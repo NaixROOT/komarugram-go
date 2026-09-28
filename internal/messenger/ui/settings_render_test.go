@@ -68,7 +68,10 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	size := image.Pt(900, 700)
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance
-		size.Y = 1000
+		look := preferences.Look{BubbleRadius: 8, AvatarCorners: 10, Seconds: true}
+		p.lookView.look = func() preferences.Look { return look }
+		p.lookView.setLook = func(l preferences.Look) { look = l }
+		size.Y = 1800
 	}
 	if os.Getenv("SETTINGS_SECTION") == "privacy" {
 		p.section = settingsPrivacy

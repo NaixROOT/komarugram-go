@@ -86,7 +86,31 @@ type Global struct {
 	Keep Keep `json:"keep"`
 	// Filters hide messages, as AyuGram's message filters.
 	Filters Filters `json:"filters"`
+	// Look is how messages and avatars are drawn, as AyuGram's
+	// customization.
+	Look Look `json:"look"`
 }
+
+// Look is how messages and avatars are drawn.
+type Look struct {
+	// BubbleRadius rounds the corners of bubbles, in dp, up to 16.
+	BubbleRadius int `json:"bubble_radius"`
+	// AvatarCorners rounds avatars, from 0, square, to AvatarRound, a
+	// circle.
+	AvatarCorners int `json:"avatar_corners"`
+	// Seconds shows the seconds of a message's time.
+	Seconds bool `json:"seconds,omitempty"`
+	// EditedMark and DeletedMark take the place of the marks of edited and
+	// deleted messages; empty for the default ones.
+	EditedMark  string `json:"edited_mark,omitempty"`
+	DeletedMark string `json:"deleted_mark,omitempty"`
+}
+
+// The bounds of Look, as AyuGram's.
+const (
+	BubbleRadiusMax = 16
+	AvatarRound     = 23
+)
 
 // Filters hide others' messages that match a pattern, or that blocked
 // users sent; all are off by default, as in AyuGram.
@@ -166,6 +190,7 @@ func defaults() Global {
 		ComposerBlur:   true,
 		Ghost:          Ghost{ReadOnInteract: true},
 		Keep:           Keep{Deleted: true, Edits: true},
+		Look:           Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound},
 	}
 }
 
@@ -228,6 +253,9 @@ func validate(g Global) error {
 	}
 	if g.Composer < ComposerFloating || g.Composer > ComposerClassic {
 		return errors.New("invalid composer style")
+	}
+	if g.Look.BubbleRadius < 0 || g.Look.BubbleRadius > BubbleRadiusMax || g.Look.AvatarCorners < 0 || g.Look.AvatarCorners > AvatarRound {
+		return errors.New("invalid look")
 	}
 	if g.StickerPlayer != "" && g.StickerPlayer != "ffmpeg" && g.StickerPlayer != "wasm" {
 		return errors.New("invalid sticker player")
@@ -310,6 +338,11 @@ func (s *Store) SetKeep(k Keep) error {
 func (s *Store) SetFilters(f Filters) error {
 	f.Patterns = slices.Clone(f.Patterns)
 	return s.change(func(global *Global) { global.Filters = f })
+}
+
+// SetLook changes how messages and avatars are drawn.
+func (s *Store) SetLook(l Look) error {
+	return s.change(func(global *Global) { global.Look = l })
 }
 
 // SetComposer changes the message composer style for all windows.

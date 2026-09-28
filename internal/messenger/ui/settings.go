@@ -22,7 +22,6 @@ import (
 
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/op/clip"
 	"gioui.org/unit"
 	"gioui.org/widget"
 
@@ -144,6 +143,8 @@ type settingsPage struct {
 	keepOpts *toggle.Toggle[string]
 	// filtersView edits the message filters; hidden without its functions.
 	filtersView *filterSettings
+	// lookView changes how messages and avatars are drawn.
+	lookView *lookSettings
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -217,6 +218,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 		}
 	})
 	p.filtersView = newFilterSettings()
+	p.lookView = newLookSettings()
 	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
 		if p.setKeep != nil {
 			p.setKeep(preferences.Keep{Deleted: slices.Contains(values, "deleted"), Edits: slices.Contains(values, "edits")})
@@ -335,6 +337,9 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 	if p.section == settingsPrivacy {
 		p.security.UpdateSettings(gtx)
 		p.filtersView.Update(gtx)
+	}
+	if p.section == settingsAppearance {
+		p.lookView.Update(gtx)
 	}
 }
 
@@ -698,6 +703,11 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 			})
 		}))
 	}
+	if p.lookView.look != nil {
+		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.lookView.Layout(gtx, l) }, defaultCardPadding)
+		}))
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, cards...)
 }
 
@@ -771,7 +781,7 @@ func (p *settingsPage) layoutAccountAvatar(gtx layout.Context, account model.Acc
 		return avatar(gtx, account.UserID, model.KindUser, name, accountAvatarSize)
 	}
 	size := image.Pt(gtx.Dp(accountAvatarSize), gtx.Dp(accountAvatarSize))
-	defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
+	defer avatarShape(gtx, size).Push(gtx.Ops).Pop()
 	gtx.Constraints = layout.Exact(size)
 	widget.Image{Src: p.images.Op(account.Avatar), Fit: widget.Cover}.Layout(gtx)
 	return layout.Dimensions{Size: size}

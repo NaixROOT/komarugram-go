@@ -38,10 +38,9 @@ var (
 )
 
 const (
-	// bubbleRadius rounds a bubble's corners; bubbleRadiusJoined, the
-	// corners where it touches another bubble of the same sender, as
-	// materialgram draws them.
-	bubbleRadius       = unit.Dp(16)
+	// bubbleRadiusJoined rounds a bubble's corners where it touches
+	// another bubble of the same sender, as materialgram draws them; the
+	// others are as round as the look asks (bubbleRadiusOf).
 	bubbleRadiusJoined = unit.Dp(6)
 	// joinGap is the time within which messages of one sender join.
 	joinGap = 15 * time.Minute
@@ -83,7 +82,8 @@ type bubbleShape struct{ nw, ne, se, sw int }
 // shapeOf is the shape of a bubble that joins its neighbours so: the
 // corners on its sender's side that touch them are less round.
 func shapeOf(gtx layout.Context, join bubbleJoin, outgoing bool) bubbleShape {
-	r, small := gtx.Dp(bubbleRadius), gtx.Dp(bubbleRadiusJoined)
+	r := bubbleRadiusOf(gtx)
+	small := min(gtx.Dp(bubbleRadiusJoined), r)
 	s := bubbleShape{r, r, r, r}
 	if outgoing {
 		if join&joinAbove != 0 {
@@ -396,20 +396,35 @@ func messageFooterIn(gtx layout.Context, m model.Message, l localization.Catalog
 	if m.Views > 0 {
 		counter(iconViews, m.Views)
 	}
+	text(footerText(gtx, m, l))
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, items...)
+}
+
+// footerText is the line of a message's time: who signed it, whether it
+// was edited or deleted, with the look's marks, and the time.
+func footerText(gtx layout.Context, m model.Message, l localization.Catalog) string {
 	var parts []string
 	if m.PostAuthor != "" {
 		parts = append(parts, m.PostAuthor)
 	}
+	look := lookOf(gtx)
 	if !m.EditedAt.IsZero() {
-		parts = append(parts, l.T("history.edited"))
+		mark := look.EditedMark
+		if mark == "" {
+			mark = l.T("history.edited")
+		}
+		parts = append(parts, mark)
 	}
 	if m.Deleted {
 		// Kept after Telegram deleted it, with AyuGram's mark.
-		parts = append(parts, l.T("history.deleted_mark"))
+		mark := look.DeletedMark
+		if mark == "" {
+			mark = l.T("history.deleted_mark")
+		}
+		parts = append(parts, mark)
 	}
-	parts = append(parts, m.Date.Local().Format("15:04"))
-	text(strings.Join(parts, " · "))
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, items...)
+	parts = append(parts, m.Date.Local().Format(timeFormat(gtx)))
+	return strings.Join(parts, " · ")
 }
 
 // shortCount writes a count as Telegram does: 1.2K, 3.4M.

@@ -208,6 +208,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.lookView.look = func() preferences.Look { return a.preferences.Global().Look }
+	a.settings.lookView.setLook = func(l preferences.Look) {
+		if err := services.Preferences.SetLook(l); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.keep = func() preferences.Keep { return a.preferences.Global().Keep }
 	a.settings.setKeep = func(k preferences.Keep) {
 		if err := services.Preferences.SetKeep(k); err != nil {
@@ -602,6 +608,7 @@ func (a *App) open(pick chatPick) {
 
 // Layout implements appwindow.Content.
 func (a *App) Layout(gtx layout.Context) {
+	withLook(gtx, a.preferences.Global().Look)
 	if trace := diagnostics.From(gtx.Values); trace != nil && trace.Recorder.Due(trace.Window, "cache-gauges", time.Second) {
 		defer func() {
 			r := trace.Recorder
