@@ -40,6 +40,8 @@ var (
 	iconFilter       = wdk.RequireIconWidget(icons.ContentFilterList)
 	iconTranslate    = wdk.RequireIconWidget(icons.ActionTranslate)
 	iconRepeat       = wdk.RequireIconWidget(icons.AVRepeat)
+	iconCalendar     = wdk.RequireIconWidget(icons.ActionEvent)
+	iconDataCenter   = wdk.RequireIconWidget(icons.ActionDNS)
 	iconDevices      = wdk.RequireIconWidget(icons.DeviceDevices)
 	iconChevronLeft  = wdk.RequireIconWidget(icons.NavigationChevronLeft)
 	iconOpenInNew    = wdk.RequireIconWidget(icons.ActionOpenInNew)

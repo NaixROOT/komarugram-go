@@ -6,6 +6,7 @@ import (
 	"context"
 	"image"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,14 +67,19 @@ type chatInfo struct {
 	usernames              model.UsernameSource
 	username, usernameLink settingsItem
 	copied                 string
-	themePage              bool
-	themes                 *chatThemeController
+	// details tells the registration of a user and the data center of a
+	// chat's photo, as materialgram's profile; each row copies its text.
+	details                  model.ChatDetailer
+	registration, dataCenter settingsItem
+	themePage                bool
+	themes                   *chatThemeController
 }
 
 func newChatInfo(source model.ConversationStore, images *imageOps, invalidate func()) *chatInfo {
 	p := &chatInfo{invalidate: invalidate, sections: map[model.SharedKind]*settingsItem{}}
 	p.source, _ = source.(model.SharedMediaSource)
 	p.usernames, _ = source.(model.UsernameSource)
+	p.details, _ = source.(model.ChatDetailer)
 	p.collection, _ = source.(model.SharedCollectionSource)
 	p.renderer = newChatPage(source, invalidate)
 	p.renderer.media.Close()
@@ -288,6 +294,16 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 			p.copied = l.T("info.link_copied")
 		}
 	}
+	registration, dataCenter := p.detailTexts(l)
+	for _, row := range []struct {
+		item *settingsItem
+		text string
+	}{{&p.registration, registration}, {&p.dataCenter, dataCenter}} {
+		if row.text != "" && row.item.click.Clicked(gtx) {
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(row.text))})
+			p.copied = l.T("info.copied")
+		}
+	}
 	if p.themesButton.click.Clicked(gtx) {
 		p.stop()
 		p.themePage = true
@@ -389,7 +405,7 @@ func (p *chatInfo) layoutInfo(gtx layout.Context, l localization.Catalog) layout
 		return layout.Inset{Top: 8, Bottom: 16, Left: 16, Right: 16}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return label(gtx, chatStatus(p.chat, l), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
+					return label(gtx, p.renderer.chatStatusOnline(p.chat, gtx.Now, l), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.status(gtx, l) }), vspace(12),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -409,6 +425,30 @@ func (p *chatInfo) layoutInfo(gtx layout.Context, l localization.Catalog) layout
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return p.usernameLink.Layout(gtx, iconLink, l.T("info.copy_link"), "t.me/"+name)
+								}),
+							)
+						}, 6)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					registration, dataCenter := p.detailTexts(l)
+					if registration == "" && dataCenter == "" {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return card(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if registration == "" {
+										return layout.Dimensions{}
+									}
+									return p.registration.Layout(gtx, iconCalendar, registration, l.T("info.registration"))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if dataCenter == "" {
+										return layout.Dimensions{}
+									}
+									return p.dataCenter.Layout(gtx, iconDataCenter, dataCenter, l.T("info.dc"))
 								}),
 							)
 						}, 6)
@@ -593,4 +633,24 @@ func (p *chatInfo) chatUsername() string {
 		return ""
 	}
 	return p.usernames.Username(p.chat.ID)
+}
+
+// detailTexts are the rows of the chat's details: when a user registered,
+// and where the chat's photo is kept; empty when not known.
+func (p *chatInfo) detailTexts(l localization.Catalog) (registration, dataCenter string) {
+	if p.details == nil || p.chat.ID == 0 {
+		return "", ""
+	}
+	if p.chat.Kind == model.KindUser || p.chat.Kind == model.KindBot {
+		at, how := model.RegisteredAround(p.chat.ID)
+		key := map[model.Registration]string{model.RegisteredAbout: "info.registered_about", model.RegisteredBefore: "info.registered_before", model.RegisteredAfter: "info.registered_after"}[how]
+		registration = l.Format(key, map[string]string{"date": at.Local().Format("01.2006")})
+	}
+	if dc := p.details.ChatDetails(p.chat.ID).PhotoDC; dc > 0 {
+		dataCenter = "DC " + strconv.Itoa(dc)
+		if name := model.DataCenterName(dc); name != "" {
+			dataCenter += ", " + name
+		}
+	}
+	return registration, dataCenter
 }

@@ -132,6 +132,8 @@ type chatPage struct {
 	errorMu                           sync.Mutex
 	mediaError                        error
 	invalidate                        func()
+	// online counts the open group's members online.
+	online groupOnline
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
 	openPhoto  func(model.Message)
 	openAuthor func(model.Chat)

@@ -60,6 +60,9 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 	pad := gtx.Dp(16)
 	imagePx := gtx.Dp(chatHeaderImage)
 	title, status := c.Title, chatStatus(c, l)
+	if selection != nil {
+		status = selection.chatStatusOnline(c, gtx.Now, l)
+	}
 	infoPx := 0
 	if head == nil {
 		offset(gtx, image.Pt(pad, (header.Y-imagePx)/2), func(gtx layout.Context) layout.Dimensions {

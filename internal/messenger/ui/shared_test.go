@@ -372,3 +372,38 @@ func TestChatInfoCopiesUsername(t *testing.T) {
 		}
 	}
 }
+
+// A user's info estimates the registration from the id, and tells where
+// the photo is kept, as materialgram's; a click copies the row.
+func TestChatInfoDetails(t *testing.T) {
+	store := mockstore.New(time.Now(), 0)
+	var images imageOps
+	p := newChatInfo(store, &images, func() {})
+	defer p.Destroy()
+	l := localization.For("en")
+	p.Open(model.Chat{ID: 2, Kind: model.KindUser})
+	awaitShared(t, p)
+	registration, dataCenter := p.detailTexts(l)
+	if registration != "before 09.2013" || dataCenter != "DC 3, Miami" {
+		t.Fatalf("details %q, %q", registration, dataCenter)
+	}
+	p.Open(model.Chat{ID: 3, Kind: model.KindGroup})
+	awaitShared(t, p)
+	if registration, dataCenter := p.detailTexts(l); registration != "" || dataCenter != "DC 4, Amsterdam" {
+		t.Fatalf("group's details %q, %q", registration, dataCenter)
+	}
+	var router input.Router
+	frame := func() {
+		ops := new(op.Ops)
+		gtx := sharedContext(ops, image.Pt(900, 800))
+		gtx.Source = router.Source()
+		p.Layout(gtx, l, false)
+		router.Frame(ops)
+	}
+	frame()
+	p.dataCenter.click.Click()
+	frame()
+	if _, text, ok := router.WriteClipboard(); !ok || string(text) != "DC 4, Amsterdam" {
+		t.Fatalf("copied %q", text)
+	}
+}
