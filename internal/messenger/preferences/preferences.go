@@ -1,0 +1,344 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+// Package preferences persists settings shared by all messenger windows.
+// Account-specific settings deliberately live in a separate namespace in the
+// file format so they can be added without changing the meaning of globals.
+package preferences
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"gio-mw/exp/powersave"
+
+	"komarugram/pkg/miniapp"
+	"komarugram/pkg/player"
+)
+
+const version = 1
+
+// Theme is the global color-theme preference.
+type Theme int
+
+const (
+	ThemeAuto Theme = iota
+	ThemeLight
+	ThemeDark
+)
+
+// ComposerStyle is how the message composer sits in a chat.
+type ComposerStyle int
+
+const (
+	// ComposerFloating is a rounded capsule floating over the history.
+	ComposerFloating ComposerStyle = iota
+	// ComposerClassic is a full-width bar below the history.
+	ComposerClassic
+)
+
+// Global contains preferences which currently apply to every account and
+// every window.
+type Global struct {
+	Theme          Theme           `json:"theme"`
+	Language       string          `json:"language"`
+	LastAccountID  string          `json:"last_account_id,omitempty"`
+	MotionMode     powersave.Mode  `json:"motion_mode"`
+	LowBattery     int             `json:"low_battery"`
+	MiniAppStorage miniapp.Storage `json:"mini_app_storage"`
+	// VisualPrivacy hides phone numbers from the interface and covers the
+	// account's identifiers in its profile with spoilers, for showing the
+	// screen to others: streams, recordings, screenshots.
+	VisualPrivacy bool `json:"visual_privacy,omitempty"`
+	// Window locking only covers the UI; account connections stay running.
+	AutoLockMinutes int           `json:"auto_lock_minutes,omitempty"`
+	LockOnMinimize  bool          `json:"lock_on_minimize,omitempty"`
+	LockOnClose     bool          `json:"lock_on_close,omitempty"`
+	Composer        ComposerStyle `json:"composer,omitempty"`
+	// ComposerBlur blurs the history behind the floating composer, while
+	// animations are on.
+	ComposerBlur bool `json:"composer_blur"`
+	// Player is the external player videos open in; empty until the user
+	// chooses one, which is asked only when more than one is installed.
+	Player player.Kind `json:"player,omitempty"`
+	// MPVPath and VLCPath are the players the user pointed at, which
+	// player.Check accepted; empty for the ones found on the system.
+	MPVPath string `json:"mpv_path,omitempty"`
+	VLCPath string `json:"vlc_path,omitempty"`
+	// BrowserPath is the browser for Mini Apps the user pointed at, which
+	// miniapp.CheckBrowser accepted; empty for the one found.
+	BrowserPath string `json:"browser_path,omitempty"`
+	FFmpegPath  string `json:"ffmpeg_path,omitempty"`
+	// StickerPlayer is empty for automatic selection, or ffmpeg/wasm.
+	StickerPlayer string `json:"sticker_player,omitempty"`
+}
+
+// PlayerPaths are the players the user pointed at, by kind.
+func (g Global) PlayerPaths() map[player.Kind]string {
+	return map[player.Kind]string{player.MPV: g.MPVPath, player.VLC: g.VLCPath}
+}
+
+type fileData struct {
+	Version int    `json:"version"`
+	Global  Global `json:"global"`
+	// Accounts reserves a stable namespace for preferences which will belong
+	// to one Telegram account. There are no such preferences yet.
+	Accounts map[string]json.RawMessage `json:"accounts"`
+}
+
+// Store is a process-wide, persistent and observable preference store.
+type Store struct {
+	mu          sync.Mutex
+	path        string
+	global      Global
+	accounts    map[string]json.RawMessage
+	subscribers map[uint64]func()
+	nextID      uint64
+}
+
+func defaults() Global {
+	return Global{
+		Theme:          ThemeAuto,
+		Language:       "ru",
+		MotionMode:     powersave.ModeAuto,
+		LowBattery:     powersave.DefaultLowBattery,
+		MiniAppStorage: miniapp.Shared,
+		ComposerBlur:   true,
+	}
+}
+
+// Open loads the process-wide settings from the application config directory.
+func Open() (*Store, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	return OpenPath(filepath.Join(dir, "komarugram-go", "settings.json"))
+}
+
+// OpenPath loads settings from path. It is also useful to isolate tests.
+func OpenPath(path string) (*Store, error) {
+	s := &Store{path: path, global: defaults(), accounts: make(map[string]json.RawMessage), subscribers: make(map[uint64]func())}
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	data := fileData{Global: defaults()}
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, fmt.Errorf("read settings: %w", err)
+	}
+	if data.Version != version {
+		return nil, fmt.Errorf("unsupported settings version %d", data.Version)
+	}
+	if err := validate(data.Global); err != nil {
+		return nil, fmt.Errorf("read settings: %w", err)
+	}
+	s.global = data.Global
+	if data.Accounts != nil {
+		s.accounts = data.Accounts
+	}
+	return s, nil
+}
+
+// Memory returns a non-persistent store, primarily for demos and tests.
+func Memory() *Store {
+	return &Store{global: defaults(), accounts: make(map[string]json.RawMessage), subscribers: make(map[uint64]func())}
+}
+
+func validate(g Global) error {
+	if g.Theme < ThemeAuto || g.Theme > ThemeDark {
+		return errors.New("invalid theme")
+	}
+	if g.Language != "ru" && g.Language != "en" {
+		return errors.New("invalid language")
+	}
+	if g.MotionMode < powersave.ModeAuto || g.MotionMode > powersave.ModeOff {
+		return errors.New("invalid animation mode")
+	}
+	if g.LowBattery < 0 || g.LowBattery > 100 {
+		return errors.New("invalid low-battery threshold")
+	}
+	if g.MiniAppStorage < miniapp.Ephemeral || g.MiniAppStorage > miniapp.Shared {
+		return errors.New("invalid Mini App storage")
+	}
+	if g.Composer < ComposerFloating || g.Composer > ComposerClassic {
+		return errors.New("invalid composer style")
+	}
+	if g.StickerPlayer != "" && g.StickerPlayer != "ffmpeg" && g.StickerPlayer != "wasm" {
+		return errors.New("invalid sticker player")
+	}
+	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
+		return errors.New("invalid external player")
+	}
+	if g.AutoLockMinutes < 0 || g.AutoLockMinutes > 120 {
+		return errors.New("invalid automatic lock delay")
+	}
+	return nil
+}
+
+// Global returns a consistent snapshot.
+func (s *Store) Global() Global {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.global
+}
+
+func (s *Store) SetFFmpegPath(path string) error {
+	return s.change(func(g *Global) { g.FFmpegPath = path })
+}
+
+func (s *Store) SetStickerPlayer(value string) error {
+	return s.change(func(g *Global) { g.StickerPlayer = value })
+}
+
+func (s *Store) SetTheme(value Theme) error {
+	return s.change(func(g *Global) { g.Theme = value })
+}
+
+// SetLanguage changes the UI language for all windows.
+func (s *Store) SetLanguage(value string) error {
+	return s.change(func(g *Global) { g.Language = value })
+}
+
+// SetLastAccount records which account should be restored on the next start.
+// It is updated when an account window gains focus or closes.
+func (s *Store) SetLastAccount(id string) error {
+	return s.change(func(g *Global) { g.LastAccountID = id })
+}
+
+func (s *Store) SetMotion(mode powersave.Mode, lowBattery int) error {
+	return s.change(func(g *Global) {
+		g.MotionMode = mode
+		g.LowBattery = lowBattery
+	})
+}
+
+// SetVisualPrivacy switches visual privacy mode for every window.
+func (s *Store) SetVisualPrivacy(on bool) error {
+	return s.change(func(g *Global) { g.VisualPrivacy = on })
+}
+
+func (s *Store) SetWindowLock(minutes int, minimize, close bool) error {
+	return s.change(func(g *Global) {
+		g.AutoLockMinutes = minutes
+		g.LockOnMinimize = minimize
+		g.LockOnClose = close
+	})
+}
+
+// SetComposer changes the message composer style for all windows.
+func (s *Store) SetComposer(value ComposerStyle) error {
+	return s.change(func(g *Global) { g.Composer = value })
+}
+
+// SetComposerBlur switches the blur behind the floating composer.
+func (s *Store) SetComposerBlur(on bool) error {
+	return s.change(func(g *Global) { g.ComposerBlur = on })
+}
+
+// SetPlayer chooses the external player for videos.
+func (s *Store) SetPlayer(kind player.Kind) error {
+	return s.change(func(g *Global) { g.Player = kind })
+}
+
+// SetPlayerPath points the player kind at path; "" goes back to the one
+// found on the system. The caller checks the path with player.Check.
+func (s *Store) SetPlayerPath(kind player.Kind, path string) error {
+	return s.change(func(g *Global) {
+		switch kind {
+		case player.MPV:
+			g.MPVPath = path
+		case player.VLC:
+			g.VLCPath = path
+		}
+	})
+}
+
+// SetBrowserPath points Mini Apps at the browser at path; "" goes back to the
+// one found. The caller checks the path with miniapp.CheckBrowser.
+func (s *Store) SetBrowserPath(path string) error {
+	return s.change(func(g *Global) { g.BrowserPath = path })
+}
+
+func (s *Store) SetMiniAppStorage(value miniapp.Storage) error {
+	return s.change(func(g *Global) { g.MiniAppStorage = value })
+}
+
+func (s *Store) change(update func(*Global)) error {
+	s.mu.Lock()
+	next := s.global
+	update(&next)
+	if next == s.global {
+		s.mu.Unlock()
+		return nil
+	}
+	if err := validate(next); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if err := s.writeLocked(next); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.global = next
+	callbacks := make([]func(), 0, len(s.subscribers))
+	for _, callback := range s.subscribers {
+		callbacks = append(callbacks, callback)
+	}
+	s.mu.Unlock()
+	for _, callback := range callbacks {
+		callback()
+	}
+	return nil
+}
+
+func (s *Store) writeLocked(global Global) error {
+	if s.path == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(fileData{
+		Version:  version,
+		Global:   global,
+		Accounts: s.accounts,
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// Subscribe registers a callback invoked after a successful change. The
+// returned function removes it.
+func (s *Store) Subscribe(callback func()) func() {
+	s.mu.Lock()
+	id := s.nextID
+	s.nextID++
+	s.subscribers[id] = callback
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		delete(s.subscribers, id)
+		s.mu.Unlock()
+	}
+}

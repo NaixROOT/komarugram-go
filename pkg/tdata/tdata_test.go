@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Unlicense
+
+package tdata
+
+import (
+	_ "embed"
+)
+
+//go:embed assets/tdata.zip
+var TData []byte
+
+var expected = []TDataSession{
+	{
+		AuthKey: "0e59e68df9515aa888eb91ce656c9438f441503c4b65ccb7f603cdb95097fcabf810062180765b8074080ae7977bd91072a9f452de2f4e4ad22418063d8c9e3933e4450c02a549d4982b38c60ececd5ec402a1df0c6aa6fdf8e87f6c56798eba7c9e5bee59990dab85b83530a726210a56e11e8b74d2437706ee8a6451f6d1cbc8526c4d57a7789e7a83866df66de74b8c296536819aa8aec2c5f2ba64319ed304af7795acdf2dc432a31067adfbe3a00a8959da7cdc6d1a0be555e8cc62858825c3cc2d0ff914a0df9428c8c8f5f9cf69c13b8bdc05680c90c88f4199c146180b6ff2db96c9ee49bbf95f7fce7258c404f260e88354f666a5bf0a1983aa99db",
+		DC:      2,
+		UserID:  1252725901,
+	},
+}

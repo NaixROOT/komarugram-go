@@ -1,0 +1,206 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+// Package sandbox holds the limits every WebAssembly sandbox of this project
+// runs under. The modules decode input that arrives from strangers, so a
+// hostile file must not be able to take the client down or starve the rest of
+// the system: a sandbox gets a memory cap of its own, a share of a budget it
+// splits with its neighbours, and a time limit for every operation.
+//
+// Running out of memory is an error for that one sandbox: the module sees its
+// memory.grow fail, which a C or Rust allocator turns into a failed allocation
+// or an abort — a trap that wazero hands back as an error.
+//
+// Time is checked after the fact. wazero can interrupt a running call, but only
+// by compiling a check into every loop and call, which made libvpx twice and
+// tlottie five times slower. So a slow operation is allowed to finish, and then
+// its sandbox is closed: an input that makes a decoder crawl costs one slow
+// frame rather than every frame after it. An operation that never finishes is
+// not caught; memory caps bound how much work libvpx can be given, but not
+// what a Lottie file can ask of tlottie.
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
+)
+
+const pageSize = 64 << 10
+
+// Limits bounds what one runtime's sandboxes may take from the host.
+type Limits struct {
+	// Memory caps the linear memory of one sandbox, in bytes. It is rounded
+	// down to whole 64 KiB pages.
+	Memory uint64
+	// Budget is shared by the sandboxes of every runtime given the same one.
+	// A nil Budget gives the runtime a budget of its own, of DefaultBudget.
+	Budget *Budget
+	// Slow is how long one operation on a sandbox may take. An operation that
+	// takes longer fails with ErrSlow, and its sandbox is closed.
+	Slow time.Duration
+}
+
+// DefaultBudget is the budget a runtime gets when its Limits name none.
+const DefaultBudget = 256 << 20
+
+// ErrBudget is returned when a new sandbox would not fit in the budget.
+var ErrBudget = errors.New("sandbox: memory budget exhausted")
+
+// ErrSlow is returned for an operation that took longer than Limits.Slow.
+var ErrSlow = errors.New("sandbox: operation too slow")
+
+// Runtime is a wazero runtime set up to enforce Limits.
+type Runtime struct {
+	wazero wazero.Runtime
+	limits Limits
+}
+
+// NewRuntime creates a wazero runtime that enforces l.
+func NewRuntime(ctx context.Context, l Limits) (*Runtime, error) {
+	pages := l.Memory / pageSize
+	if pages == 0 || pages > 65536 {
+		return nil, fmt.Errorf("sandbox: memory limit %d is out of range", l.Memory)
+	}
+	if l.Slow <= 0 {
+		return nil, fmt.Errorf("sandbox: time limit %v is out of range", l.Slow)
+	}
+	if l.Budget == nil {
+		l.Budget = NewBudget(DefaultBudget)
+	}
+	config := wazero.NewRuntimeConfig().WithMemoryLimitPages(uint32(pages))
+	return &Runtime{wazero: wazero.NewRuntimeWithConfig(ctx, config), limits: l}, nil
+}
+
+// Wazero returns the underlying runtime, for compiling modules and setting up
+// host modules. Sandboxes must be started with Instantiate, which is what
+// charges them to the budget.
+func (r *Runtime) Wazero() wazero.Runtime { return r.wazero }
+
+// Close tears down every sandbox of this runtime.
+func (r *Runtime) Close(ctx context.Context) error { return r.wazero.Close(ctx) }
+
+// Instantiate starts a sandbox from compiled once the budget has room for the
+// memory the module starts with.
+func (r *Runtime) Instantiate(ctx context.Context, compiled wazero.CompiledModule, config wazero.ModuleConfig) (api.Module, error) {
+	var initial uint64
+	for _, memory := range compiled.ExportedMemories() {
+		initial += uint64(memory.Min()) * pageSize
+	}
+	if !r.limits.Budget.fits(initial) {
+		return nil, ErrBudget
+	}
+	// The allocator travels in the context; wazero reads it while creating the
+	// module's memory, so this context need not outlive the call.
+	ctx = experimental.WithMemoryAllocator(ctx, r.limits.Budget)
+	return r.wazero.InstantiateModule(ctx, compiled, config)
+}
+
+// Budget returns the budget this runtime's sandboxes draw on.
+func (r *Runtime) Budget() *Budget { return r.limits.Budget }
+
+// Check ends one operation on module, which began at started. An operation
+// that took longer than the time limit closes module and fails with ErrSlow.
+func (r *Runtime) Check(ctx context.Context, module api.Module, started time.Time) error {
+	took := time.Since(started)
+	if took <= r.limits.Slow {
+		return nil
+	}
+	_ = module.Close(ctx)
+	return fmt.Errorf("%w: took %v, limit %v", ErrSlow, took.Round(time.Microsecond), r.limits.Slow)
+}
+
+// Budget is a memory allowance shared by many sandboxes. Its zero value is
+// not usable; create one with NewBudget.
+type Budget struct {
+	mu          sync.Mutex
+	limit, used uint64
+}
+
+// NewBudget returns a budget of the given size in bytes.
+func NewBudget(bytes uint64) *Budget {
+	return &Budget{limit: bytes}
+}
+
+// Used reports how much of the budget the live sandboxes hold.
+func (b *Budget) Used() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.used
+}
+
+func (b *Budget) fits(n uint64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.used+n <= b.limit
+}
+
+// take reserves n bytes. A forced reservation always succeeds: wazero cannot
+// cope with a module's initial memory being refused, so that is checked
+// before instantiation instead and granted here unconditionally.
+func (b *Budget) take(n uint64, force bool) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !force && b.used+n > b.limit {
+		return false
+	}
+	b.used += n
+	return true
+}
+
+func (b *Budget) release(n uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.used -= min(n, b.used)
+}
+
+// Allocate implements experimental.MemoryAllocator.
+func (b *Budget) Allocate(_, max uint64) experimental.LinearMemory {
+	return &memory{budget: b, max: max}
+}
+
+// memory is a linear memory whose capacity is charged to a budget.
+type memory struct {
+	budget  *Budget
+	buf     []byte
+	max     uint64
+	started bool
+}
+
+func (m *memory) Reallocate(size uint64) []byte {
+	// Only the first call, which wazero makes for the initial memory, is forced.
+	force := !m.started
+	m.started = true
+	if size > m.max {
+		return nil
+	}
+	if size <= uint64(cap(m.buf)) {
+		m.buf = m.buf[:size]
+		return m.buf
+	}
+
+	// Grow by half again, so that page-by-page growth does not copy the whole
+	// memory each time; fall back to the exact size when the budget is tight.
+	old := uint64(cap(m.buf))
+	grown := min(max(size, old+old/2), m.max)
+	if !m.budget.take(grown-old, force) {
+		if grown == size || !m.budget.take(size-old, false) {
+			return nil
+		}
+		grown = size
+	}
+	buf := make([]byte, size, grown)
+	copy(buf, m.buf)
+	m.buf = buf
+	return m.buf
+}
+
+func (m *memory) Free() {
+	m.budget.release(uint64(cap(m.buf)))
+	m.buf = nil
+}

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitchen Mini App</title>
+<script src="telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 20px;
+    font: 15px/1.5 system-ui, sans-serif;
+    background: var(--tg-theme-bg-color, #fff);
+    color: var(--tg-theme-text-color, #000);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 20px; color: var(--tg-theme-hint-color, #777); }
+  section { margin-bottom: 20px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--tg-theme-hint-color, #777); margin: 0 0 8px; }
+  button {
+    font: inherit; padding: 10px 14px; margin: 0 8px 8px 0; cursor: pointer;
+    border: 0; border-radius: 10px;
+    background: var(--tg-theme-button-color, #6750A4);
+    color: var(--tg-theme-button-text-color, #fff);
+  }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+  dt { color: var(--tg-theme-hint-color, #777); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  pre { background: color-mix(in srgb, currentColor 8%, transparent);
+        padding: 10px; border-radius: 10px; min-height: 60px; margin: 0;
+        white-space: pre-wrap; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Kitchen Mini App</h1>
+  <p class="sub">A real Telegram Mini App SDK talking to a Gio client over CDP</p>
+
+  <section>
+    <h2>What the SDK was handed</h2>
+    <dl>
+      <dt>version</dt><dd id="version"></dd>
+      <dt>platform</dt><dd id="platform"></dd>
+      <dt>user</dt><dd id="user"></dd>
+      <dt>colorScheme</dt><dd id="scheme"></dd>
+      <dt>viewport</dt><dd id="viewport"></dd>
+      <dt>localStorage</dt><dd id="visits"></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Send to the client</h2>
+    <button onclick="app.MainButton.setText('Pay 10 ⭐').show()">Show MainButton</button>
+    <button onclick="app.HapticFeedback.impactOccurred('medium')">Haptic</button>
+    <button onclick="app.sendData(JSON.stringify({from: 'mini app', at: Date.now()}))">sendData</button>
+    <button onclick="app.close()">Close</button>
+  </section>
+
+  <section>
+    <h2>Received from the client</h2>
+    <pre id="log"></pre>
+  </section>
+
+<script>
+const app = window.Telegram.WebApp;
+const $ = (id) => document.getElementById(id);
+const log = (line) => { $('log').textContent = line + '\n' + $('log').textContent; };
+
+function refresh() {
+  $('version').textContent = app.version;
+  $('platform').textContent = app.platform;
+  const user = app.initDataUnsafe.user;
+  $('user').textContent = user ? `${user.first_name} (id ${user.id})` : '(no initData)';
+  $('scheme').textContent = `${app.colorScheme} · bg ${app.themeParams.bg_color || '—'}`;
+  $('viewport').textContent = `${Math.round(app.viewportHeight)}px · expanded: ${app.isExpanded}`;
+}
+
+app.onEvent('themeChanged', () => { refresh(); log('themeChanged → ' + app.colorScheme); });
+app.onEvent('viewportChanged', () => { refresh(); log('viewportChanged → ' + Math.round(app.viewportHeight) + 'px'); });
+app.onEvent('mainButtonClicked', () => log('mainButtonClicked'));
+app.onEvent('backButtonClicked', () => log('backButtonClicked'));
+app.onEvent('popupClosed', (e) => log('popupClosed'));
+
+// A Mini App is an ordinary web application, so it stores things and expects
+// them back. Whether it gets them back is what the client's profile decides.
+try {
+  const visits = (Number(localStorage.getItem('visits')) || 0) + 1;
+  localStorage.setItem('visits', String(visits));
+  $('visits').textContent = visits === 1
+    ? 'first launch on this profile'
+    : `launch #${visits} on this profile`;
+  // Published only once the new count is stored, so a client reading it cannot
+  // catch the value this launch is about to replace.
+  document.body.dataset.visits = String(visits);
+} catch (e) {
+  $('visits').textContent = 'unavailable';
+}
+
+app.ready();
+app.expand();
+app.BackButton.show();
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+package ui
+
+import (
+	"gio-mw/wdk"
+
+	"golang.org/x/exp/shiny/materialdesign/icons"
+
+	"komarugram/internal/messenger/model"
+)
+
+var (
+	iconAttach       = wdk.RequireIconWidget(icons.EditorAttachFile)
+	iconEmoji        = wdk.RequireIconWidget(icons.EditorInsertEmoticon)
+	iconAttachPhoto  = wdk.RequireIconWidget(icons.ImagePhoto)
+	iconAttachFile   = wdk.RequireIconWidget(icons.EditorInsertDriveFile)
+	iconAttachTasks  = wdk.RequireIconWidget(icons.ActionCheckCircle)
+	iconAllChats     = wdk.RequireIconWidget(icons.CommunicationForum)
+	iconFolder       = wdk.RequireIconWidget(icons.FileFolder)
+	iconPersonal     = wdk.RequireIconWidget(icons.SocialPerson)
+	iconGroups       = wdk.RequireIconWidget(icons.SocialGroup)
+	iconChannels     = wdk.RequireIconWidget(icons.ActionAnnouncement)
+	iconBots         = wdk.RequireIconWidget(icons.ActionExtension)
+	iconSearch       = wdk.RequireIconWidget(icons.ActionSearch)
+	iconProfile      = wdk.RequireIconWidget(icons.ActionAccountCircle)
+	iconSaved        = wdk.RequireIconWidget(icons.ActionBookmark)
+	iconSettings     = wdk.RequireIconWidget(icons.ActionSettings)
+	iconDark         = wdk.RequireIconWidget(icons.ImageBrightness2)
+	iconLight        = wdk.RequireIconWidget(icons.ImageWBSunny)
+	iconBack         = wdk.RequireIconWidget(icons.NavigationArrowBack)
+	iconMenu         = wdk.RequireIconWidget(icons.NavigationMenu)
+	iconClear        = wdk.RequireIconWidget(icons.ContentClear)
+	iconChevron      = wdk.RequireIconWidget(icons.NavigationChevronRight)
+	iconExpandMore   = wdk.RequireIconWidget(icons.NavigationExpandMore)
+	iconDevices      = wdk.RequireIconWidget(icons.DeviceDevices)
+	iconChevronLeft  = wdk.RequireIconWidget(icons.NavigationChevronLeft)
+	iconOpenInNew    = wdk.RequireIconWidget(icons.ActionOpenInNew)
+	iconPalette      = wdk.RequireIconWidget(icons.ImagePalette)
+	iconPrivacy      = wdk.RequireIconWidget(icons.ActionLock)
+	iconPower        = wdk.RequireIconWidget(icons.DeviceBatteryStd)
+	iconIntegrations = wdk.RequireIconWidget(icons.ActionSettingsInputComponent)
+	iconAddAccount   = wdk.RequireIconWidget(icons.SocialPersonAdd)
+	iconLogOut       = wdk.RequireIconWidget(icons.ActionExitToApp)
+	iconEdit         = wdk.RequireIconWidget(icons.EditorModeEdit)
+	iconReply        = wdk.RequireIconWidget(icons.ContentReply)
+	iconCopy         = wdk.RequireIconWidget(icons.ContentContentCopy)
+	iconLink         = wdk.RequireIconWidget(icons.ContentLink)
+	iconForward      = wdk.RequireIconWidget(icons.ContentForward)
+	iconDelete       = wdk.RequireIconWidget(icons.ActionDelete)
+	iconSelect       = wdk.RequireIconWidget(icons.ActionCheckCircle)
+	iconMore         = wdk.RequireIconWidget(icons.NavigationMoreVert)
+	iconDownload     = wdk.RequireIconWidget(icons.FileFileDownload)
+)
+
+// folderIcon picks an icon for a folder by the kinds of chats it holds.
+func folderIcon(f model.Folder) wdk.IconWidget {
+	if len(f.Kinds) == 0 {
+		return iconFolder
+	}
+	switch f.Kinds[0] {
+	case model.KindUser:
+		return iconPersonal
+	case model.KindGroup:
+		return iconGroups
+	case model.KindChannel:
+		return iconChannels
+	case model.KindBot:
+		return iconBots
+	default:
+		return iconFolder
+	}
+}

@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+package tgstore
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"komarugram/internal/messenger/model"
+
+	"github.com/gotd/td/tg"
+)
+
+func (s *Store) DeleteMessages(ctx context.Context, chat int64, ids []model.MessageID, revoke bool) error {
+	chat = s.realChat(chat)
+	c := s.history
+	c.mu.Lock()
+	api := c.api
+	peer, ok := c.peers[chat]
+	c.mu.Unlock()
+	if api == nil {
+		return errors.New("cannot delete while offline")
+	}
+	if !ok {
+		return errors.New("unknown chat")
+	}
+	if peer.Kind == "channel" && !revoke {
+		return errors.New("channel messages can only be deleted for everyone")
+	}
+	var all []int
+	seen := map[int]bool{}
+	for _, id := range ids {
+		n := int(id)
+		if n <= 0 {
+			return errors.New("invalid message ID")
+		}
+		if !seen[n] {
+			all = append(all, n)
+			seen[n] = true
+		}
+	}
+	for len(all) > 0 {
+		n := min(len(all), 100)
+		batch := all[:n]
+		var err error
+		if peer.Kind == "channel" {
+			_, err = api.ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{Channel: &tg.InputChannel{ChannelID: peer.ID, AccessHash: peer.Hash}, ID: batch})
+		} else {
+			_, err = api.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{ID: batch, Revoke: revoke})
+		}
+		if err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
+		scope := int64(0)
+		if peer.Kind == "channel" {
+			scope = chat
+		}
+		tops, err := s.deleteMessages(ctx, scope, batch)
+		if err != nil {
+			return err
+		}
+		s.replaceDeletedPreviews(ctx, tops)
+		s.changed()
+		all = all[n:]
+	}
+	return s.persistDialogs(ctx)
+}

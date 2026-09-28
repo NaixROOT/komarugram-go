@@ -1,0 +1,710 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+package ui
+
+import (
+	"context"
+	"fmt"
+	"image"
+	"image/color"
+	"math"
+	"sort"
+	"sync"
+	"time"
+
+	"gio-mw/token"
+	"gio-mw/wdk"
+
+	"gioui.org/f32"
+	"gioui.org/io/event"
+	"gioui.org/io/key"
+	"gioui.org/io/pointer"
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
+	"gioui.org/unit"
+	"gioui.org/widget"
+
+	"komarugram/internal/crash"
+	"komarugram/internal/messenger/chatmedia"
+	"komarugram/internal/messenger/localization"
+	"komarugram/internal/messenger/model"
+	"komarugram/pkg/resample"
+)
+
+// The viewer's background: nearly opaque over the chat, and in a window of
+// its own lighter the more the compositor does to keep the photo readable
+// over whatever the desktop shows.
+var (
+	viewerBackdrop        = color.NRGBA{R: 8, G: 9, B: 12, A: 244}
+	viewerBackdropClear   = color.NRGBA{R: 8, G: 9, B: 12, A: 215}
+	viewerBackdropBlurred = color.NRGBA{R: 8, G: 9, B: 12, A: 150}
+)
+
+const (
+	viewerBar       = unit.Dp(56)
+	viewerStrip     = unit.Dp(84)
+	viewerThumb     = unit.Dp(56)
+	viewerThumbGap  = unit.Dp(6)
+	viewerArrow     = unit.Dp(48)
+	viewerSide      = unit.Dp(72)
+	viewerPage      = 60 // photos read from the cache per request
+	viewerPrefetch  = 8  // read more when this close to a loaded end
+	viewerFullLimit = 4  // decoded full-size photos: current, neighbours, the one before
+	// viewerRingDelay keeps a photo that decodes quickly from flashing a
+	// progress ring on the way.
+	viewerRingDelay = 400 * time.Millisecond
+)
+
+// photoViewer shows a chat's photos over the whole window: the current one
+// at its own size, as far as the window allows, arrows to its neighbours and
+// a strip of thumbnails below. It reads only what the local cache has.
+type photoViewer struct {
+	source     model.ConversationStore
+	gallery    model.PhotoGallery
+	images     *imageOps
+	invalidate func()
+	// full decodes the photo on screen for the space it has; thumbs decodes
+	// the smallest variant that covers a thumbnail; mid decodes one that
+	// covers half the stage, shown while the original is on its way. A
+	// chat tile has usually cached that one already.
+	full, mid, thumbs *chatmedia.Manager
+
+	open    bool
+	focus   bool
+	chat    int64
+	current model.MessageID
+	center  bool // scroll the strip to the current photo on the next frame
+	// previous is the photo shown before current, kept decoded so that
+	// going back is instant; since is when current was chosen.
+	previous model.MessageID
+	since    time.Time
+
+	mu        sync.Mutex
+	session   int
+	ctx       context.Context // ends when the viewer closes
+	cancel    context.CancelFunc
+	items     []model.Message // sorted by message ID
+	loading   [2]bool         // older, newer
+	exhausted [2]bool
+
+	backdrop, picture, prev, next, close, detach widget.Clickable
+	zoom                                         viewerZoom
+	// popout, when set, is what the button beside ✕ calls to show the
+	// photos in a window of their own; the viewer then closes.
+	popout func(chat int64, current model.Message, known []model.Message)
+	// standalone is set in such a window: the background does not close it.
+	standalone bool
+	// backdrop is the colour under the photo; a translucent window lets
+	// the desktop show through it.
+	backdropColor color.NRGBA
+	keys          struct{}
+	strip         layout.List
+	drag          stripDrag
+	thumbState    map[model.MessageID]*viewerThumbState
+	// drawn is the photo the last frame drew, for tests to compare with
+	// current.
+	drawn model.MessageID
+}
+
+type viewerThumbState struct {
+	click widget.Clickable
+	// msg shows the variant that suits the thumbnail size it was made for;
+	// mid the one shown while the original loads.
+	msg, mid model.Message
+	size     int
+}
+
+// stripDrag scrolls the thumbnail strip by dragging it with a mouse. Touch
+// drags and horizontal swipes are scrolled by the list itself.
+type stripDrag struct {
+	pressed, dragging bool
+	id                pointer.ID
+	last, moved, rest float32
+}
+
+func newPhotoViewer(source model.ConversationStore, images *imageOps, invalidate func()) *photoViewer {
+	v := &photoViewer{source: source, images: images, invalidate: invalidate, thumbState: map[model.MessageID]*viewerThumbState{}, backdropColor: viewerBackdrop}
+	v.gallery, _ = source.(model.PhotoGallery)
+	v.full = chatmedia.NewSized(source, invalidate, viewerFullLimit, 4096)
+	v.mid = chatmedia.NewSized(source, invalidate, 3, 1024)
+	v.thumbs = chatmedia.NewSized(source, invalidate, 96, 256)
+	v.strip.Axis = layout.Horizontal
+	return v
+}
+
+// Open shows photo m of chat. known are photos the caller already has, such
+// as those of the loaded history, so that the strip is not empty while the
+// cache is read.
+func (v *photoViewer) Open(chat int64, m model.Message, known []model.Message) {
+	v.mu.Lock()
+	if v.cancel != nil {
+		v.cancel()
+	}
+	v.session++
+	v.items = mergePhotos(mergePhotos(nil, []model.Message{m}), known)
+	v.loading, v.exhausted = [2]bool{}, [2]bool{v.gallery == nil || m.Key.MessageID < 0, v.gallery == nil || m.Key.MessageID < 0}
+	v.ctx, v.cancel = context.WithCancel(context.Background())
+	ctx, session := v.ctx, v.session
+	first, last := v.items[0].Key.MessageID, v.items[len(v.items)-1].Key.MessageID
+	v.mu.Unlock()
+	v.open, v.focus, v.center = true, true, true
+	v.zoom.reset()
+	v.chat, v.current = chat, m.Key.MessageID
+	v.strip.Position = layout.Position{}
+	clear(v.thumbState)
+	v.fetch(ctx, session, -1, first)
+	v.fetch(ctx, session, 1, last)
+}
+
+func (v *photoViewer) Close() {
+	v.mu.Lock()
+	if v.cancel != nil {
+		v.cancel()
+		v.cancel = nil
+	}
+	v.session++
+	v.items = nil
+	v.mu.Unlock()
+	v.open = false
+	// A closed viewer keeps no decoded pixels.
+	v.full.Clear()
+	v.mid.Clear()
+	v.thumbs.Clear()
+	clear(v.thumbState)
+}
+
+// Destroy stops the viewer's workers for good, when its window closes.
+func (v *photoViewer) Destroy() {
+	v.Close()
+	v.full.Close()
+	v.mid.Close()
+	v.thumbs.Close()
+}
+
+// Release drops the decoded photos of a hidden window; the open photo and
+// its strip are decoded again when the window is shown.
+func (v *photoViewer) Release() {
+	v.full.Release()
+	v.mid.Release()
+	v.thumbs.Release()
+}
+
+// fetch reads the next gallery page past anchor in the background.
+func (v *photoViewer) fetch(ctx context.Context, session, dir int, anchor model.MessageID) {
+	side := (dir + 1) / 2
+	v.mu.Lock()
+	if v.session != session || v.loading[side] || v.exhausted[side] {
+		v.mu.Unlock()
+		return
+	}
+	v.loading[side] = true
+	chat := v.chat
+	v.mu.Unlock()
+	go func() {
+		defer crash.Recover("photo gallery", func(*crash.Panic) {
+			v.mu.Lock()
+			if v.session == session {
+				v.loading[side], v.exhausted[side] = false, true
+			}
+			v.mu.Unlock()
+		})
+		page, err := v.gallery.ChatPhotos(ctx, chat, anchor, dir, viewerPage)
+		v.mu.Lock()
+		defer v.invalidate()
+		defer v.mu.Unlock()
+		if v.session != session {
+			return
+		}
+		v.loading[side] = false
+		// A failed page ends the strip there; photos already known stay available.
+		v.exhausted[side] = err != nil || len(page) < viewerPage
+		v.items = mergePhotos(v.items, page)
+	}()
+}
+
+// mergePhotos adds photos to a sorted list, once each.
+func mergePhotos(items, add []model.Message) []model.Message {
+	seen := make(map[model.MessageID]bool, len(items))
+	for _, m := range items {
+		seen[m.Key.MessageID] = true
+	}
+	for _, m := range add {
+		if m.Kind == model.MessagePhoto && m.Media != nil && !seen[m.Key.MessageID] {
+			seen[m.Key.MessageID] = true
+			items = append(items, m)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Key.MessageID < items[j].Key.MessageID })
+	return items
+}
+
+func (v *photoViewer) snapshot() (items []model.Message, loading, exhausted [2]bool, ctx context.Context, session int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.items, v.loading, v.exhausted, v.ctx, v.session
+}
+
+func indexOf(items []model.Message, id model.MessageID) int {
+	i := sort.Search(len(items), func(i int) bool { return items[i].Key.MessageID >= id })
+	return min(i, len(items)-1)
+}
+
+// show makes photo i current. center scrolls the strip to it, which a
+// click on the strip itself does not want.
+func (v *photoViewer) show(items []model.Message, i int, center bool) {
+	if i >= 0 && i < len(items) && items[i].Key.MessageID != v.current {
+		v.previous, v.current = v.current, items[i].Key.MessageID
+		v.since = time.Time{}
+		v.zoom.reset()
+		v.center = v.center || center
+	}
+}
+
+func (v *photoViewer) Layout(gtx layout.Context, l localization.Catalog, animate bool) {
+	if !v.open {
+		return
+	}
+	v.full.BeginFrame()
+	defer v.full.EndFrame()
+	v.mid.BeginFrame()
+	defer v.mid.EndFrame()
+	v.thumbs.BeginFrame()
+	defer v.thumbs.EndFrame()
+
+	items, loading, exhausted, ctx, session := v.snapshot()
+	if len(items) == 0 {
+		v.Close()
+		return
+	}
+	size := gtx.Constraints.Max
+	bar, strip, side := gtx.Dp(viewerBar), gtx.Dp(viewerStrip), gtx.Dp(viewerSide)
+	stage := image.Rect(side, bar, max(side, size.X-side), max(bar, size.Y-strip))
+	if size.X < 3*side {
+		stage.Min.X, stage.Max.X = 0, size.X
+	}
+	// An enlarged photo spreads under the side zones, up to the window edges.
+	view := image.Rect(0, stage.Min.Y, size.X, stage.Max.Y)
+	i := indexOf(items, v.current)
+	v.keyEvents(gtx, items, i, native(items[i]), stage.Size())
+	if !v.open {
+		return
+	}
+	i = indexOf(items, v.current)
+	v.zoomEvents(gtx, items, i, view, native(items[i]), fitScale(native(items[i]), stage.Size()))
+	i = indexOf(items, v.current)
+	if v.prev.Clicked(gtx) {
+		v.show(items, i-1, true)
+	}
+	if v.next.Clicked(gtx) {
+		v.show(items, i+1, true)
+	}
+	// Thumbnail clicks are handled here, before anything is drawn, like the
+	// arrows: handled while laying out the strip, they would change the photo
+	// after it was drawn, and nothing would draw it until the next input.
+	for id, st := range v.thumbState {
+		if st.click.Clicked(gtx) {
+			v.show(items, indexOf(items, id), false)
+		}
+	}
+	if v.backdrop.Clicked(gtx) && !v.standalone || v.close.Clicked(gtx) {
+		v.Close()
+		return
+	}
+	if v.detach.Clicked(gtx) && v.popout != nil {
+		i := indexOf(items, v.current)
+		v.popout(v.chat, items[i], items)
+		v.Close()
+		return
+	}
+	i = indexOf(items, v.current)
+	if v.since.IsZero() {
+		v.since = gtx.Now
+	}
+	// Keep decoded only what the arrows lead to and the way back.
+	keep := []string{items[i].Media.ID}
+	for _, j := range []int{i - 1, i + 1, indexOf(items, v.previous)} {
+		if j >= 0 && j < len(items) {
+			keep = append(keep, items[j].Media.ID)
+		}
+	}
+	v.full.Retain(keep...)
+	// Read further into the cache before the strip runs out.
+	if i < viewerPrefetch && !exhausted[0] && !loading[0] {
+		v.fetch(ctx, session, -1, items[0].Key.MessageID)
+	}
+	if len(items)-1-i < viewerPrefetch && !exhausted[1] && !loading[1] {
+		v.fetch(ctx, session, 1, items[len(items)-1].Key.MessageID)
+	}
+
+	photo := native(items[i])
+	fit := fitScale(photo, stage.Size())
+	if v.zoom.step(gtx.Now, animate, fit, photo, view.Size()) {
+		gtx.Execute(op.InvalidateCmd{})
+	}
+
+	area := clip.Rect{Max: size}.Push(gtx.Ops)
+	defer area.Pop()
+	event.Op(gtx.Ops, &v.keys)
+	// Everything under the viewer is covered and gets no input.
+	v.backdrop.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		paint.Fill(gtx.Ops, v.backdropColor)
+		return layout.Dimensions{Size: size}
+	})
+
+	v.layoutPhoto(gtx, items[i], stage, view, fit, l, animate)
+	v.layoutSides(gtx, view, i > 0, i < len(items)-1)
+	// Over the side zones, so that the wheel works there too; it passes
+	// clicks on to them.
+	v.zoomArea(gtx, view, photo)
+	v.layoutBar(gtx, items, i, l)
+	v.layoutStrip(gtx, items, i, image.Rect(0, size.Y-strip, size.X, size.Y))
+	// Decode the neighbours ahead, so that the arrows switch at once.
+	for _, j := range []int{i - 1, i + 1} {
+		if j >= 0 && j < len(items) {
+			v.full.StatusFit(items[j], false, stage.Size(), false)
+		}
+	}
+}
+
+func (v *photoViewer) keyEvents(gtx layout.Context, items []model.Message, i int, photo, stage image.Point) {
+	if v.focus {
+		gtx.Execute(key.FocusCmd{Tag: &v.keys})
+		v.focus = false
+	}
+	for {
+		ev, ok := gtx.Event(
+			key.FocusFilter{Target: &v.keys},
+			key.Filter{Focus: &v.keys, Name: key.NameLeftArrow},
+			key.Filter{Focus: &v.keys, Name: key.NameRightArrow},
+			key.Filter{Focus: &v.keys, Name: key.NameHome},
+			key.Filter{Focus: &v.keys, Name: key.NameEnd},
+			key.Filter{Focus: &v.keys, Name: key.NameEscape},
+			key.Filter{Focus: &v.keys, Name: "=", Required: key.ModShortcut, Optional: key.ModShift},
+			key.Filter{Focus: &v.keys, Name: "+", Required: key.ModShortcut, Optional: key.ModShift},
+			key.Filter{Focus: &v.keys, Name: "-", Required: key.ModShortcut},
+			key.Filter{Focus: &v.keys, Name: "0", Required: key.ModShortcut},
+		)
+		if !ok {
+			return
+		}
+		e, ok := ev.(key.Event)
+		if !ok || e.State != key.Press {
+			continue
+		}
+		switch e.Name {
+		case key.NameLeftArrow:
+			v.show(items, i-1, true)
+		case key.NameRightArrow:
+			v.show(items, i+1, true)
+		case key.NameHome:
+			v.show(items, 0, true)
+		case key.NameEnd:
+			v.show(items, len(items)-1, true)
+		case key.NameEscape:
+			v.Close()
+			gtx.Execute(key.FocusCmd{})
+			return
+		case "=", "+":
+			if photo != (image.Point{}) {
+				v.zoom.zoomBy(zoomStep, f32.Point{}, fitScale(photo, stage))
+			}
+		case "-":
+			if v.zoom.active() {
+				v.zoom.zoomBy(1/zoomStep, f32.Point{}, fitScale(photo, stage))
+			}
+		case "0":
+			v.zoom.unzoom(fitScale(photo, stage))
+		}
+		i = indexOf(items, v.current)
+	}
+}
+
+// layoutPhoto draws the current photo centered in stage, never larger than
+// its own pixels. Until it is decoded, its thumbnail or blurred preview is
+// stretched to the same place.
+func (v *photoViewer) layoutPhoto(gtx layout.Context, m model.Message, stage, view image.Rectangle, fit float32, l localization.Catalog, animate bool) {
+	v.drawn = m.Key.MessageID
+	box := stage.Size()
+	if v.zoom.active() && v.zoom.target > fit {
+		// Enlarged, the photo is decoded at its own size; the fitted frame
+		// stays on screen until then.
+		box = native(m)
+	}
+	status := v.full.StatusFit(m, animate, box, false)
+	w, h := m.Media.Width, m.Media.Height
+	if status.Frame != nil && (w <= 0 || h <= 0) {
+		b := status.Frame.Bounds()
+		w, h = b.Dx(), b.Dy()
+	}
+	if w <= 0 || h <= 0 {
+		w, h = 4, 3
+	}
+	shown := resample.Fit(w, h, stage.Size(), false)
+	if m.Media.Width <= 0 && status.Frame == nil {
+		// Unknown size: reserve the stage's width in a 4:3 frame.
+		shown = resample.Fit(4000, 3000, stage.Size(), false)
+	}
+	origin := stage.Min.Add(stage.Size().Sub(shown).Div(2))
+	if v.zoom.active() {
+		s := v.zoom.scale
+		shown = image.Pt(max(1, int(math.Round(float64(float32(w)*s)))), max(1, int(math.Round(float64(float32(h)*s)))))
+		center := layout.FPt(view.Min.Add(view.Max)).Mul(.5).Add(v.zoom.offset)
+		origin = image.Pt(int(math.Round(float64(center.X)-float64(shown.X)/2)), int(math.Round(float64(center.Y)-float64(shown.Y)/2)))
+	}
+	defer clip.Rect(view).Push(gtx.Ops).Pop()
+	im := status.Frame
+	if im == nil {
+		// Half the stage in a smaller variant, decoded in a few milliseconds
+		// and usually cached by the chat tile, then the thumbnail, then the
+		// blurred preview.
+		half := stage.Size().Div(2)
+		if mid := m.Media.Variant(half.X, half.Y); mid != m.Media {
+			im = v.mid.StatusFit(v.variant(m, mid), false, half, false).Frame
+		}
+	}
+	if im == nil {
+		if t := v.thumb(m, gtx.Dp(viewerThumb)); t != nil {
+			im = v.thumbs.StatusFit(*t, false, image.Pt(gtx.Dp(viewerThumb), gtx.Dp(viewerThumb)), true).Frame
+		}
+	}
+	if im == nil {
+		im = status.Preview
+	}
+	showRing := status.Err != nil
+	if status.Loading {
+		if wait := v.since.Add(viewerRingDelay); gtx.Now.Before(wait) {
+			gtx.Execute(op.InvalidateCmd{At: wait})
+		} else {
+			showRing = true
+		}
+	}
+	if v.picture.Clicked(gtx) && (status.Err != nil || status.Cancelled) {
+		v.full.Retry(m)
+	}
+	offset(gtx, origin, func(gtx layout.Context) layout.Dimensions {
+		return v.picture.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints = layout.Exact(shown)
+			if im == nil {
+				fillRect(gtx, token.NewMatColorFromHexRGB(0x1d2127), shown)
+			} else {
+				widget.Image{Src: v.images.Op(im), Fit: widget.Fill}.Layout(gtx)
+			}
+			if showRing {
+				diameter := min(gtx.Dp(56), shown.X, shown.Y)
+				offset(gtx, shown.Sub(image.Pt(diameter, diameter)).Div(2), func(gtx layout.Context) layout.Dimensions {
+					paint.FillShape(gtx.Ops, color.NRGBA{A: 150}, clip.Ellipse{Max: image.Pt(diameter, diameter)}.Op(gtx.Ops))
+					if status.Loading {
+						progress := float32(0)
+						if status.Total > 0 {
+							progress = min(1, float32(status.Downloaded)/float32(status.Total))
+						}
+						ring(gtx, diameter, progress, animate)
+					}
+					return layout.Dimensions{Size: image.Pt(diameter, diameter)}
+				})
+			}
+			if status.Err != nil {
+				errGtx := gtx
+				errGtx.Constraints = layout.Constraints{Max: image.Pt(shown.X, shown.Y/2)}
+				offset(errGtx, image.Pt(0, shown.Y/2+gtx.Dp(36)), func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return centeredLabel(gtx, l.T("viewer.failed"), token.TypestyleLabelLarge, token.NewMatColorFromHexRGB(0xffffff), 2)
+				})
+			}
+			return layout.Dimensions{Size: shown}
+		})
+	})
+}
+
+// layoutSides lays out the zones beside the photo that switch to its
+// neighbours: the whole height of the stage, not only the arrow drawn in it,
+// is the target.
+func (v *photoViewer) layoutSides(gtx layout.Context, view image.Rectangle, prev, next bool) {
+	w := gtx.Dp(viewerSide)
+	if prev {
+		sideZone(gtx, &v.prev, image.Rect(view.Min.X, view.Min.Y, view.Min.X+w, view.Max.Y), iconChevronLeft)
+	}
+	if next {
+		sideZone(gtx, &v.next, image.Rect(view.Max.X-w, view.Min.Y, view.Max.X, view.Max.Y), iconChevron)
+	}
+}
+
+func sideZone(gtx layout.Context, c *widget.Clickable, r image.Rectangle, icon wdk.IconWidget) {
+	offset(gtx, r.Min, func(gtx layout.Context) layout.Dimensions {
+		size := r.Size()
+		gtx.Constraints = layout.Exact(size)
+		return c.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			if c.Hovered() {
+				paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 10}, clip.Rect{Max: size}.Op())
+			}
+			d := gtx.Dp(viewerArrow)
+			offset(gtx, size.Sub(image.Pt(d, d)).Div(2), func(gtx layout.Context) layout.Dimensions {
+				return viewerIcon(gtx, c.Hovered(), icon, d)
+			})
+			return layout.Dimensions{Size: size}
+		})
+	})
+}
+
+// viewerIcon draws a round translucent button face that stays visible over
+// any photo.
+func viewerIcon(gtx layout.Context, hovered bool, icon wdk.IconWidget, d int) layout.Dimensions {
+	size := image.Pt(d, d)
+	alpha := uint8(110)
+	if hovered {
+		alpha = 170
+	}
+	paint.FillShape(gtx.Ops, color.NRGBA{R: 40, G: 44, B: 52, A: alpha}, clip.Ellipse{Max: size}.Op(gtx.Ops))
+	inner := d * 3 / 5
+	offset(gtx, size.Sub(image.Pt(inner, inner)).Div(2), func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints = layout.Exact(image.Pt(inner, inner))
+		return icon(gtx, token.NewMatColorFromHexRGB(0xffffff))
+	})
+	return layout.Dimensions{Size: size}
+}
+
+func viewerButton(gtx layout.Context, c *widget.Clickable, icon wdk.IconWidget, d int) layout.Dimensions {
+	return c.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return viewerIcon(gtx, c.Hovered(), icon, d)
+	})
+}
+
+func (v *photoViewer) layoutBar(gtx layout.Context, items []model.Message, i int, l localization.Catalog) {
+	bar := gtx.Dp(viewerBar)
+	white := token.NewMatColorFromHexRGB(0xffffff)
+	dim := token.NewMatColorFromHexRGB(0xb8bec8)
+	m := items[i]
+	d := gtx.Dp(40)
+	barGtx := gtx
+	barGtx.Constraints = layout.Exact(image.Pt(gtx.Constraints.Max.X, bar))
+	layout.Inset{Left: 20, Right: 12}.Layout(barGtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+				return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					// The column takes its own height, so that W centres it.
+					gtx.Constraints.Min = image.Point{}
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return label(gtx, l.Format("viewer.position", map[string]string{"n": fmt.Sprint(i + 1), "amount": fmt.Sprint(len(items))}), token.TypestyleTitleSmall, white, 1)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							txt := m.Date.Local().Format("02.01.2006 15:04")
+							if m.SenderName != "" {
+								txt = m.SenderName + " · " + txt
+							}
+							return label(gtx, txt, token.TypestyleLabelMedium, dim, 1)
+						}),
+					)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if v.popout == nil {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return viewerButton(gtx, &v.detach, iconOpenInNew, d)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return viewerButton(gtx, &v.close, iconClear, d) }),
+		)
+	})
+}
+
+// variant returns m showing variant, with the original's blurred preview.
+// The copy is kept with the thumbnail state, so drawing does not allocate.
+func (v *photoViewer) variant(m model.Message, variant *model.MessageMedia) model.Message {
+	st := v.thumbState[m.Key.MessageID]
+	if st == nil {
+		st = &viewerThumbState{}
+		v.thumbState[m.Key.MessageID] = st
+	}
+	if st.mid.Media == nil || st.mid.Media.ID != variant.ID {
+		copy := *variant
+		if copy.Preview == nil {
+			copy.Preview = m.Media.Preview
+		}
+		st.mid = m.WithMedia(&copy)
+	}
+	return st.mid
+}
+
+// thumb returns the message showing the variant of m that covers a square
+// thumbnail of side pixels, cached per photo so that frames do not allocate.
+func (v *photoViewer) thumb(m model.Message, side int) *model.Message {
+	st := v.thumbState[m.Key.MessageID]
+	if st == nil {
+		st = &viewerThumbState{}
+		v.thumbState[m.Key.MessageID] = st
+	}
+	if st.size != side || st.msg.Media == nil {
+		variant := *m.Media.Variant(side, side)
+		if variant.Preview == nil {
+			variant.Preview = m.Media.Preview
+		}
+		st.msg, st.size = m.WithMedia(&variant), side
+	}
+	return &st.msg
+}
+
+func (v *photoViewer) layoutStrip(gtx layout.Context, items []model.Message, current int, area image.Rectangle) {
+	side, gap := gtx.Dp(viewerThumb), gtx.Dp(viewerThumbGap)
+	pitch := side + gap
+	width := min(area.Dx(), len(items)*pitch)
+	x := area.Min.X + (area.Dx()-width)/2
+	y := area.Min.Y + (area.Dy()-side)/2
+	visible := max(1, width/pitch)
+	if v.center {
+		v.strip.Position.First = max(0, min(current-visible/2, len(items)-visible))
+		v.strip.Position.Offset = 0
+		v.center = false
+	}
+	stripGtx := gtx
+	stripGtx.Constraints = layout.Exact(image.Pt(width, side))
+	offset(stripGtx, image.Pt(x, y), func(gtx layout.Context) layout.Dimensions {
+		dims := v.strip.Layout(gtx, len(items), func(gtx layout.Context, i int) layout.Dimensions {
+			m := items[i]
+			t := v.thumb(m, side)
+			st := v.thumbState[m.Key.MessageID]
+			return layout.Inset{Right: unit.Dp(float32(gap) / gtx.Metric.PxPerDp)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return st.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					size := image.Pt(side, side)
+					gtx.Constraints = layout.Exact(size)
+					defer clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(6)).Push(gtx.Ops).Pop()
+					fillRect(gtx, token.NewMatColorFromHexRGB(0x2a2f37), size)
+					status := v.thumbs.StatusFit(*t, false, size, true)
+					im := status.Frame
+					if im == nil {
+						im = status.Preview
+					}
+					if im != nil {
+						if i != current {
+							defer paint.PushOpacity(gtx.Ops, .55).Pop()
+						}
+						widget.Image{Src: v.images.Op(im), Fit: widget.Cover}.Layout(gtx)
+					}
+					if i == current {
+						w := float32(gtx.Dp(2))
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 230}, clip.Stroke{Path: clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(6)).Path(gtx.Ops), Width: w}.Op())
+					}
+					return layout.Dimensions{Size: size}
+				})
+			})
+		})
+		v.dragStrip(gtx, width)
+		return dims
+	})
+}
+
+// dragStrip lets a mouse drag the strip and a vertical wheel scroll it. It
+// sits over the thumbnails but passes the pointer on, so a click still
+// selects one; once the pointer moves far enough to be a drag, it takes the
+// pointer and the thumbnail under it sees a cancelled press, not a click.
+func (v *photoViewer) dragStrip(gtx layout.Context, width int) {
+	dragHorizontalStrip(gtx, width, &v.drag, &v.strip, v.invalidate)
+}
+func (v *photoViewer) scrollStrip(px float32) {
+	scrollHorizontalStrip(&v.drag, &v.strip, v.invalidate, px)
+}

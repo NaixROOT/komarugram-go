@@ -1,0 +1,377 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+// Command messenger is the desktop messenger client. It signs in with a phone
+// number and keeps the session for the next start; it can also run on a real
+// account imported from a Telegram Desktop tdata archive, or on demo data.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"gioui.org/io/system"
+	"gioui.org/unit"
+	"github.com/gotd/td/tg"
+
+	"komarugram/internal/appwindow"
+	"komarugram/internal/diagnostics"
+	"komarugram/internal/messenger/account"
+	"komarugram/internal/messenger/localization"
+	"komarugram/internal/messenger/mockstore"
+	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/preferences"
+	"komarugram/internal/messenger/security"
+	"komarugram/internal/messenger/tgstore"
+	"komarugram/internal/messenger/ui"
+	"komarugram/internal/miniappprefs"
+	"komarugram/internal/profilerui"
+	"komarugram/internal/tray"
+	"komarugram/pkg/miniapp"
+)
+
+type pathsFlag []string
+
+func (p *pathsFlag) String() string { return strings.Join(*p, ",") }
+func (p *pathsFlag) Set(value string) error {
+	*p = append(*p, value)
+	return nil
+}
+
+func main() {
+	demo := flag.Bool("demo", false, "run on demo data instead of signing in")
+	demoChats := flag.Int("demo-chats", 0, "run on demo data with this many generated chats added")
+	demoPanic := flag.Bool("demo-panic", false, "show the recovered-panic dialog once on demo data")
+	var tdataPaths pathsFlag
+	flag.Var(&tdataPaths, "tdata", "import a Telegram Desktop tdata zip or every zip in a directory; may be repeated")
+	check := flag.Bool("check", false, "import/load accounts without windows, print counts and exit")
+	proxy := flag.String("proxy", os.Getenv("KOMARUGRAM_PROXY"), "connect through this MTProxy link, tg://proxy?server=…&port=…&secret=… (default: $KOMARUGRAM_PROXY)")
+	profile := flag.Bool("profile", false, "open performance profiler in a separate window")
+	profileDir := flag.String("profile-dir", "profiles", "directory for explicitly exported profiler artifacts")
+	profileExport := flag.Duration("profile-export", 0, "automatically export JSON at this interval (e.g. 2s); enables collection without profiler UI")
+	profileCapture := flag.String("profile-capture", "", "capture profiles without GUI: comma-separated cpu,heap,allocs,trace,goroutine")
+	flag.Parse()
+	if *profileExport < 0 || *profileExport > 0 && *profileExport < 100*time.Millisecond {
+		log.Fatal("-profile-export must be zero or at least 100ms")
+	}
+	captures := []string{}
+	for _, kind := range strings.Split(*profileCapture, ",") {
+		kind = strings.TrimSpace(kind)
+		if kind == "" {
+			continue
+		}
+		switch kind {
+		case "cpu", "heap", "allocs", "trace", "goroutine":
+			captures = append(captures, kind)
+		default:
+			log.Fatalf("unknown profile capture %q", kind)
+		}
+	}
+	profiling := *profile || *profileExport > 0 || len(captures) > 0
+	if profiling && *check {
+		log.Fatal("-profile requires a window; cannot be combined with -check")
+	}
+	demoMode := *demo || *demoChats > 0 || *demoPanic
+	if demoMode && (*check || len(tdataPaths) > 0) {
+		log.Fatal("-demo runs without accounts; cannot be combined with -check or -tdata")
+	}
+	if profiling {
+		r := diagnostics.Enable()
+		if *profileExport > 0 {
+			exporter, err := r.StartAutoExport(*profileDir, *profileExport)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("automatic profiler export: %s", exporter.Directory)
+		}
+		if len(captures) > 0 {
+			go func() {
+				for _, kind := range captures {
+					path, err := r.Capture(*profileDir, kind)
+					if err != nil {
+						log.Printf("profile %s: %v", kind, err)
+						return
+					}
+					log.Printf("profile %s saved: %s", kind, path)
+				}
+			}()
+		}
+	}
+
+	if demoMode {
+		runDemo(*demoChats, *profile, *profileDir, *demoPanic)
+		return
+	}
+	// A second start brings the running instance back from the tray.
+	var windows atomic.Pointer[accountWindows]
+	releaseInstance := func() {}
+	if !*check {
+		var err error
+		releaseInstance, err = claimInstance(func(token string) {
+			if w := windows.Load(); w != nil {
+				w.ShowAll(token)
+			}
+		})
+		if errors.Is(err, errRunning) && len(tdataPaths) > 0 {
+			log.Fatal("the messenger is already running; quit it from the tray to import tdata")
+		}
+		if errors.Is(err, errRunning) {
+			log.Print(err)
+			return
+		}
+		if err != nil {
+			log.Printf("single instance: %v", err)
+		}
+	}
+
+	protection, err := security.Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	manager, err := newManager(*proxy, protection)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer manager.Close()
+	var imports []*account.TData
+	if len(tdataPaths) > 0 {
+		paths, err := expandTDataPaths(tdataPaths)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, path := range paths {
+			archive, err := os.ReadFile(path)
+			if err != nil {
+				log.Fatal(err)
+			}
+			imported, err := account.ReadTData(archive)
+			if err != nil {
+				log.Fatalf("%s: %v", filepath.Base(path), err)
+			}
+			imports = append(imports, imported)
+		}
+	}
+	if *check {
+		if err := checkAccounts(manager, imports); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	sharedPreferences, err := preferences.Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	sharedMiniApps := miniApps(sharedPreferences)
+	process := newProcess(*profile, *profileDir, func() {
+		if w := windows.Load(); w != nil {
+			w.Quit()
+		}
+	})
+	accounts := newAccountWindows(process, windowOptions(sharedPreferences), manager, protection, sharedPreferences, sharedMiniApps, imports)
+	catalog := localization.For(sharedPreferences.Global().Language)
+	icon, err := tray.Start(tray.Options{
+		ID:       "komarugram-go",
+		Title:    catalog.T("app.title"),
+		Activate: accounts.ShowAll,
+		Items: []tray.Item{
+			{Label: catalog.T("tray.open"), Action: accounts.ShowAll},
+			{Separator: true},
+			{Label: catalog.T("tray.quit"), Action: func(string) { accounts.Quit() }},
+		},
+	})
+	switch {
+	case err == nil:
+		accounts.tray = icon
+	case !errors.Is(err, tray.ErrUnsupported):
+		log.Print(err)
+	}
+	flush := process.BeforeExit
+	process.BeforeExit = func() {
+		if icon != nil {
+			icon.Close()
+		}
+		releaseInstance()
+		if flush != nil {
+			flush()
+		}
+	}
+	windows.Store(accounts)
+	process.Open(accounts.startSpec())
+	process.Main()
+}
+
+// runDemo shows demo data with settings kept in memory only: the demo
+// neither reads nor changes the user's settings, accounts or local-data
+// protection.
+func runDemo(chats int, profile bool, profileDir string, panicDemo bool) {
+	prefs := preferences.Memory()
+	process := newProcess(profile, profileDir, nil)
+	opts := windowOptions(prefs)
+	opts.ProfileName = "demo"
+	opts.DemoPanic = panicDemo
+	process.Open(appwindow.Spec{Options: opts, Build: func(w *appwindow.Window) appwindow.Content {
+		return ui.New(w, mockstore.New(time.Now(), chats), ui.Services{
+			Preferences: prefs,
+			MiniApps:    miniApps(prefs),
+			OpenWindow:  process.Open,
+		})
+	}})
+	process.Main()
+}
+
+// miniApps returns the Mini App settings kept in prefs.
+func miniApps(prefs *preferences.Store) *miniappprefs.Settings {
+	settings := miniappprefs.New(prefs.Global().MiniAppStorage)
+	settings.SetPreferenceChanged(func(storage miniapp.Storage) {
+		if err := prefs.SetMiniAppStorage(storage); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	})
+	return settings
+}
+
+func windowOptions(prefs *preferences.Store) appwindow.Options {
+	catalog := localization.For(prefs.Global().Language)
+	return appwindow.Options{
+		Title:  catalog.T("app.title"),
+		Width:  unit.Dp(1200),
+		Height: unit.Dp(760),
+		Locale: system.Locale{Language: string(catalog.Language()), Direction: system.LTR},
+	}
+}
+
+// newProcess returns the window host, which with diagnostics enabled quits on
+// a signal, so that profiles are flushed, and opens the profiler window if
+// asked. quit ends the process, nil for closing every window.
+func newProcess(profile bool, profileDir string, quit func()) *appwindow.Host {
+	process := new(appwindow.Host)
+	process.EnableCrashDialogs()
+	if quit == nil {
+		quit = process.CloseAll
+	}
+	if r := diagnostics.Current(); r != nil {
+		process.BeforeExit = r.Close
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+		go func() { <-signals; quit() }()
+		if profile {
+			process.Open(profilerui.Spec(r, profileDir))
+		}
+	}
+	return process
+}
+
+func expandTDataPaths(values []string) ([]string, error) {
+	var paths []string
+	for _, value := range values {
+		info, err := os.Stat(value)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			paths = append(paths, value)
+			continue
+		}
+		entries, err := os.ReadDir(value)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".zip") {
+				paths = append(paths, filepath.Join(value, entry.Name()))
+			}
+		}
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return nil, errors.New("no tdata zip archives found")
+	}
+	return paths, nil
+}
+
+// checkAccounts adds the imports, loads every account without a window and
+// prints what it loaded.
+func checkAccounts(manager *account.Manager, imports []*account.TData) error {
+	if err := manager.Load(); errors.Is(err, security.ErrLocked) {
+		return errors.New("-check: local data is protected; unlock it in the window, -check cannot ask for the password")
+	} else if err != nil {
+		return err
+	}
+	for _, t := range imports {
+		if _, err := manager.ImportTData(context.Background(), t); err != nil {
+			return err
+		}
+	}
+	accounts := manager.Accounts()
+	if len(accounts) == 0 {
+		return errors.New("-check needs an imported or saved account")
+	}
+	fmt.Printf("accounts: %d\n", len(accounts))
+	for i, a := range accounts {
+		store := tgstore.New(nil)
+		if err := manager.Run(context.Background(), a, func(ctx context.Context, api *tg.Client) error {
+			return store.Load(ctx, api)
+		}); err != nil {
+			return fmt.Errorf("account %d: %w", i+1, err)
+		}
+		fmt.Printf("account %d: ", i+1)
+		printSummary(store)
+	}
+	return nil
+}
+
+// newManager returns an account manager that connects through the MTProxy
+// in proxy, or directly if it is empty.
+func newManager(proxy string, protection *security.Manager) (*account.Manager, error) {
+	manager, err := account.NewManager(account.TDesktopWindows, protection)
+	if err != nil {
+		return nil, err
+	}
+	if err := manager.SetProxy(proxy); err != nil {
+		return nil, err
+	}
+	return manager, nil
+}
+
+// printSummary tells what was loaded without printing anything personal.
+func printSummary(store *tgstore.Store) {
+	me := store.Me()
+	kinds := map[model.ChatKind]int{}
+	unread, pinned, muted := 0, 0, 0
+	chats := store.Chats()
+	for _, c := range chats {
+		kinds[c.Kind]++
+		if c.Unread > 0 {
+			unread++
+		}
+		if c.Pinned {
+			pinned++
+		}
+		if c.Muted {
+			muted++
+		}
+	}
+	fmt.Printf("profile: name %v, username %v, bio %v\n", me.FirstName != "", me.Username != "", me.Bio != "")
+	fmt.Printf("chats: %d (users %d, saved %d, bots %d, groups %d, channels %d), pinned %d, unread %d, muted %d\n",
+		len(chats), kinds[model.KindUser], kinds[model.KindSaved], kinds[model.KindBot],
+		kinds[model.KindGroup], kinds[model.KindChannel], pinned, unread, muted)
+	for i, f := range store.Folders() {
+		n := 0
+		for _, c := range chats {
+			if f.Contains(c) {
+				n++
+			}
+		}
+		fmt.Printf("folder %d: %d chats\n", i+1, n)
+	}
+}

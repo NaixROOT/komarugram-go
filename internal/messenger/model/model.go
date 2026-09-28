@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+// Package model holds the messenger data types the UI works with, and the
+// Store interface that provides them. The UI only sees a Store, so the stub
+// data of mockstore can later be replaced by a real account.
+package model
+
+import (
+	"image"
+	"time"
+)
+
+// ChatKind is the kind of a chat.
+type ChatKind int
+
+const (
+	KindUser ChatKind = iota
+	KindGroup
+	KindChannel
+	KindBot
+	// KindSaved is the user's own chat, "Saved Messages".
+	KindSaved
+)
+
+type Chat struct {
+	ID          int64
+	Kind        ChatKind
+	Title       string
+	LastMessage string
+	// LastSender is shown before LastMessage in groups; empty otherwise.
+	LastSender string
+	LastTime   time.Time
+	Unread     int
+	Muted      bool
+	Pinned     bool
+	// Members is the member or subscriber count of groups and channels.
+	Members int
+	// Badges are the marks beside the chat's name.
+	Badges
+}
+
+// Badges are the marks Telegram shows around a name.
+type Badges struct {
+	// Premium is set for a user with Telegram Premium, and EmojiStatus is
+	// the custom emoji a user or channel shows beside the name instead of the
+	// Premium star, 0 for none.
+	Premium     bool
+	EmojiStatus int64
+	// Verified is Telegram's own check mark.
+	Verified bool
+	// Scam and Fake are Telegram's warnings; either replaces every other
+	// mark after the name.
+	Scam, Fake bool
+	// BotVerification is the custom emoji a verifying bot (a third party,
+	// such as a Mini App) put before the name, 0 for none.
+	BotVerification int64
+}
+
+// Folder is a chat folder. It holds the chats Match accepts or, without
+// Match, the chats of the given kinds.
+type Folder struct {
+	ID    int64
+	Title string
+	// Kinds are the kinds of chat the folder is about. They also pick its
+	// icon, so a folder with Match may name them too.
+	Kinds []ChatKind
+	// Match decides membership when a folder is more than a set of kinds, as
+	// a Telegram folder is: its rules name chats as well as kinds.
+	Match func(Chat) bool
+}
+
+// Contains reports whether the chat belongs to the folder.
+func (f Folder) Contains(c Chat) bool {
+	if f.Match != nil {
+		return f.Match(c)
+	}
+	for _, k := range f.Kinds {
+		if c.Kind == k {
+			return true
+		}
+	}
+	return false
+}
+
+type Profile struct {
+	// ID is the account's user id, 0 when unknown.
+	ID int64
+	// DC is the account's home data center, 0 when unknown.
+	DC        int
+	FirstName string
+	LastName  string
+	Username  string
+	Phone     string
+	Bio       string
+	// Badges are the marks beside the account's name.
+	Badges
+}
+
+// Name returns the full name.
+func (p Profile) Name() string {
+	if p.LastName == "" {
+		return p.FirstName
+	}
+	return p.FirstName + " " + p.LastName
+}
+
+// Store provides the account data.
+type Store interface {
+	// Me returns the profile of the account.
+	Me() Profile
+	// Folders returns the chat folders in display order.
+	Folders() []Folder
+	// Chats returns all chats, pinned first, then newest first.
+	Chats() []Chat
+}
+
+// AccountInfo is the process-wide summary shown in Settings. It is known for
+// every saved account, connected or not.
+type AccountInfo struct {
+	ID string
+	// UserID is the Telegram user id, which also picks the placeholder
+	// avatar's color.
+	UserID   int64
+	Name     string
+	Username string
+	Phone    string
+	Premium  bool
+	// Avatar is the small profile photo, nil when there is none or it is not
+	// known yet.
+	Avatar image.Image
+	Open   bool
+}
+
+// Accounts exposes all saved accounts and opens or focuses their windows.
+// Implementations notify subscribers when profiles or open-window state
+// changes.
+type Accounts interface {
+	All() []AccountInfo
+	Open(id string)
+	// Add opens a window that signs in to another account, or shows the one
+	// already doing it.
+	Add()
+	// LogOut ends the account's session in Telegram, closes its window and
+	// deletes its data from this computer.
+	LogOut(id string)
+	Subscribe(func()) func()
+}
