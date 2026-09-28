@@ -3,8 +3,10 @@
 Пересмотрен 25 сентября 2026 года. Прежний план («read-only чаты», 22 сентября)
 в основном выполнен и перерос сам себя: клиент отправляет, удаляет и пересылает
 сообщения, ищет по Telegram и по локальному кешу. Новое направление — перенос
-функций из форков Telegram Desktop: [AyuGram](ayugram/) и [materialgram](materialgram/).
-Их исходники лежат в корне репозитория без git-истории (версии — в `AGENTS.md`).
+функций из форков Telegram Desktop: [AyuGram](https://github.com/AyuGram/AyuGramDesktop)
+и [materialgram](https://github.com/kukuruzka165/materialgram). Их исходников в репозитории
+нет: когда они нужны, их клонируют в корень без git-истории, в `ayugram/` и `materialgram/`,
+которые игнорирует git (см. `AGENTS.md`, «Telegram Desktop sources»).
 
 ## Правила переноса
 
@@ -56,7 +58,7 @@ tdesktop.
 ## Порт из AyuGram и materialgram
 
 Порядок — от того, что меняет повседневное чтение, к удобствам. Пути — внутри
-`ayugram/Telegram/SourceFiles` и `materialgram/Telegram/SourceFiles`.
+`Telegram/SourceFiles` локальных клонов `ayugram/` и `materialgram/`.
 
 ### 0. Начать с этого: наборы стикеров и emoji, контекстное меню сообщения
 

@@ -803,7 +803,6 @@ bug, a failed test or a wrong first guess at least once.
   cannot be checked without them — leave such changes until they can.
 - On X11 with Mesa, the first EGL configs with alpha use 24-bit visuals, so a
   transparent X11 window needs an EGL config chosen for a 32-bit visual.
-- There is no git repository: keep a copy of a file before editing it for an
-  experiment.
-- Crash reports are in `~/.cache/komarugram-go/crashes`; a recovered panic is also
-  in the log with its stack.
+- Crash reports are in `~/.cache/komarugram-go/crashes`
+  (`%LocalAppData%\komarugram-go\crashes` on Windows); a recovered panic is
+  also in the log with its stack.
