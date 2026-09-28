@@ -69,6 +69,9 @@ set to the absolute path of an `avcdec.wasm`, which is not in this repository
 
 ## Rules
 
+- **The README files in the root (`README.md`, `README_RU.md`) change only
+  with the maintainer's consent.** Propose the text instead; when a change
+  is agreed, make it in both languages.
 - **Root causes, not workarounds.** Measure before and after; say what was
   verified and what was not.
 - **Live-test only the operating system the maintainer is using.** Other operating systems are tested manually by the maintainer: say when a change needs their check.
