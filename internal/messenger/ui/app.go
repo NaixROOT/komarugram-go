@@ -620,7 +620,7 @@ func (a *App) Layout(gtx layout.Context) {
 		a.signIn.Layout(gtx, a.catalog(), a.private())
 		return
 	}
-	if a.info != nil && a.history.header.Clicked(gtx) {
+	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked()) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)
 		}

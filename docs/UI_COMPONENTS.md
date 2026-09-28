@@ -167,6 +167,11 @@ The history is drawn as materialgram draws it:
   history (`servicePill`), worded in the UI's language by
   `localization.Catalog.Service` from `model.ServiceAction`. A pin's plate
   quotes the message and shows it on a click; a call is a bubble.
+- **Header actions** (`chat_menu.go`, `chat_search.go`): the search and
+  menu buttons at the end of a chat's header. The search is a field over
+  the header (`model.ChatSearcher`) with a counter and buttons to the older
+  and newer found messages; the one shown is tinted for a moment
+  (`highlight`). The menu is a `contextMenu` under its button.
 - **Pinned bar** (`pinned_bar.go`): under the chat's header, the latest
   pinned message above the history's bottom (`model.PinnedSource`); a click
   goes to it and shows the one before, as Telegram Desktop's does. Its line
@@ -199,7 +204,7 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`,
-  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
+  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations.
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the

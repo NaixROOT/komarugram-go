@@ -61,9 +61,17 @@ type chatPage struct {
 	// pinned is the bar of the chat's pinned messages.
 	pinned pinnedBar
 	// reacted lists who reacted to a message.
-	reacted  reactedDialog
-	deletion messageDeletion
-	stickers stickerSetDialog
+	reacted reactedDialog
+	// chatSearch searches the chat; chatMenu is the menu of its header.
+	chatSearch chatSearch
+	chatMenu   chatMenu
+	// highlight is the message a search went to, tinted until
+	// highlightUntil; infoAsked, set when the menu asks for the chat's info.
+	highlight      model.MessageID
+	highlightUntil time.Time
+	infoAsked      bool
+	deletion       messageDeletion
+	stickers       stickerSetDialog
 	// dialogStickers are the media of the sticker sets shown in the dialog
 	// in this chat; switching chats forgets them.
 	dialogStickers map[string]bool
@@ -311,6 +319,8 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.stickers.stop()
 		p.emojiPacks.stop()
 		p.reacted.stop()
+		p.closeChatSearch()
+		p.chatMenu.open = false
 		p.closeMenu()
 		p.save(true)
 		p.clearSelection()

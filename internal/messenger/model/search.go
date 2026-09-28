@@ -3,6 +3,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -42,6 +43,22 @@ type SearchQuery struct {
 	Text    string
 	Section SearchSection
 	Global  bool
+}
+
+// ChatSearchPage is a page of the messages of one chat that a search found,
+// newest first. Next asks for the page after it; empty after the last.
+// Count is how many were found in all, 0 when it is not known.
+type ChatSearchPage struct {
+	Messages []Message
+	Next     string
+	Count    int
+}
+
+// ChatSearcher finds messages of one chat, as Telegram Desktop's search in
+// a chat does: from Telegram when connected, else in what this computer
+// saved.
+type ChatSearcher interface {
+	SearchChat(ctx context.Context, chat int64, text string, next string, limit int) (ChatSearchPage, error)
 }
 
 // FoundMessage is a message found by a search, with the chat it is in.

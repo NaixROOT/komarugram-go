@@ -222,6 +222,11 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 	call := record.Stop()
 	if p.selection.selected[m.Key.MessageID] && !p.snapshotting {
 		fillRect(gtx, scheme(gtx).Primary.Color.SetOpacity(.13), dims.Size)
+	} else if p.highlight == m.Key.MessageID && gtx.Now.Before(p.highlightUntil) && !p.snapshotting {
+		// A message a search went to, which fades out.
+		left := float32(p.highlightUntil.Sub(gtx.Now)) / float32(highlightTime)
+		fillRect(gtx, scheme(gtx).Primary.Color.SetOpacity(token.OpacityLevel(.2*min(1, 2*left))), dims.Size)
+		gtx.Execute(op.InvalidateCmd{})
 	}
 	call.Add(gtx.Ops)
 	r.bodyTop = gtx.Dp(top) + dateHeight
