@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -345,4 +347,43 @@ func TestPhotoViewerShowsMiddleVariantWhileOriginalLoads(t *testing.T) {
 	h.until("the original", func() bool {
 		return h.viewer.full.StatusFit(s.photos[14], false, image.Pt(656, 460), false).Frame != nil
 	})
+}
+
+// The bar saves the original in the user's pictures and copies it as PNG;
+// a protected photo offers neither.
+func TestPhotoViewerSavesAndCopies(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("USERPROFILE", home)
+	h := newViewerHarness(t)
+	s := h.store
+	h.viewer.Open(1, s.photos[3], nil)
+	h.frame()
+	h.viewer.save.Click()
+	h.until("the saved notice", func() bool { return strings.HasPrefix(h.viewer.notice, "Photo saved: ") })
+	path := strings.TrimPrefix(h.viewer.notice, "Photo saved: ")
+	want, _ := s.Media(context.Background(), s.photos[3])
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, want) || filepath.Ext(path) != ".png" {
+		t.Fatalf("saved %s: %v", path, err)
+	}
+	// Ctrl+C copies, as the button does.
+	h.router.Queue(key.Event{Name: "C", Modifiers: key.ModShortcut, State: key.Press})
+	h.until("the copied notice", func() bool { return h.viewer.notice == "Photo copied to clipboard." })
+	h.frame()
+	mime, data, ok := h.router.WriteClipboard()
+	if !ok || mime != "image/png" {
+		t.Fatalf("clipboard %q, %v", mime, ok)
+	}
+	if im, err := png.Decode(bytes.NewReader(data)); err != nil || im.Bounds().Size() != image.Pt(1600, 1200) {
+		t.Fatalf("copied picture: %v", err)
+	}
+	if !canKeep(s.photos[3]) {
+		t.Fatal("a photo may not be kept")
+	}
+	protected := s.photos[3]
+	protected.NoForwards = true
+	if canKeep(protected) {
+		t.Fatal("a protected photo may be kept")
+	}
 }
