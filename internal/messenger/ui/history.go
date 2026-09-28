@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"komarugram/internal/diagnostics"
 	"komarugram/internal/messenger/chatmedia"
@@ -90,36 +91,39 @@ type chatPage struct {
 	dialogStickers map[string]bool
 	// releaseMemory gives memory a view dropped back to the system later;
 	// keepMemory cancels that when a view is shown again.
-	releaseMemory, keepMemory         func()
-	emojiPacks                        emojiPacksDialog
-	messageMenu                       messageMenu
-	composer                          *messageComposer
-	header                            widget.Clickable
-	appearance                        *chatThemeController
-	files                             *attachmentFiles
-	trace                             *diagnostics.Trace
-	selection                         messageSelection
-	keyboard                          struct{}
-	activeText                        *messageRow
-	actions                           selectionBar
-	forwarding                        forwardPicker
-	selectionNotice                   string
-	images                            *imageOps
-	revision                          uint64
-	dates                             []string
-	dayStart                          []bool
-	joins                             []bubbleJoin
-	nextDay                           []int
-	avatar                            avatarLayout
-	kind                              model.ChatKind
-	linkModal                         modal
-	source                            model.ConversationStore
-	media                             *chatmedia.Manager
-	animate                           bool
-	chat                              int64
-	list                              scroll.List
-	messages                          []model.Message
-	rows                              map[model.MessageID]*messageRow
+	releaseMemory, keepMemory func()
+	emojiPacks                emojiPacksDialog
+	messageMenu               messageMenu
+	composer                  *messageComposer
+	header                    widget.Clickable
+	appearance                *chatThemeController
+	files                     *attachmentFiles
+	trace                     *diagnostics.Trace
+	selection                 messageSelection
+	keyboard                  struct{}
+	activeText                *messageRow
+	actions                   selectionBar
+	forwarding                forwardPicker
+	selectionNotice           string
+	images                    *imageOps
+	revision                  uint64
+	dates                     []string
+	dayStart                  []bool
+	joins                     []bubbleJoin
+	nextDay                   []int
+	avatar                    avatarLayout
+	kind                      model.ChatKind
+	linkModal                 modal
+	source                    model.ConversationStore
+	media                     *chatmedia.Manager
+	animate                   bool
+	chat                      int64
+	list                      scroll.List
+	messages                  []model.Message
+	rows                      map[model.MessageID]*messageRow
+	// textRunes are the rune counts of the messages' texts, which the
+	// estimates of unmeasured heights need on every change of width.
+	textRunes                         map[model.MessageID]textRunes
 	env                               model.RenderEnvironment
 	heights                           *model.HeightIndex
 	measures                          map[model.MessageID]model.MessageLayout
@@ -664,22 +668,36 @@ func (p *chatPage) rebuild(messages []model.Message, env model.RenderEnvironment
 
 	hs := make([]int, len(messages))
 	alive := map[model.MessageID]bool{}
+	if p.textRunes == nil {
+		p.textRunes = map[model.MessageID]textRunes{}
+	}
 	for i, m := range messages {
 		alive[m.Key.MessageID] = true
-		hs[i] = max(56, int(float32(60+len([]rune(m.Text))/55*20)*float32(env.ScaleMilli)/1000))
-		if m.Media != nil {
-			hs[i] += 240
-		}
 		if l, ok := p.measures[m.Key.MessageID]; ok && l.ContentRevision == m.ContentRevision {
 			hs[i] = l.HeightPx
 			if p.trace != nil {
 				p.trace.History.LayoutHits++
 			}
+			continue
+		}
+		runes, ok := p.textRunes[m.Key.MessageID]
+		if !ok || runes.revision != m.ContentRevision {
+			runes = textRunes{m.ContentRevision, utf8.RuneCountInString(m.Text)}
+			p.textRunes[m.Key.MessageID] = runes
+		}
+		hs[i] = max(56, int(float32(60+runes.n/55*20)*float32(env.ScaleMilli)/1000))
+		if m.Media != nil {
+			hs[i] += 240
 		}
 	}
 	for id := range p.rows {
 		if !alive[id] {
 			delete(p.rows, id)
+		}
+	}
+	for id := range p.textRunes {
+		if !alive[id] {
+			delete(p.textRunes, id)
 		}
 	}
 	p.pruneSelection(alive)
@@ -689,6 +707,12 @@ func (p *chatPage) rebuild(messages []model.Message, env model.RenderEnvironment
 		p.restore(anchor, off)
 	}
 	p.list.Position.BeforeEnd = !end
+}
+
+// textRunes is how many runes a message's text has, at a revision.
+type textRunes struct {
+	revision uint64
+	n        int
 }
 
 func (p *chatPage) richText(gtx layout.Context, r *messageRow, l localization.Catalog, animate bool) layout.Dimensions {

@@ -168,3 +168,19 @@ func BenchmarkHistoryLongPosts(b *testing.B) {
 		})
 	}
 }
+
+// Unmeasured heights are estimated from the text; the count kept for the
+// estimate follows an edit.
+func TestEstimateFollowsEdits(t *testing.T) {
+	p := newChatPage(benchmarkHistory{}, func() {})
+	defer p.Close()
+	env := model.RenderEnvironment{ScaleMilli: 1000}
+	m := model.Message{Key: model.MessageKey{ChatID: 1, MessageID: 1}, Text: "short", ContentRevision: 1}
+	p.rebuild([]model.Message{m}, env)
+	short := p.heights.Prefix(1)
+	m.Text, m.ContentRevision = strings.Repeat("long text ", 100), 2
+	p.rebuild([]model.Message{m}, env)
+	if long := p.heights.Prefix(1); long <= short {
+		t.Fatalf("estimate %d after the edit, %d before", long, short)
+	}
+}

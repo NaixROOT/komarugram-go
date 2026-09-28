@@ -79,3 +79,31 @@ func TestWrappedSpansCoverEveryRuneOnce(t *testing.T) {
 		}
 	}
 }
+
+// A line is shaped from the start of its span only; it must wrap as if the
+// whole span were shaped, whatever glyphs and breaks the text has.
+func TestLinePrefixWrapsAsWholeSpan(t *testing.T) {
+	shaper := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
+	texts := []string{
+		strings.Repeat("Длинный пост канала с обычным текстом, который переносится. ", 30),
+		strings.Repeat("iiii llll ", 200),
+		strings.Repeat("W", 900) + " tail",
+		strings.Repeat("short\n", 50) + strings.Repeat("x ", 400),
+		strings.Repeat("ааааааааааааааааааааааааааааааааааааааа ", 40),
+		// Combining marks take no width: a line holds more runes than
+		// the estimate, and is shaped again from the whole span.
+		strings.Repeat("e\u0301\u0301\u0301\u0301 ", 300),
+	}
+	for _, content := range texts {
+		for _, width := range []int{37, 120, 333, 800} {
+			spans := []SpanStyle{{Size: 14, Content: "lead "}, {Size: 14, Content: content}, {Size: 14, Font: font.Font{Weight: font.Bold}, Content: " end"}}
+			got, gotSize := layoutFragments(t, shaper, nil, width, spans...)
+			shapeWholeSpans = true
+			want, wantSize := layoutFragments(t, shaper, nil, width, spans...)
+			shapeWholeSpans = false
+			if gotSize != wantSize || !reflect.DeepEqual(got, want) {
+				t.Fatalf("%.20q at %d: %d fragments %v, want %d %v", content, width, len(got), gotSize, len(want), wantSize)
+			}
+		}
+	}
+}
