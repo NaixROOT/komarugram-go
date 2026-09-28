@@ -12,6 +12,7 @@ import (
 	"gio-mw/token"
 	"gio-mw/wdk"
 
+	"gioui.org/gesture"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -154,6 +155,15 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 	if m.ReplyToMessageID != 0 && r.reply.Clicked(gtx) {
 		p.jumpTo(m.ReplyToMessageID)
 	}
+	for {
+		e, ok := r.quick.Update(gtx.Source)
+		if !ok {
+			break
+		}
+		if e.Kind == gesture.KindClick && e.NumClicks == 2 {
+			p.quickReact(m)
+		}
+	}
 	if m.Service != nil && m.Service.Kind == model.ServiceHidden && !date {
 		// Telegram Desktop shows nothing for it, as a group's migration.
 		r.bodySize = image.Point{}
@@ -237,6 +247,11 @@ func (p *chatPage) bubble(gtx layout.Context, r *messageRow, m model.Message, jo
 			if p.appearance != nil {
 				p.appearance.Bubble(gtx, m.Outgoing, animate, shape)
 			}
+			// A double click on the bubble, where nothing over it takes
+			// clicks, reacts to it.
+			area := shape.rrect(size).Push(gtx.Ops)
+			r.quick.Add(gtx.Ops)
+			area.Pop()
 			return layout.Dimensions{Size: size}
 		}),
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {

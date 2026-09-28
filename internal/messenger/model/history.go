@@ -129,6 +129,8 @@ type Message struct {
 	CommentsOpen bool       `json:",omitempty"`
 	Commenters   []int64    `json:",omitempty"`
 	Reactions    []Reaction `json:",omitempty"`
+	// ReactionsListed is set when the account may see who reacted.
+	ReactionsListed bool `json:",omitempty"`
 	// ReplyToTopID is the root of the thread a reply is in, when it
 	// replies to another reply there.
 	ReplyToTopID MessageID `json:",omitempty"`

@@ -86,6 +86,7 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 		}
 		if reactions, ok := m.GetReactions(); ok {
 			out.Reactions = convertReactions(reactions)
+			out.ReactionsListed = reactions.CanSeeList && len(out.Reactions) > 0
 		}
 		for _, e := range m.Entities {
 			entity := model.Entity{Offset: e.GetOffset(), Length: e.GetLength()}

@@ -155,7 +155,9 @@ The history is drawn as materialgram draws it:
   at the side.
 - **Reactions** (`reactions.go`): chips under a message toggle a reaction
   (`model.Reactor`); `reactionStrip` is the row at the top of the message
-  menu that expands into all the chat's reactions.
+  menu that expands into all the chat's reactions. A double click on a
+  bubble, off its text, puts the default reaction (`model.QuickReactor`);
+  `reactedDialog` (`reacted.go`) lists who reacted, a tab for each reaction.
 - **Comments** (`comments.go`): `commentsBar` ends a channel post's bubble,
   clipped to its shape; the comments open in a second `chatPage` under a
   `chatHead` — `layoutChatPageHead` with a back button in place of the
@@ -197,7 +199,7 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`,
-  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
+  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations.
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the

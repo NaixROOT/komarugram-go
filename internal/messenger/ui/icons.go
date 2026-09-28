@@ -49,6 +49,7 @@ var (
 	iconForward      = wdk.RequireIconWidget(icons.ContentForward)
 	iconDelete       = wdk.RequireIconWidget(icons.ActionDelete)
 	iconSelect       = wdk.RequireIconWidget(icons.ActionCheckCircle)
+	iconReacted      = wdk.RequireIconWidget(icons.ActionFavoriteBorder)
 	iconMore         = wdk.RequireIconWidget(icons.NavigationMoreVert)
 	iconDownload     = wdk.RequireIconWidget(icons.FileFileDownload)
 )

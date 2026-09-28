@@ -42,6 +42,7 @@ const (
 	actionSelect
 	actionClearSelection
 	actionEmojiPacks
+	actionReacted
 	menuActions
 )
 
@@ -60,8 +61,10 @@ type messageMenu struct {
 	shown  []menuAction
 	items  [menuActions]surface
 	packs  emojiPackLookup
-	// reactions is the strip at the top, when the chat allows reactions.
+	// reactions is the strip at the top, when the chat allows reactions;
+	// reactedOf, the reactions of the message, which its item counts.
 	reactions reactionStrip
+	reactedOf []model.Reaction
 	// target takes right clicks on the history; dismiss, the clicks
 	// around the open menu; panel, those on it. Their sizes keep their
 	// addresses, which tag input, apart.
@@ -217,6 +220,9 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 	if p.messageMenu.packs.id == m.Key.MessageID && len(p.messageMenu.packs.found.refs) > 0 {
 		out = append(out, actionEmojiPacks)
 	}
+	if _, ok := p.source.(model.ReactionLister); ok && m.ReactionsListed {
+		out = append(out, actionReacted)
+	}
 	return out
 }
 
@@ -288,6 +294,8 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		p.selectionNotice = ""
 	case actionClearSelection:
 		p.clearSelection()
+	case actionReacted:
+		p.reacted.open(p, m)
 	case actionEmojiPacks:
 		refs := p.messageMenu.packs.found.refs
 		if len(refs) == 1 {
@@ -324,6 +332,12 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.select")
 	case actionClearSelection:
 		return l.T("menu.clear_selection")
+	case actionReacted:
+		total := 0
+		for _, r := range p.messageMenu.reactedOf {
+			total += r.Count
+		}
+		return l.Count("menu.reacted", total, nil)
 	case actionEmojiPacks:
 		found := p.messageMenu.packs.found
 		text := l.Count("menu.emoji_packs", len(found.refs), nil)
@@ -350,6 +364,8 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconDelete
 	case actionSelect, actionClearSelection:
 		return iconSelect
+	case actionReacted:
+		return iconReacted
 	}
 	return iconEmoji
 }
@@ -393,6 +409,7 @@ func (p *chatPage) menuLayout(gtx layout.Context, l localization.Catalog) {
 		} else {
 			m.shown = p.menuActions(msg)
 			m.reactions.shown = p.menuReactions(msg)
+			m.reactedOf = msg.Reactions
 			m.rect, m.corner = menuRect(gtx, m.at, size, m.shown, m.reactions.height(gtx))
 		}
 	}

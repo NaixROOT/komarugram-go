@@ -17,7 +17,8 @@ func init() {
 		"composer.reply_to": "lng_preview_reply_to", "composer.reply_remove": "lng_reply_remove",
 		"emoji_packs.title": "lng_custom_emoji_used_sets",
 		"pinned.title":      "lng_pinned_message", "pinned.previous": "lng_pinned_previous",
-		"pinned.hide": "lng_pinned_hide_all",
+		"pinned.hide":  "lng_pinned_hide_all",
+		"menu.reacted": "lng_context_seen_reacted", "reacted.title": "lng_manage_peer_reactions",
 	} {
 		TelegramKeys[key] = telegram
 	}
@@ -46,6 +47,12 @@ func init() {
 		"pinned.title":           "Закреплённое сообщение",
 		"pinned.previous":        "Предыдущее сообщение",
 		"pinned.hide":            "Не показывать закреплённые",
+		"menu.reacted#one":       "{count} реакция",
+		"menu.reacted#few":       "{count} реакции",
+		"menu.reacted#many":      "{count} реакций",
+		"reacted.title":          "Реакции",
+		"reacted.all":            "Все",
+		"reacted.failed":         "Не удалось загрузить список",
 	} {
 		russian[key] = value
 	}
@@ -73,6 +80,11 @@ func init() {
 		"pinned.title":           "Pinned message",
 		"pinned.previous":        "Previous message",
 		"pinned.hide":            "Don't show pinned messages",
+		"menu.reacted#one":       "{count} Reacted",
+		"menu.reacted#other":     "{count} Reacted",
+		"reacted.title":          "Reactions",
+		"reacted.all":            "All",
+		"reacted.failed":         "Could not load the list",
 	} {
 		english[key] = value
 	}

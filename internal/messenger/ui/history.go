@@ -23,6 +23,7 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/font"
+	"gioui.org/gesture"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -46,7 +47,9 @@ type messageRow struct {
 	// comments is the bar that opens a channel post's comments.
 	comments surface
 	// reply is the quote of the message replied to, which shows it.
-	reply    surface
+	reply surface
+	// quick takes double clicks on the bubble, which react to it.
+	quick    gesture.Click
 	media    widget.Clickable
 	sticker  surface
 	revealed bool
@@ -56,7 +59,9 @@ type messageRow struct {
 }
 type chatPage struct {
 	// pinned is the bar of the chat's pinned messages.
-	pinned   pinnedBar
+	pinned pinnedBar
+	// reacted lists who reacted to a message.
+	reacted  reactedDialog
 	deletion messageDeletion
 	stickers stickerSetDialog
 	// dialogStickers are the media of the sticker sets shown in the dialog
@@ -305,6 +310,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.forgetDialogStickers()
 		p.stickers.stop()
 		p.emojiPacks.stop()
+		p.reacted.stop()
 		p.closeMenu()
 		p.save(true)
 		p.clearSelection()
@@ -535,6 +541,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	p.forwardDialog(gtx, l)
 	p.emojiPacks.layout(gtx, p, l)
 	p.stickers.layout(gtx, p, l)
+	p.reacted.layout(gtx, p, l)
 }
 
 // hasMessage reports whether the history shows the message.

@@ -186,3 +186,17 @@ func (s *reactionStrip) layoutExpand(gtx layout.Context, at image.Point, cell in
 		})
 	})
 }
+
+// quickReact puts the account's default reaction on m, or takes it back,
+// as a double click does in Telegram Desktop.
+func (p *chatPage) quickReact(m model.Message) {
+	quick, ok := p.source.(model.QuickReactor)
+	reactor, canToggle := p.source.(model.Reactor)
+	if !ok || !canToggle || !p.canReact(m) {
+		return
+	}
+	if r, ok := quick.QuickReaction(p.chat); ok {
+		reactor.ToggleReaction(m, r, p.reportMedia)
+		p.invalidate()
+	}
+}
