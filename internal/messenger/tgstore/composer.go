@@ -387,6 +387,8 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 	if err != nil {
 		return fmt.Errorf("send: %w", err)
 	}
+	// Once the message is in the history, the chat may be read up to it.
+	defer s.readOnInteract(chat)
 	if short, ok := res.(*tg.UpdateShortSentMessage); ok {
 		var destination tg.PeerClass
 		switch peer.Kind {

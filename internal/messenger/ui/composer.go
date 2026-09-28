@@ -384,6 +384,9 @@ drained:
 				d.text = next
 				d.pending = nil
 				d.err = nil
+				if g, ok := c.source.(model.GhostStore); ok && strings.TrimSpace(next) != "" {
+					g.Typing(c.chat)
+				}
 			}
 		}
 	}

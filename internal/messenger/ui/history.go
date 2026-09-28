@@ -527,6 +527,12 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.source.LoadNewer(p.chat)
 	}
 	p.save(false)
+	if g, ok := p.source.(model.GhostStore); ok && p.threadRoot == 0 {
+		// What the history shows is read, if Ghost allows telling that.
+		if id := p.bottomMessage(); id > 0 {
+			g.MarkRead(c.ID, id, false)
+		}
+	}
 	if len(p.dirty) > 0 {
 		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(500 * time.Millisecond)})
 		if p.trace != nil {

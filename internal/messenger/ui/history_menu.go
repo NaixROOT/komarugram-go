@@ -43,6 +43,7 @@ const (
 	actionClearSelection
 	actionEmojiPacks
 	actionReacted
+	actionRead
 	menuActions
 )
 
@@ -223,6 +224,11 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 	if _, ok := p.source.(model.ReactionLister); ok && m.ReactionsListed {
 		out = append(out, actionReacted)
 	}
+	// Without read receipts, a message is read when asked, as AyuGram's
+	// Read Message does.
+	if g, ok := p.source.(model.GhostStore); ok && !g.Ghost().SendRead && !m.Outgoing && p.kind != model.KindSaved && p.threadRoot == 0 && m.Key.MessageID > 0 {
+		out = append(out, actionRead)
+	}
 	return out
 }
 
@@ -296,6 +302,14 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		p.clearSelection()
 	case actionReacted:
 		p.reacted.open(p, m)
+	case actionRead:
+		if g, ok := p.source.(model.GhostStore); ok {
+			last := m.Key.MessageID
+			for _, part := range parts {
+				last = max(last, part.Key.MessageID)
+			}
+			g.MarkRead(p.chat, last, true)
+		}
 	case actionEmojiPacks:
 		refs := p.messageMenu.packs.found.refs
 		if len(refs) == 1 {
@@ -332,6 +346,8 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.select")
 	case actionClearSelection:
 		return l.T("menu.clear_selection")
+	case actionRead:
+		return l.T("menu.read")
 	case actionReacted:
 		total := 0
 		for _, r := range p.messageMenu.reactedOf {
@@ -366,6 +382,8 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconSelect
 	case actionReacted:
 		return iconReacted
+	case actionRead:
+		return iconRead
 	}
 	return iconEmoji
 }

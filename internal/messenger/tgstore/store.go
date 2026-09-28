@@ -52,6 +52,7 @@ type Store struct {
 	chats         []model.Chat
 	reactions     reactionState
 	recent        recentChats
+	ghost         ghostState
 }
 
 // New returns an empty store that calls changed whenever Load has read more.

@@ -309,6 +309,7 @@ func (s *Store) ToggleReaction(msg model.Message, reaction model.Reaction, repor
 		c.mu.Unlock()
 		err := s.sendReaction(ctx, api, peer, id, model.ChosenReactions(after))
 		if err == nil {
+			s.readOnInteract(chat)
 			return
 		}
 		// Undo, unless something changed the reactions since.

@@ -43,8 +43,10 @@ type App struct {
 	store  model.Store
 
 	preferences *preferences.Store
-	lightTheme  *token.Theme
-	darkTheme   *token.Theme
+	// focused is set while the window has the focus.
+	focused    bool
+	lightTheme *token.Theme
+	darkTheme  *token.Theme
 
 	section section
 	// beforeSearch is the section search was opened from; opening search
@@ -194,6 +196,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.settings.premium, _ = store.(model.PremiumSource)
 	a.settings.setPrivate = func(on bool) {
 		if err := services.Preferences.SetVisualPrivacy(on); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.ghost = func() preferences.Ghost { return a.preferences.Global().Ghost }
+	a.settings.setGhost = func(g preferences.Ghost) {
+		if err := services.Preferences.SetGhost(g); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
@@ -620,6 +628,7 @@ func (a *App) Layout(gtx layout.Context) {
 		a.signIn.Layout(gtx, a.catalog(), a.private())
 		return
 	}
+	a.tellGhost()
 	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked()) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)
@@ -805,6 +814,25 @@ func (a *App) SetSuspended(hidden bool) {
 		a.avatars.media.Release()
 	}
 	a.images.Release()
+}
+
+// SetFocused is called on the UI goroutine when the window gains or loses
+// the focus: the account shows online while it has it, if Ghost allows.
+func (a *App) SetFocused(focused bool) {
+	a.focused = focused
+	a.tellGhost()
+}
+
+// tellGhost gives the store what Ghost allows, and whether the window is
+// active.
+func (a *App) tellGhost() {
+	g, ok := a.store.(model.GhostStore)
+	if !ok {
+		return
+	}
+	p := a.preferences.Global().Ghost
+	g.SetGhost(model.Ghost{SendRead: p.SendRead, SendOnline: p.SendOnline, SendTyping: p.SendTyping, ReadOnInteract: p.ReadOnInteract})
+	g.SetOnline(a.focused)
 }
 
 // SetMinimized is called for an explicit minimize or a suspended window.

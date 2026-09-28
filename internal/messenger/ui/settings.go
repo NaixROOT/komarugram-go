@@ -126,6 +126,11 @@ type settingsPage struct {
 	private    func() bool
 	setPrivate func(bool)
 	visual     *toggle.Toggle[string]
+	// ghost and setGhost read and change what the accounts tell others;
+	// without them the section is hidden.
+	ghost     func() preferences.Ghost
+	setGhost  func(preferences.Ghost)
+	ghostOpts *toggle.Toggle[string]
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -186,6 +191,11 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	p.visual = toggle.NewToggle([]string{"visual"}, nil, func(values []string) {
 		if p.setPrivate != nil {
 			p.setPrivate(len(values) == 1)
+		}
+	})
+	p.ghostOpts = toggle.NewToggle(ghostOptions, nil, func(values []string) {
+		if p.setGhost != nil {
+			p.setGhost(ghostFromOptions(values))
 		}
 	})
 	p.composer = radio.NewRadios([]preferences.ComposerStyle{preferences.ComposerClassic, preferences.ComposerFloating}, preferences.ComposerFloating, func(style preferences.ComposerStyle) {
@@ -347,6 +357,14 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 						return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.security.WindowLockLayout(gtx, l) }, defaultCardPadding)
 					}),
 					vspace(12),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.ghost == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.layoutGhost(gtx, l) }, defaultCardPadding)
+						})
+					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return card(gtx, p.privacy.Layout, defaultCardPadding) }),
 				)
 			}

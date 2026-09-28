@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"gio-mw/exp"
 	"image"
 	"image/color"
 	"image/png"
@@ -38,8 +39,8 @@ func (staticAccounts) LogOut(string)              {}
 func (staticAccounts) Subscribe(func()) func()    { return func() {} }
 
 // TestRenderSettingsAccounts draws the main settings page with a list of
-// saved accounts and saves a screenshot, for looking at it. SETTINGS_SECTION=appearance
-// or integrations draws that section instead:
+// saved accounts and saves a screenshot, for looking at it. SETTINGS_SECTION=appearance,
+// privacy or integrations draws that section instead:
 //
 //	SETTINGS_PNG=/tmp/settings.png go test ./internal/messenger/ui -run RenderSettingsAccounts
 func TestRenderSettingsAccounts(t *testing.T) {
@@ -68,6 +69,13 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance
 		size.Y = 1000
+	}
+	if os.Getenv("SETTINGS_SECTION") == "privacy" {
+		p.section = settingsPrivacy
+		size.Y = 1600
+		ghost := preferences.Ghost{ReadOnInteract: true}
+		p.ghost = func() preferences.Ghost { return ghost }
+		p.setGhost = func(g preferences.Ghost) { ghost = g }
 	}
 	if os.Getenv("SETTINGS_SECTION") == "integrations" {
 		p.section = settingsIntegrations
@@ -99,6 +107,8 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	gtx := layout.Context{Ops: ops, Now: time.Now(), Constraints: layout.Exact(size), Metric: unit.Metric{PxPerDp: 1.25, PxPerSp: 1.25}, Values: map[string]any{}}
 	wdk.InitMaterialThemeInContext(gtx, defaults.NewTheme(gtx, schemes.SchemeBaselineLight()))
 	images.BeginFrame()
+	// The root surface, which sections drawn by exp widgets read.
+	exp.Background(gtx)
 	p.Update(gtx, themeAuto, "ru")
 	p.Layout(gtx, themeAuto, appearance.Light, false, localization.For("ru"))
 	images.EndFrame()

@@ -449,6 +449,9 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 			if e.Config.Focused && !focused && activated != nil {
 				activated()
 			}
+			if observer, ok := content.(interface{ SetFocused(bool) }); ok && e.Config.Focused != focused {
+				observer.SetFocused(e.Config.Focused)
+			}
 			focused = e.Config.Focused
 		case app.FrameEvent:
 			if w.suspended.Load() {

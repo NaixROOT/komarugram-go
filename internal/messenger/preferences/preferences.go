@@ -74,6 +74,18 @@ type Global struct {
 	FFmpegPath  string `json:"ffmpeg_path,omitempty"`
 	// StickerPlayer is empty for automatic selection, or ffmpeg/wasm.
 	StickerPlayer string `json:"sticker_player,omitempty"`
+	// Ghost is what the accounts tell others of themselves, as AyuGram's
+	// Ghost Mode, the same for all of them.
+	Ghost Ghost `json:"ghost"`
+}
+
+// Ghost is what the accounts tell others: see model.Ghost. Nothing is told
+// by default; a chat is read on sending to it or reacting in it.
+type Ghost struct {
+	SendRead       bool `json:"send_read,omitempty"`
+	SendOnline     bool `json:"send_online,omitempty"`
+	SendTyping     bool `json:"send_typing,omitempty"`
+	ReadOnInteract bool `json:"read_on_interact"`
 }
 
 // PlayerPaths are the players the user pointed at, by kind.
@@ -107,6 +119,7 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
+		Ghost:          Ghost{ReadOnInteract: true},
 	}
 }
 
@@ -230,6 +243,11 @@ func (s *Store) SetWindowLock(minutes int, minimize, close bool) error {
 		g.LockOnMinimize = minimize
 		g.LockOnClose = close
 	})
+}
+
+// SetGhost changes what the accounts tell others of themselves.
+func (s *Store) SetGhost(g Ghost) error {
+	return s.change(func(global *Global) { global.Ghost = g })
 }
 
 // SetComposer changes the message composer style for all windows.
