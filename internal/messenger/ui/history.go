@@ -155,11 +155,12 @@ type chatPage struct {
 	chats func() []model.Chat
 	// title is the open chat's, for the initials of its avatar.
 	title string
-	// snapshotDue takes a snapshot of the selection at the end of the
-	// frame; snapshotting is set while its rows are laid out, and
-	// snapshots brings back where it was saved.
-	snapshotDue, snapshotting bool
-	snapshots                 chan snapshotResult
+	// snapshotting is set while the rows of a snapshot are laid out; shot
+	// is the dialog that makes one; historyWidth, how wide the history was
+	// in the last frame, which a snapshot is too.
+	snapshotting bool
+	shot         shotDialog
+	historyWidth int
 	// player and setPlayer read and save the external player the user
 	// chose; playerChoice asks for it.
 	player       func() player.Kind
@@ -331,6 +332,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.emojiPacks.stop()
 		p.reacted.stop()
 		p.edits.stop()
+		p.shot.stop()
 		p.closeChatSearch()
 		p.chatMenu.open = false
 		p.closeMenu()
@@ -352,7 +354,6 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	p.kind, p.title = c.Kind, c.Title
 	p.menuUpdate(gtx, l)
 	p.updateForward(l)
-	p.updateSnapshot(l)
 	p.source.OpenChat(c.ID)
 	if w, ok := p.source.(model.ChatWatcher); ok {
 		w.WatchChat(p, c.ID)
@@ -396,6 +397,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.appearance.Update(c.ID, token.IsDarkColorSet(sc.Surface))
 		p.appearance.Background(gtx)
 	}
+	p.historyWidth = size.X
 	theme := uint32(sc.Surface.Color.AsNRGBA().R)<<16 | uint32(sc.Surface.Color.AsNRGBA().G)<<8 | uint32(sc.Surface.Color.AsNRGBA().B)
 	env := model.RenderEnvironment{WidthPx: size.X, ScaleMilli: int(gtx.Metric.PxPerDp * 1000), TextScaleMilli: int(gtx.Metric.PxPerSp * 1000), Locale: string(l.Language()), FontRevision: 1, ThemeRevision: theme, RendererRevision: 10}
 	if p.trace != nil {
@@ -556,10 +558,6 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 			p.trace.Recorder.Count(p.trace.Window, "history.invalidate.pending-measurements")
 		}
 	}
-	if p.snapshotDue {
-		p.snapshotDue = false
-		p.takeSnapshot(gtx, l)
-	}
 	return layout.Dimensions{Size: size}
 }
 
@@ -576,6 +574,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	p.stickers.layout(gtx, p, l)
 	p.reacted.layout(gtx, p, l)
 	p.edits.layout(gtx, p, l)
+	p.shot.layout(gtx, p, l)
 }
 
 // hasMessage reports whether the history shows the message.
