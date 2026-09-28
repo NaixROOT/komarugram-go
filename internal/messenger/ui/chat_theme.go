@@ -64,6 +64,8 @@ type chatThemeController struct {
 	path                                           *textField
 	loading                                        bool
 	problem                                        error
+	// told is the problem handed to be told last: see newProblem.
+	told error
 }
 
 func newChatThemeController(source model.ConversationStore, images *imageOps, invalidate func()) *chatThemeController {
@@ -343,7 +345,7 @@ func (t *chatThemeController) LayoutChoices(gtx layout.Context, l localization.C
 			switch i {
 			case 0:
 				if t.problem != nil {
-					return textButton(gtx, &t.retry, l.T("history.retry")+" · "+mediaErrorText(t.problem))
+					return textButton(gtx, &t.retry, l.T("history.retry"))
 				}
 
 				return label(gtx, t.appearance.Theme.Title, token.TypestyleTitleMedium, scheme(gtx).Surface.OnColor, 2)
@@ -404,4 +406,14 @@ func (t *chatThemeController) DiscardPreview() {
 		t.selected = nil
 		t.load()
 	}
+}
+
+// newProblem returns the problem that came since it was last asked, for
+// the page that shows the themes to tell in its toast; nil if none.
+func (t *chatThemeController) newProblem() error {
+	if t.problem == t.told {
+		return nil
+	}
+	t.told = t.problem
+	return t.problem
 }

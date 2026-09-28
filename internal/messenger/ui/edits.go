@@ -27,6 +27,7 @@ type editsDialog struct {
 	results  chan editsResult
 	cancel   context.CancelFunc
 	close    surface
+	retry    surface
 	list     scroll.List
 	loader   loadingIndicator
 }
@@ -45,10 +46,16 @@ func (d *editsDialog) open(p *chatPage, m model.Message) {
 	}
 	d.msg = m
 	d.modal.Open()
+	d.load(p, store)
+}
+
+// load reads the versions of the message in the background.
+func (d *editsDialog) load(p *chatPage, store model.KeepStore) {
+	d.loaded, d.failed = false, false
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	d.cancel = cancel
 	d.results = make(chan editsResult, 1)
-	results := d.results
+	results, m := d.results, d.msg
 	go func() {
 		defer cancel()
 		versions, err := store.MessageEdits(ctx, m)
@@ -71,7 +78,13 @@ func (d *editsDialog) layout(gtx layout.Context, p *chatPage, l localization.Cat
 	select {
 	case r := <-d.results:
 		d.loaded, d.failed, d.versions = true, r.err != nil, r.versions
+		if r.err != nil {
+			d.modal.Toast(l.T("edits.failed"))
+		}
 	default:
+	}
+	if store, ok := p.source.(model.KeepStore); ok && d.failed && d.retry.Clicked(gtx) {
+		d.load(p, store)
 	}
 	if !d.modal.closing && d.close.Clicked(gtx) {
 		d.modal.Close()
@@ -92,7 +105,7 @@ func (d *editsDialog) layout(gtx layout.Context, p *chatPage, l localization.Cat
 					case !d.loaded:
 						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return d.loader.sized(gtx, l, 32) })
 					case d.failed:
-						return label(gtx, l.T("edits.failed"), token.TypestyleBodyMedium, sc.Error.Color, 2)
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &d.retry, l.T("history.retry")) })
 					case len(d.versions) == 0:
 						return label(gtx, l.T("edits.none"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
 					}

@@ -35,6 +35,9 @@ import (
 )
 
 type messageRow struct {
+	// mediaTold is the failure to load the row's media told in the toast
+	// last, so that a failure is told once, not on every frame.
+	mediaTold   error
 	avatarPoint image.Point
 	bodySize    image.Point
 	bodyTop     int
@@ -104,23 +107,25 @@ type chatPage struct {
 	activeText                *messageRow
 	actions                   selectionBar
 	forwarding                forwardPicker
-	selectionNotice           string
-	images                    *imageOps
-	revision                  uint64
-	dates                     []string
-	dayStart                  []bool
-	joins                     []bubbleJoin
-	nextDay                   []int
-	avatar                    avatarLayout
-	kind                      model.ChatKind
-	linkModal                 modal
-	source                    model.ConversationStore
-	media                     *chatmedia.Manager
-	animate                   bool
-	chat                      int64
-	list                      scroll.List
-	messages                  []model.Message
-	rows                      map[model.MessageID]*messageRow
+	// toast tells, over the end of the history, what was done in the chat
+	// and what failed there.
+	toast     toast
+	images    *imageOps
+	revision  uint64
+	dates     []string
+	dayStart  []bool
+	joins     []bubbleJoin
+	nextDay   []int
+	avatar    avatarLayout
+	kind      model.ChatKind
+	linkModal modal
+	source    model.ConversationStore
+	media     *chatmedia.Manager
+	animate   bool
+	chat      int64
+	list      scroll.List
+	messages  []model.Message
+	rows      map[model.MessageID]*messageRow
 	// textRunes are the rune counts of the messages' texts, which the
 	// estimates of unmeasured heights need on every change of width.
 	textRunes                         map[model.MessageID]textRunes
@@ -133,9 +138,11 @@ type chatPage struct {
 	saved                             time.Time
 	older, newer, retry, open, cancel surface
 	link                              string
-	errorMu                           sync.Mutex
-	mediaError                        error
-	invalidate                        func()
+	// mediaError is a failure of a background task on the chat's media,
+	// reported from its goroutine and told in the toast.
+	errorMu    sync.Mutex
+	mediaError error
+	invalidate func()
 	// online counts the open group's members online.
 	online groupOnline
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
@@ -311,7 +318,7 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 
 func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
 	p.animate = animate
-	p.updateDelete(c.ID)
+	p.updateDelete(c.ID, l)
 	p.trace = diagnostics.From(gtx.Values)
 	if p.trace != nil {
 		p.trace.History = diagnostics.History{Window: p.trace.Window, Chat: c.ID}
@@ -544,9 +551,18 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		call.Add(gtx.Ops)
 		backdrop = &call
 	}
+	end := size.Y
 	if p.composer != nil {
 		p.composer.Layout(gtx, c.ID, l, p, animate, backdrop)
+		end = p.composer.top
 	}
+	p.errorMu.Lock()
+	if err := p.mediaError; err != nil {
+		p.mediaError = nil
+		p.toast.Show(mediaErrorText(err))
+	}
+	p.errorMu.Unlock()
+	p.toast.Layout(gtx, image.Rect(0, top, size.X, end))
 	p.menuLayout(gtx, l)
 	if p.restored && p.list.Position.First < 3 && history.HasOlder && !history.LoadingOlder && history.Err == nil {
 		p.source.LoadOlder(p.chat)

@@ -36,6 +36,7 @@ type reactedDialog struct {
 	active  int
 	tabs    tabRow
 	close   surface
+	retry   surface
 	list    scroll.List
 	loader  loadingIndicator
 	// ctx ends the pages asked for when the dialog closes.
@@ -103,8 +104,9 @@ func (d *reactedDialog) fetch(p *chatPage) {
 	}()
 }
 
-// update takes the pages that came.
-func (d *reactedDialog) update() {
+// update takes the pages that came; a page that did not is told in the
+// dialog's toast.
+func (d *reactedDialog) update(loc localization.Catalog) {
 	for i := range d.lists {
 		l := &d.lists[i]
 		if l.results == nil {
@@ -115,6 +117,7 @@ func (d *reactedDialog) update() {
 			l.loading, l.results = false, nil
 			if r.err != nil {
 				l.failed = true
+				d.modal.Toast(loc.T("reacted.failed"))
 				continue
 			}
 			l.items = append(l.items, r.page.List...)
@@ -147,7 +150,7 @@ func (d *reactedDialog) layout(gtx layout.Context, p *chatPage, l localization.C
 	if !d.modal.Shown() {
 		return
 	}
-	d.update()
+	d.update(l)
 	if !d.modal.closing {
 		if d.close.Clicked(gtx) {
 			d.modal.Close()
@@ -201,13 +204,14 @@ func (d *reactedDialog) layout(gtx layout.Context, p *chatPage, l localization.C
 // layoutList draws who reacted, as the active tab has them, and asks for
 // more at its end.
 func (d *reactedDialog) layoutList(gtx layout.Context, p *chatPage, l localization.Catalog) layout.Dimensions {
-	sc := scheme(gtx)
 	list := &d.lists[d.active]
 	if len(list.items) == 0 {
 		if list.failed {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return label(gtx, l.T("reacted.failed"), token.TypestyleBodyMedium, sc.Error.Color, 2)
-			})
+			if d.retry.Clicked(gtx) {
+				list.failed = false
+				d.fetch(p)
+			}
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &d.retry, l.T("history.retry")) })
 		}
 		d.fetch(p)
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

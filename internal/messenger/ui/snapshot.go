@@ -58,7 +58,6 @@ type shotDialog struct {
 	image            *image.RGBA
 	encoded          []byte
 	err              error
-	status           string
 	save, copy       surface
 	close            surface
 	loader           loadingIndicator
@@ -122,6 +121,9 @@ func (d *shotDialog) layout(gtx layout.Context, p *chatPage, l localization.Cata
 	case r := <-d.results:
 		d.rendering, d.results = false, nil
 		d.image, d.err, d.encoded = r.image, r.err, nil
+		if r.err != nil {
+			d.modal.Toast(l.T("history.snapshot_failed") + ": " + mediaErrorText(r.err))
+		}
 	default:
 	}
 	if d.stale && !d.rendering {
@@ -133,17 +135,17 @@ func (d *shotDialog) layout(gtx layout.Context, p *chatPage, l localization.Cata
 		}
 		if d.save.Clicked(gtx) && d.image != nil {
 			if b, err := d.png(); err != nil {
-				d.status = l.T("history.snapshot_failed") + ": " + mediaErrorText(err)
+				d.modal.Toast(l.T("history.snapshot_failed") + ": " + mediaErrorText(err))
 			} else if path, err := saveSnapshot(b, fmt.Sprintf("komarugram-go-%s.png", time.Now().Format("2006-01-02-150405"))); err != nil {
-				d.status = l.T("history.snapshot_failed") + ": " + mediaErrorText(err)
+				d.modal.Toast(l.T("history.snapshot_failed") + ": " + mediaErrorText(err))
 			} else {
-				d.status = l.Format("history.snapshot_saved", map[string]string{"path": path})
+				d.modal.Toast(l.Format("history.snapshot_saved", map[string]string{"path": path}))
 			}
 		}
 		if d.copy.Clicked(gtx) && d.image != nil {
 			if b, err := d.png(); err == nil {
 				gtx.Execute(clipboard.WriteCmd{Type: "image/png", Data: io.NopCloser(bytes.NewReader(b))})
-				d.status = l.T("shot.copied")
+				d.modal.Toast(l.T("shot.copied"))
 			}
 		}
 		d.themes.Update(gtx)
@@ -189,9 +191,8 @@ func (d *shotDialog) layoutContent(gtx layout.Context, p *chatPage, l localizati
 					return widget.Image{Src: p.images.Op(d.image), Fit: widget.Contain, Position: layout.N}.Layout(gtx)
 				})
 			case d.err != nil:
-				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return label(gtx, l.T("history.snapshot_failed")+": "+mediaErrorText(d.err), token.TypestyleBodyMedium, sc.Error.Color, 3)
-				})
+				// The toast told why; the preview stays empty.
+				return layout.Dimensions{Size: size}
 			}
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return d.loader.sized(gtx, l, 32) })
 		}),
@@ -207,14 +208,6 @@ func (d *shotDialog) layoutContent(gtx layout.Context, p *chatPage, l localizati
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return d.switches.Layout(gtx, map[string]string{
 				"background": l.T("shot.background"), "date": l.T("shot.date"), "reactions": l.T("shot.reactions"), "spoilers": l.T("shot.spoilers"),
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if d.status == "" {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Top: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return label(gtx, d.status, token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 2)
 			})
 		}),
 		vspace(8),
@@ -251,6 +244,7 @@ func (d *shotDialog) render(gtx layout.Context, p *chatPage, l localization.Cata
 	ops, size, ok := p.buildSnapshot(sgtx, l, d.msgs, d.opts)
 	if !ok {
 		d.image, d.err = nil, fmt.Errorf("%s", l.T("history.snapshot_too_tall"))
+		d.modal.Toast(l.T("history.snapshot_too_tall"))
 		return
 	}
 	d.rendering = true

@@ -17,7 +17,6 @@ import (
 
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
-	"gioui.org/op"
 
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
@@ -96,7 +95,7 @@ func savePhoto(data []byte, m model.Message) (string, error) {
 	return path, os.WriteFile(path, data, 0o644)
 }
 
-// updateKept takes the results of saving and copying: the notice shows for
+// updateKept takes the results of saving and copying: the toast tells them for
 // a few seconds, and a copied picture goes on the clipboard.
 func (v *photoViewer) updateKept(gtx layout.Context) {
 	for {
@@ -105,13 +104,10 @@ func (v *photoViewer) updateKept(gtx layout.Context) {
 			if r.png != nil {
 				gtx.Execute(clipboard.WriteCmd{Type: "image/png", Data: io.NopCloser(bytes.NewReader(r.png))})
 			}
-			v.notice, v.noticeUntil = r.notice, gtx.Now.Add(4*time.Second)
+			v.toast.Show(r.notice)
 			continue
 		default:
 		}
 		break
-	}
-	if v.notice != "" && gtx.Now.Before(v.noticeUntil) {
-		gtx.Execute(op.InvalidateCmd{At: v.noticeUntil})
 	}
 }

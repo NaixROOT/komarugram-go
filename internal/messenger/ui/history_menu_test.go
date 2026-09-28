@@ -208,7 +208,7 @@ func TestMessageMenuShowsTelegramActions(t *testing.T) {
 	if _, text, ok := h.router.WriteClipboard(); !ok || string(text) != "https://t.me/c/1/4" {
 		t.Fatalf("copied link %q", text)
 	}
-	if h.page.selectionNotice == "" {
+	if h.page.toast.Text() == "" {
 		t.Fatal("private link copied without its notice")
 	}
 }

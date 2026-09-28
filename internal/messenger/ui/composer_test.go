@@ -260,11 +260,14 @@ func TestRenderComposer(t *testing.T) {
 			Items: []model.PickerItem{{ID: "preview/1", Emoji: "🐈"}, {ID: "preview/2", Emoji: "🐕"}, {ID: "preview/3", Emoji: "🐱"}}}}
 	case "gif":
 		h.p.composer.tab = model.PickerGIF
-	case "classic", "floating":
+	case "classic", "floating", "toast", "toast-classic":
 		h.p.composer.pickerOpen = false
-		classic := os.Getenv("COMPOSER_VIEW") == "classic"
+		classic := strings.HasSuffix(os.Getenv("COMPOSER_VIEW"), "classic")
 		h.p.classic = func() bool { return classic }
 		h.chat = 2
+		if strings.HasPrefix(os.Getenv("COMPOSER_VIEW"), "toast") {
+			h.p.toast.Show("Не удалось отправить сообщение: нет соединения с Telegram")
+		}
 	case "blur":
 		// The history scrolled so that messages pass behind the blurred capsule.
 		h.p.composer.pickerOpen = false

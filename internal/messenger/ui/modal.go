@@ -3,6 +3,8 @@
 package ui
 
 import (
+	"image"
+
 	"gio-mw/token"
 	"gio-mw/wdk"
 
@@ -43,6 +45,9 @@ type modal struct {
 	// back, if set, handles Escape first: it reports whether it went back
 	// within the dialog, which then stays open.
 	back func() bool
+	// toast tells the outcome of what was done in the dialog, at its
+	// bottom.
+	toast toast
 }
 
 // Open shows the dialog, animating in.
@@ -56,6 +61,10 @@ func (m *modal) Close() {
 		m.closing = true
 	}
 }
+
+// Toast shows text at the bottom of the dialog for a few seconds: an error,
+// or the outcome of an action, which the dialog does not keep as text.
+func (m *modal) Toast(text string) { m.toast.Show(text) }
 
 // Hide removes the dialog at once, as when what it is about goes away.
 func (m *modal) Hide() {
@@ -132,6 +141,7 @@ func (m *modal) Layout(gtx layout.Context, locked bool, content layout.Widget) b
 	area.Pop()
 	if visibility == 1 {
 		call.Add(gtx.Ops)
+		m.layoutToast(gtx, size, dims.Size)
 		return true
 	}
 	scale := modalEnterScale + (1-modalEnterScale)*visibility
@@ -139,7 +149,16 @@ func (m *modal) Layout(gtx layout.Context, locked bool, content layout.Widget) b
 	defer op.Affine(f32.AffineId().Scale(center, f32.Pt(scale, scale))).Push(gtx.Ops).Pop()
 	defer paint.PushOpacity(gtx.Ops, visibility).Pop()
 	call.Add(gtx.Ops)
+	m.layoutToast(gtx, size, dims.Size)
 	return true
+}
+
+// layoutToast draws the toast under the dialog, which lies in the middle
+// of area, so that it hides none of the dialog's buttons; over the
+// dialog's bottom when there is no room under it.
+func (m *modal) layoutToast(gtx layout.Context, area, dialog image.Point) {
+	below := (area.Y - dialog.Y) / 2
+	m.toast.LayoutBelow(gtx, image.Rectangle{Max: dialog}, image.Rect(0, dialog.Y, dialog.X, dialog.Y+below))
 }
 
 // animate returns how much the dialog shows, from 0 to 1.

@@ -19,7 +19,7 @@ func TestStickerSetAuthorCopiesID(t *testing.T) {
 	if _, data, ok := h.router.WriteClipboard(); !ok || string(data) != "123456789" {
 		t.Fatalf("author ID not copied: %q %t", data, ok)
 	}
-	if h.p.stickers.notice == "" {
+	if h.p.stickers.modal.toast.Text() == "" {
 		t.Fatal("no copy feedback")
 	}
 }

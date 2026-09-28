@@ -91,12 +91,11 @@ type photoViewer struct {
 
 	backdrop, picture, prev, next, close, detach widget.Clickable
 	// save and copy keep the photo on screen; kept brings what they gave,
-	// and notice tells it until noticeUntil.
-	save, copy  widget.Clickable
-	kept        chan viewerFile
-	notice      string
-	noticeUntil time.Time
-	zoom        viewerZoom
+	// and toast tells it, over the strip of photos.
+	save, copy widget.Clickable
+	kept       chan viewerFile
+	toast      toast
+	zoom       viewerZoom
 	// popout, when set, is what the button beside ✕ calls to show the
 	// photos in a window of their own; the viewer then closes.
 	popout func(chat int64, current model.Message, known []model.Message)
@@ -374,13 +373,8 @@ func (v *photoViewer) Layout(gtx layout.Context, l localization.Catalog, animate
 	// clicks on to them.
 	v.zoomArea(gtx, view, photo)
 	v.layoutBar(gtx, items, i, l)
-	if v.notice != "" && gtx.Now.Before(v.noticeUntil) {
-		// Under the bar, in the middle, as Telegram Desktop's toasts.
-		inRect(gtx, image.Rect(gtx.Dp(16), bar+gtx.Dp(8), size.X-gtx.Dp(16), bar+gtx.Dp(48)), func(gtx layout.Context) layout.Dimensions {
-			return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return pill(gtx, v.notice) })
-		})
-	}
 	v.layoutStrip(gtx, items, i, image.Rect(0, size.Y-strip, size.X, size.Y))
+	v.toast.Layout(gtx, image.Rect(0, bar, size.X, size.Y-strip))
 	// Decode the neighbours ahead, so that the arrows switch at once.
 	for _, j := range []int{i - 1, i + 1} {
 		if j >= 0 && j < len(items) {

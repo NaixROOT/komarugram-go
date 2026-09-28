@@ -62,11 +62,11 @@ type chatInfo struct {
 	sections          map[model.SharedKind]*settingsItem
 	themesButton      settingsItem
 	// username copies the chat's @username, and usernameLink its link, as
-	// AyuGram's Copy Username and Copy Username as Link; copied tells
-	// what was copied.
+	// AyuGram's Copy Username and Copy Username as Link.
 	usernames              model.UsernameSource
 	username, usernameLink settingsItem
-	copied                 string
+	// told is the failure to load told in the toast last.
+	told error
 	// details tells the registration of a user and the data center of a
 	// chat's photo, as materialgram's profile; each row copies its text.
 	details                  model.ChatDetailer
@@ -107,7 +107,6 @@ func (p *chatInfo) Open(c model.Chat) {
 	p.visible = true
 	p.modal.Open()
 	p.chat = c
-	p.copied = ""
 	p.kinds = append([]model.SharedKind{}, model.SharedKinds...)
 	if p.collection != nil {
 		if c.Kind != model.KindGroup {
@@ -266,6 +265,27 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 		return
 	}
 	p.drain()
+	if p.problem != nil && p.problem != p.told {
+		p.modal.Toast(mediaErrorText(p.problem))
+	}
+	p.told = p.problem
+	if p.themes != nil {
+		if err := p.themes.newProblem(); err != nil {
+			p.modal.Toast(mediaErrorText(err))
+		}
+	}
+	// What the media shown here tell goes in this dialog's toast: the
+	// renderer's own is not drawn.
+	p.renderer.errorMu.Lock()
+	if err := p.renderer.mediaError; err != nil {
+		p.renderer.mediaError = nil
+		p.modal.Toast(mediaErrorText(err))
+	}
+	p.renderer.errorMu.Unlock()
+	if text := p.renderer.toast.Text(); text != "" {
+		p.renderer.toast.Hide()
+		p.modal.Toast(text)
+	}
 	// The dialogs over this one take Escape first.
 	if p.renderer.link != "" {
 		p.renderer.linkModal.Update(gtx, false)
@@ -287,11 +307,11 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 	if name := p.chatUsername(); name != "" {
 		if p.username.click.Clicked(gtx) {
 			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("@" + name))})
-			p.copied = l.T("info.username_copied")
+			p.modal.Toast(l.T("info.username_copied"))
 		}
 		if p.usernameLink.click.Clicked(gtx) {
 			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("https://t.me/" + name))})
-			p.copied = l.T("info.link_copied")
+			p.modal.Toast(l.T("info.link_copied"))
 		}
 	}
 	registration, dataCenter := p.detailTexts(l)
@@ -301,7 +321,7 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 	}{{&p.registration, registration}, {&p.dataCenter, dataCenter}} {
 		if row.text != "" && row.item.click.Clicked(gtx) {
 			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(row.text))})
-			p.copied = l.T("info.copied")
+			p.modal.Toast(l.T("info.copied"))
 		}
 	}
 	if p.themesButton.click.Clicked(gtx) {
@@ -416,9 +436,6 @@ func (p *chatInfo) layoutInfo(gtx layout.Context, l localization.Catalog) layout
 					return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return card(gtx, func(gtx layout.Context) layout.Dimensions {
 							subtitle := l.T("info.username")
-							if p.copied != "" {
-								subtitle = p.copied
-							}
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return p.username.Layout(gtx, iconCopy, "@"+name, subtitle)
@@ -508,13 +525,7 @@ func (p *chatInfo) status(gtx layout.Context, l localization.Catalog) layout.Dim
 		})
 	}
 	if p.problem != nil {
-		return textButton(gtx, &p.retry, l.T("history.retry")+" · "+mediaErrorText(p.problem))
-	}
-	p.renderer.errorMu.Lock()
-	err := p.renderer.mediaError
-	p.renderer.errorMu.Unlock()
-	if err != nil {
-		return label(gtx, mediaErrorText(err), token.TypestyleBodySmall, scheme(gtx).Error.Color, 3)
+		return textButton(gtx, &p.retry, l.T("history.retry"))
 	}
 	if p.section != "" && len(p.messages) == 0 {
 		return label(gtx, l.SharedEmpty(p.section), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)

@@ -45,17 +45,15 @@ type stickerSetDialog struct {
 	chat  int64
 	busy  bool
 	// refreshing is set while a set shown from the cache is fetched again.
-	refreshing             bool
+	refreshing bool
+	// err is why the set did not load; it has no pack then.
 	err                    error
-	exportErr              error
-	savedPath              string
 	results                chan stickerSetResult
 	cancel                 context.CancelFunc
 	list                   scroll.List
 	close, action, retry   surface
 	more, download, author surface
 	authorResult           *stickerSetResult
-	notice                 string
 	menu                   contextMenu
 	menuOpen               bool
 	menuRect               image.Rectangle
@@ -138,7 +136,7 @@ func (d *stickerSetDialog) export(p *chatPage) {
 	d.stopRefresh()
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
-	d.busy, d.err, d.exportErr, d.savedPath = true, nil, nil, ""
+	d.busy, d.err = true, nil
 	d.results = make(chan stickerSetResult, 1)
 	results, source := d.results, p.source
 	pack := *d.pack
@@ -165,7 +163,9 @@ func (d *stickerSetDialog) back() bool {
 	return true
 }
 
-func (d *stickerSetDialog) update() {
+// update takes the results of what the dialog asked for; the outcome of an
+// action, or its failure, goes in the dialog's toast.
+func (d *stickerSetDialog) update(l localization.Catalog) {
 	if d.results == nil {
 		return
 	}
@@ -195,13 +195,22 @@ func (d *stickerSetDialog) update() {
 			return
 		}
 		if result.exported {
-			d.exportErr = result.err
-			if result.err == nil {
-				d.savedPath = result.path
+			if result.err != nil {
+				d.modal.Toast(l.T("stickers.export_failed") + ": " + mediaErrorText(result.err))
+			} else if result.path != "" {
+				d.modal.Toast(l.Format("stickers.saved", map[string]string{"path": result.path}))
 			}
 			return
 		}
-		d.err = result.err
+		if result.err != nil {
+			key := "stickers.failed"
+			if d.pack != nil {
+				key = "stickers.action_failed"
+			} else {
+				d.err = result.err
+			}
+			d.modal.Toast(l.T(key) + ": " + mediaErrorText(result.err))
+		}
 		if result.err == nil {
 			if result.pack != nil {
 				d.setPack(result.pack)
@@ -238,7 +247,7 @@ func (d *stickerSetDialog) layout(gtx layout.Context, p *chatPage, l localizatio
 	if !d.modal.Shown() {
 		return
 	}
-	d.update()
+	d.update(l)
 	if result := d.authorResult; result != nil {
 		d.authorResult = nil
 		if result.author != nil && result.err == nil && p.openAuthor != nil {
@@ -247,7 +256,7 @@ func (d *stickerSetDialog) layout(gtx layout.Context, p *chatPage, l localizatio
 		} else {
 			text := strconv.FormatInt(result.authorID, 10)
 			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(text))})
-			d.notice = l.Format("stickers.author_copied", map[string]string{"id": text})
+			d.modal.Toast(l.Format("stickers.author_copied", map[string]string{"id": text}))
 		}
 	}
 	d.modal.back = d.back
@@ -340,31 +349,6 @@ func (d *stickerSetDialog) layout(gtx layout.Context, p *chatPage, l localizatio
 					}
 					if d.pack != nil {
 						return d.grid(gtx, p)
-					}
-					if d.err != nil {
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return label(gtx, l.T("stickers.failed")+": "+mediaErrorText(d.err), token.TypestyleBodyMedium, sc.Error.Color, 4)
-						})
-					}
-					return layout.Dimensions{}
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if d.err == nil || d.pack == nil {
-						return layout.Dimensions{}
-					}
-					return layout.Inset{Top: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return label(gtx, l.T("stickers.action_failed")+": "+mediaErrorText(d.err), token.TypestyleBodySmall, sc.Error.Color, 3)
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if d.notice != "" {
-						return label(gtx, d.notice, token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 3)
-					}
-					if d.exportErr != nil {
-						return label(gtx, l.T("stickers.export_failed")+": "+mediaErrorText(d.exportErr), token.TypestyleBodySmall, sc.Error.Color, 2)
-					}
-					if d.savedPath != "" {
-						return label(gtx, l.Format("stickers.saved", map[string]string{"path": d.savedPath}), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 2)
 					}
 					return layout.Dimensions{}
 				}),
@@ -584,7 +568,6 @@ func (d *stickerSetDialog) findAuthor(p *chatPage) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	d.cancel = cancel
 	d.busy = true
-	d.notice = ""
 	d.results = make(chan stickerSetResult, 1)
 	results := d.results
 	go func() {

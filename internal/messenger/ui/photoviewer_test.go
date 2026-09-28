@@ -361,15 +361,15 @@ func TestPhotoViewerSavesAndCopies(t *testing.T) {
 	h.viewer.Open(1, s.photos[3], nil)
 	h.frame()
 	h.viewer.save.Click()
-	h.until("the saved notice", func() bool { return strings.HasPrefix(h.viewer.notice, "Photo saved: ") })
-	path := strings.TrimPrefix(h.viewer.notice, "Photo saved: ")
+	h.until("the saved notice", func() bool { return strings.HasPrefix(h.viewer.toast.Text(), "Photo saved: ") })
+	path := strings.TrimPrefix(h.viewer.toast.Text(), "Photo saved: ")
 	want, _ := s.Media(context.Background(), s.photos[3])
 	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, want) || filepath.Ext(path) != ".png" {
 		t.Fatalf("saved %s: %v", path, err)
 	}
 	// Ctrl+C copies, as the button does.
 	h.router.Queue(key.Event{Name: "C", Modifiers: key.ModShortcut, State: key.Press})
-	h.until("the copied notice", func() bool { return h.viewer.notice == "Photo copied to clipboard." })
+	h.until("the copied notice", func() bool { return h.viewer.toast.Text() == "Photo copied to clipboard." })
 	h.frame()
 	mime, data, ok := h.router.WriteClipboard()
 	if !ok || mime != "image/png" {

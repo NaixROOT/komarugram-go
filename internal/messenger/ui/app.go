@@ -295,6 +295,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	}
 	if source, ok := store.(model.SessionsSource); ok {
 		a.settings.sessions = newSessionsView(source, w.Invalidate)
+		a.settings.sessions.toast = &a.settings.toast
 		a.settings.sessions.private = a.private
 	}
 	a.security = a.settings.security

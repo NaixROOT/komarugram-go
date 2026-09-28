@@ -367,7 +367,7 @@ func TestChatInfoCopiesUsername(t *testing.T) {
 		if _, text, ok := router.WriteClipboard(); !ok || string(text) != c.want {
 			t.Fatalf("copied %q, want %q", text, c.want)
 		}
-		if p.copied == "" {
+		if p.modal.toast.Text() == "" {
 			t.Fatal("no notice of the copy")
 		}
 	}

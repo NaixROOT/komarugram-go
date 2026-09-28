@@ -296,9 +296,10 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 	case actionCopyLink:
 		if link, public, ok := p.menuLink(m); ok {
 			copyText(link)
-			p.selectionNotice = l.T("menu.link_copied")
-			if !public {
-				p.selectionNotice = l.T("menu.private_link")
+			if public {
+				p.toast.Show(l.T("menu.link_copied"))
+			} else {
+				p.toast.Show(l.T("menu.private_link"))
 			}
 		}
 	case actionForward:
@@ -315,7 +316,6 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		}
 		p.selection.selected[m.Key.MessageID] = true
 		p.activeText = nil
-		p.selectionNotice = ""
 	case actionClearSelection:
 		p.clearSelection()
 	case actionReacted:
@@ -330,7 +330,7 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		// A filter of the words selected, in every chat, as AyuGram's
 		// quick filter.
 		p.addFilter(preferences.FilterPattern{Text: regexp.QuoteMeta(strings.TrimSpace(p.menuSelectedText(m))), CaseInsensitive: true})
-		p.selectionNotice = l.T("filters.added")
+		p.toast.Show(l.T("filters.added"))
 	case actionRead:
 		if g, ok := p.source.(model.GhostStore); ok {
 			last := m.Key.MessageID

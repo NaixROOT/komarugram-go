@@ -33,7 +33,6 @@ type messageSelection struct {
 
 func (p *chatPage) clearSelection() {
 	p.selection = messageSelection{}
-	p.selectionNotice = ""
 }
 func (p *chatPage) pruneSelection(alive map[model.MessageID]bool) {
 	for id := range p.selection.selected {
@@ -121,7 +120,6 @@ func (p *chatPage) selectionEvents(gtx layout.Context) {
 			s.selecting = !s.selected[s.anchor]
 			s.dragging, s.pointer, s.position, s.scrollAt = true, e.PointerID, e.Position, gtx.Now
 			p.activeText = nil
-			p.selectionNotice = ""
 			p.rangeSelection(s.anchor)
 			gtx.Execute(pointer.GrabCmd{Tag: s, ID: e.PointerID})
 			gtx.Execute(key.FocusCmd{Tag: &p.keyboard})

@@ -90,6 +90,10 @@ func (p *chatPage) mediaTile(gtx layout.Context, r *messageRow, m model.Message,
 			progress = min(1, float32(status.Downloaded)/float32(status.Total))
 		}
 	}
+	if err != nil && err != r.mediaTold && !cancelled {
+		p.toast.Show(mediaErrorText(err))
+	}
+	r.mediaTold = err
 	if clicked {
 		if video {
 			p.play(gtx, m, p.reportMedia, l)
@@ -128,10 +132,14 @@ func (p *chatPage) mediaTile(gtx layout.Context, r *messageRow, m model.Message,
 			offset(gtx, origin, func(gtx layout.Context) layout.Dimensions {
 				paint.FillShape(gtx.Ops, color.NRGBA{A: 145}, clip.Ellipse{Max: image.Pt(diameter, diameter)}.Op(gtx.Ops))
 				symbol := "×"
-				if video {
+				switch {
+				case video:
 					symbol = "▶"
-				} else if cancelled || err != nil {
+				case cancelled:
 					symbol = "↓"
+				case err != nil:
+					// A click loads it again; the toast told why it failed.
+					symbol = "!"
 				}
 				box := gtx
 				box.Constraints = layout.Exact(image.Pt(diameter, diameter))
@@ -143,15 +151,6 @@ func (p *chatPage) mediaTile(gtx layout.Context, r *messageRow, m model.Message,
 					ring(gtx, diameter, progress, animate)
 				}
 				return layout.Dimensions{Size: image.Pt(diameter, diameter)}
-			})
-		}
-		if err != nil && !cancelled {
-			inset := min(gtx.Dp(8), size.X/10)
-			errGtx := gtx
-			errGtx.Constraints = layout.Constraints{Max: image.Pt(max(1, size.X-inset*2), max(1, size.Y/2))}
-			// Show the actual error, rather than an indefinitely spinning placeholder.
-			offset(errGtx, image.Pt(inset, max(0, size.Y/2+gtx.Dp(26))), func(gtx layout.Context) layout.Dimensions {
-				return label(gtx, mediaErrorText(err), token.TypestyleLabelSmall, scheme(gtx).Surface.OnColor, 4)
 			})
 		}
 		if video {

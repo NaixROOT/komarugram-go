@@ -32,6 +32,8 @@ const (
 // look for, as the tabs of Telegram Desktop's search, and the results.
 type searchPanel struct {
 	searcher model.Searcher
+	// told is the failure told in the list's toast last.
+	told error
 	// tabs pick this computer (0) or Telegram (1).
 	tabs     tabRow
 	global   bool
@@ -232,7 +234,8 @@ func (p *searchPanel) statusText(l localization.Catalog) string {
 	case errors.Is(r.Err, model.ErrSearchOffline):
 		return l.T("search.offline")
 	case r.Err != nil:
-		return l.T("search.failed") + ": " + mediaErrorText(r.Err)
+		// Why, the list's toast tells: see failure.
+		return l.T("search.failed")
 	case r.Query.Global && r.Query.Text == "" && !r.Query.Section.Media() && r.Query.Section != model.SearchPosts:
 		return l.T("search.hint")
 	case len(r.Chats) == 0 && len(r.Messages) == 0:
@@ -364,4 +367,22 @@ func (l *chatList) layoutFound(gtx layout.Context, p *searchPanel, f model.Found
 	c := f.Chat
 	c.LastMessage, c.LastSender, c.LastTime, c.Unread = foundText(f.Message, catalog), "", f.Message.Date, 0
 	return l.layoutRowWith(gtx, p.foundRow(f.Message.Key), c, selected, false, now, catalog)
+}
+
+// failure is why the search failed, to be told in the list's toast, when
+// it failed since it was last asked; "" otherwise. Being offline is not a
+// failure: the status line says so.
+func (p *searchPanel) failure(l localization.Catalog) string {
+	err := p.results.Err
+	if errors.Is(err, model.ErrSearchOffline) {
+		err = nil
+	}
+	if err == p.told {
+		return ""
+	}
+	p.told = err
+	if err == nil {
+		return ""
+	}
+	return l.T("search.failed") + ": " + mediaErrorText(err)
 }

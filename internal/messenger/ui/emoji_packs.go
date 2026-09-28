@@ -158,7 +158,9 @@ func (d *emojiPacksDialog) row(gtx layout.Context, i int, l localization.Catalog
 					return d.loader.sized(gtx, l, 20)
 				}
 				if set.Title == "" {
-					return label(gtx, l.T("emoji_packs.failed"), token.TypestyleBodyMedium, sc.Error.Color, 1)
+					// The row has no name to show for a set that did not
+					// load: this stands in for it, not as an error.
+					return label(gtx, l.T("emoji_packs.failed"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 1)
 				}
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {

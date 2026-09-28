@@ -151,9 +151,11 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 	return layout.Dimensions{Size: size}
 }
 
-// scrollPage lays out content in a centered, scrollable column.
+// scrollPage lays out content in a centered, scrollable column, with a
+// toast at its bottom for what the page has to tell.
 type scrollPage struct {
-	list scroll.List
+	list  scroll.List
+	toast toast
 }
 
 func (p *scrollPage) layout(gtx layout.Context, content layout.Widget) layout.Dimensions {
@@ -169,5 +171,6 @@ func (p *scrollPage) layout(gtx layout.Context, content layout.Widget) layout.Di
 			return layout.UniformInset(unit.Dp(24)).Layout(gtx, content)
 		})
 	})
+	p.toast.Layout(gtx, image.Rectangle{Max: size})
 	return layout.Dimensions{Size: size}
 }

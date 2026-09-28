@@ -28,8 +28,11 @@ type translateDialog struct {
 	results chan translateResult
 	cancel  context.CancelFunc
 	close   surface
-	list    scroll.List
-	loader  loadingIndicator
+	retry   surface
+	// start asks for the translation again, after a failure.
+	start  func()
+	list   scroll.List
+	loader loadingIndicator
 }
 
 type translateResult struct {
@@ -50,16 +53,21 @@ func (d *translateDialog) open(p *chatPage, m model.Message, selected string, to
 		d.text, id = selected, 0
 	}
 	d.modal.Open()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	d.cancel = cancel
-	d.results = make(chan translateResult, 1)
-	results, chat, text := d.results, m.Key.ChatID, d.text
-	go func() {
-		defer cancel()
-		out, err := translator.Translate(ctx, chat, id, text, to)
-		results <- translateResult{out, err}
-		p.invalidate()
-	}()
+	chat, text := m.Key.ChatID, d.text
+	d.start = func() {
+		d.loaded, d.failed = false, false
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		d.cancel = cancel
+		d.results = make(chan translateResult, 1)
+		results := d.results
+		go func() {
+			defer cancel()
+			out, err := translator.Translate(ctx, chat, id, text, to)
+			results <- translateResult{out, err}
+			p.invalidate()
+		}()
+	}
+	d.start()
 }
 
 func (d *translateDialog) stop() {
@@ -76,7 +84,13 @@ func (d *translateDialog) layout(gtx layout.Context, p *chatPage, l localization
 	select {
 	case r := <-d.results:
 		d.loaded, d.result, d.failed = true, r.text, r.err != nil
+		if r.err != nil {
+			d.modal.Toast(l.T("translate.failed"))
+		}
 	default:
+	}
+	if d.failed && d.retry.Clicked(gtx) {
+		d.start()
 	}
 	if !d.modal.closing && d.close.Clicked(gtx) {
 		d.modal.Close()
@@ -105,7 +119,7 @@ func (d *translateDialog) layout(gtx layout.Context, p *chatPage, l localization
 					case !d.loaded:
 						return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return d.loader.sized(gtx, l, 28) })
 					case d.failed:
-						return label(gtx, l.T("translate.failed"), token.TypestyleBodyMedium, sc.Error.Color, 3)
+						return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &d.retry, l.T("history.retry")) })
 					}
 					d.list.Axis = layout.Vertical
 					return d.list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
