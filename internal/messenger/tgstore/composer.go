@@ -353,7 +353,7 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 		if typ == "" {
 			typ = "application/octet-stream"
 		}
-		attrs, err := uploadAttributes(ctx, msg.Path, typ, msg.AsMedia)
+		attrs, err := uploadAttributes(ctx, msg.Path, typ, msg.AsMedia, msg.FFmpeg)
 		if err != nil {
 			return err
 		}

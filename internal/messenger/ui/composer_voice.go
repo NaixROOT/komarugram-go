@@ -32,24 +32,25 @@ type voiceRecorder interface {
 	Cancel()
 }
 
-// voiceTools record the microphone and encode what it recorded; tests
-// replace them.
+// voiceTools record the microphone and encode what it recorded, with the
+// FFmpeg the user set or else the one on PATH. Tests replace them.
 type voiceTools struct {
-	record func(ctx context.Context) (voiceRecorder, error)
-	encode func(ctx context.Context, pcm []int16, path string) error
+	// record fails with voice.ErrNoFFmpeg when there is no FFmpeg.
+	record func(ctx context.Context, ffmpeg string) (voiceRecorder, error)
+	encode func(ctx context.Context, ffmpeg string, pcm []int16, path string) error
 }
 
 // ffmpegVoice records and encodes with ffmpeg.
 var ffmpegVoice = voiceTools{
-	record: func(ctx context.Context) (voiceRecorder, error) {
-		ffmpeg, err := voice.FFmpeg()
+	record: func(ctx context.Context, custom string) (voiceRecorder, error) {
+		ffmpeg, err := voice.FFmpeg(custom)
 		if err != nil {
 			return nil, err
 		}
 		return voice.Start(ctx, ffmpeg), nil
 	},
-	encode: func(ctx context.Context, pcm []int16, path string) error {
-		ffmpeg, err := voice.FFmpeg()
+	encode: func(ctx context.Context, custom string, pcm []int16, path string) error {
+		ffmpeg, err := voice.FFmpeg(custom)
 		if err != nil {
 			return err
 		}
@@ -83,10 +84,18 @@ func (c *messageComposer) canRecord(d *messageDraft) bool {
 	return c.voice.record != nil && c.source != nil && c.recording == nil && !d.sending && d.pending == nil && d.editor.Text() == ""
 }
 
+// ffmpegPath is the FFmpeg the user set, or "" for the one on PATH.
+func (c *messageComposer) ffmpegPath() string {
+	if c.ffmpeg == nil {
+		return ""
+	}
+	return c.ffmpeg()
+}
+
 // startRecording starts recording a voice message for the open chat.
 func (c *messageComposer) startRecording(l localization.Catalog) {
 	d := c.draft(c.chat)
-	rec, err := c.voice.record(c.ctx)
+	rec, err := c.voice.record(c.ctx, c.ffmpegPath())
 	if errors.Is(err, voice.ErrNoFFmpeg) {
 		d.err = errors.New(l.T("record.no_ffmpeg"))
 		return
@@ -117,7 +126,10 @@ func (c *messageComposer) finishRecording() {
 		return
 	}
 	c.recording = nil
-	encode, ctx := c.voice.encode, c.ctx
+	ctx, ffmpeg := c.ctx, c.ffmpegPath()
+	encode := func(ctx context.Context, pcm []int16, path string) error {
+		return c.voice.encode(ctx, ffmpeg, pcm, path)
+	}
 	go func() {
 		res := voiceResult{chat: r.chat}
 		pcm, err := r.rec.Stop()

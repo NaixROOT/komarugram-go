@@ -110,6 +110,9 @@ working on this code".
 
 ## Testing the app live (Linux, X11/XFCE)
 
+- `-no-integrations` makes the client find no FFmpeg, player or browser on
+  the system, only the paths set in the settings: the way to see it as on a
+  machine without them.
 - Run the built binary from a scratch directory in the background. Stop it
   with `pkill -x messenger`: `pkill -f <path>` also matches, and kills, the
   shell that runs it.

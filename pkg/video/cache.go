@@ -3,6 +3,7 @@
 package video
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -86,8 +87,12 @@ func DecodeClip(path string, maxHeight int, fps float64, maxFrames int, format F
 	size.X &^= 1
 	size.Y &^= 1
 
+	ffmpeg := ResolveFFmpeg("")
+	if ffmpeg == "" {
+		return nil, errors.New("ffmpeg is not installed")
+	}
 	// No -re here: the clip is read as fast as ffmpeg can decode it.
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.Command(ffmpeg,
 		"-hide_banner", "-loglevel", "error",
 		"-threads", "1",
 		"-i", path,

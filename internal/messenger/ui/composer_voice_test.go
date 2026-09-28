@@ -50,12 +50,12 @@ func voiceHarness(t *testing.T) (*menuHarness, *[]*fakeRecorder) {
 	h := newMenuHarness(t, nil)
 	var recorders []*fakeRecorder
 	h.page.composer.voice = voiceTools{
-		record: func(context.Context) (voiceRecorder, error) {
+		record: func(context.Context, string) (voiceRecorder, error) {
 			r := &fakeRecorder{}
 			recorders = append(recorders, r)
 			return r, nil
 		},
-		encode: func(_ context.Context, _ []int16, path string) error {
+		encode: func(_ context.Context, _ string, _ []int16, path string) error {
 			return os.WriteFile(path, []byte("OggS"), 0o600)
 		},
 	}

@@ -7,6 +7,7 @@ package video
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -40,7 +41,11 @@ func Probe(path string) (Info, error) { return probe(path, "") }
 func probe(path, ffmpeg string) (Info, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, probeExecutable(ffmpeg),
+	ffprobe := ResolveFFprobe(ffmpeg)
+	if ffprobe == "" {
+		return Info{}, errors.New("ffprobe is not installed")
+	}
+	out, err := exec.CommandContext(ctx, ffprobe,
 		"-format_whitelist", "mov,matroska,webm,gif",
 		"-v", "error",
 		"-select_streams", "v:0",

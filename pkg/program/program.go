@@ -15,8 +15,33 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// searchOff turns off looking for programs on the system: only the paths
+// the user set are run. It is for trying the client as on a machine without
+// them.
+var searchOff atomic.Bool
+
+// SetSearching turns looking for programs on the system on or off: off,
+// LookPath and FindFlatpak find nothing.
+func SetSearching(on bool) { searchOff.Store(!on) }
+
+// Searching reports whether programs are looked for on the system.
+func Searching() bool { return !searchOff.Load() }
+
+// ErrSearchDisabled is LookPath's error while searching is off.
+var ErrSearchDisabled = errors.New("looking for programs on the system is turned off")
+
+// LookPath is exec.LookPath, unless searching is off. Every search for an
+// external program goes through it or FindFlatpak.
+func LookPath(name string) (string, error) {
+	if searchOff.Load() {
+		return "", fmt.Errorf("%s: %w", name, ErrSearchDisabled)
+	}
+	return exec.LookPath(name)
+}
 
 // bannerTimeout bounds how long a program may take to print its version. A
 // flatpak takes about a second the first time.
@@ -115,6 +140,9 @@ func FlatpakExports() []string {
 
 // FindFlatpak returns the launcher of the flatpak app id, or "".
 func FindFlatpak(id string) string {
+	if searchOff.Load() {
+		return ""
+	}
 	for _, dir := range FlatpakExports() {
 		path := filepath.Join(dir, id)
 		if IsExecutable(path) {

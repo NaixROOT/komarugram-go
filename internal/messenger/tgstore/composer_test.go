@@ -9,6 +9,8 @@ import (
 	"komarugram/internal/messenger/model"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -243,7 +245,7 @@ func TestVideoAttachmentAttributes(t *testing.T) {
 	if _, err := os.Stat("../../../video.mp4"); err != nil {
 		t.Skip("video fixture unavailable")
 	}
-	attrs, err := uploadAttributes(context.Background(), "../../../video.mp4", "video/mp4", true)
+	attrs, err := uploadAttributes(context.Background(), "../../../video.mp4", "video/mp4", true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,5 +399,34 @@ func TestSendVoice(t *testing.T) {
 	audio, ok := sent.Attributes[0].(*tg.DocumentAttributeAudio)
 	if !ok || !audio.Voice || audio.Duration != 3 || string(audio.Waveform) != string(waveform) {
 		t.Fatalf("attribute %+v", sent.Attributes[0])
+	}
+}
+
+// A video sent as media is inspected by the ffprobe beside the FFmpeg the
+// user set, not only by one on PATH.
+func TestVideoAttributesUseChosenFFmpeg(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake programs are shell scripts")
+	}
+	dir := t.TempDir()
+	for name, script := range map[string]string{
+		"ffmpeg":  "#!/bin/sh\nexit 0\n",
+		"ffprobe": "#!/bin/sh\necho '{\"streams\":[{\"width\":320,\"height\":240,\"duration\":\"1.5\"}]}'\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", t.TempDir())
+	clip := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(clip, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attrs, err := uploadAttributes(context.Background(), clip, "video/mp4", true, filepath.Join(dir, "ffmpeg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := attrs[len(attrs)-1].(*tg.DocumentAttributeVideo); !ok || v.W != 320 || v.H != 240 {
+		t.Fatalf("attributes %+v", attrs)
 	}
 }

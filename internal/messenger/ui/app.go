@@ -346,6 +346,7 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 			g := a.preferences.Global()
 			return g.ConfirmSticker, g.ConfirmGIF
 		}
+		p.composer.ffmpeg = func() string { return a.preferences.Global().FFmpegPath }
 	}
 	p.addFilter = func(pattern preferences.FilterPattern) {
 		f := a.preferences.Global().Filters

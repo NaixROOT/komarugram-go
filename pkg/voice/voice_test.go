@@ -76,7 +76,7 @@ func fixed(inputs [][]string) func(context.Context) ([][]string, error) {
 
 func ffmpeg(t *testing.T) string {
 	t.Helper()
-	path, err := FFmpeg()
+	path, err := FFmpeg("")
 	if err != nil {
 		t.Skip(err)
 	}

@@ -125,6 +125,8 @@ type messageComposer struct {
 	recording             *voiceRecording
 	voiceResults          chan voiceResult
 	micClick, voiceCancel surface
+	// ffmpeg is the FFmpeg the user set, "" for the one on PATH.
+	ffmpeg func() string
 }
 
 func newMessageComposer(source model.ConversationStore, invalidate func()) *messageComposer {
@@ -230,6 +232,9 @@ func (c *messageComposer) submit(chat int64, msg model.OutgoingMessage) {
 	}
 	if d.reply != nil && msg.ReplyTo == 0 {
 		msg.ReplyTo = d.reply.Key.MessageID
+	}
+	if msg.Path != "" {
+		msg.FFmpeg = c.ffmpegPath()
 	}
 	if msg.RandomID == 0 {
 		if d.pending != nil {

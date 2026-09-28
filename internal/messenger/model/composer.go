@@ -61,6 +61,9 @@ type OutgoingMessage struct {
 	ReplyTo MessageID
 	// Voice makes the file at Path, Opus in OGG, a voice message.
 	Voice *VoiceNote
+	// FFmpeg is the FFmpeg the user set, beside which ffprobe inspects a
+	// video sent as media; empty for the one on PATH.
+	FFmpeg string
 }
 
 // VoiceNote is what Telegram shows of a voice message before it is played.

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"komarugram/pkg/program"
+	"komarugram/pkg/video"
 )
 
 // Rate is the sample rate the microphone is recorded at.
@@ -34,10 +35,11 @@ const (
 // ErrNoFFmpeg is returned when ffmpeg is not installed.
 var ErrNoFFmpeg = errors.New("ffmpeg is not installed")
 
-// FFmpeg finds ffmpeg.
-func FFmpeg() (string, error) {
-	path, err := exec.LookPath("ffmpeg")
-	if err != nil {
+// FFmpeg finds ffmpeg: custom, the one the user set, or else the one on
+// PATH.
+func FFmpeg(custom string) (string, error) {
+	path := video.ResolveFFmpeg(custom)
+	if path == "" {
 		return "", ErrNoFFmpeg
 	}
 	return path, nil
