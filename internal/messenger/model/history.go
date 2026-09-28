@@ -131,6 +131,8 @@ type Message struct {
 	Reactions    []Reaction `json:",omitempty"`
 	// ReactionsListed is set when the account may see who reacted.
 	ReactionsListed bool `json:",omitempty"`
+	// Deleted marks a message Telegram deleted that the cache kept.
+	Deleted bool `json:",omitempty"`
 	// ReplyToTopID is the root of the thread a reply is in, when it
 	// replies to another reply there.
 	ReplyToTopID MessageID `json:",omitempty"`

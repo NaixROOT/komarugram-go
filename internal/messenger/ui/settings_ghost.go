@@ -67,3 +67,37 @@ func (p *settingsPage) layoutGhost(gtx layout.Context, l localization.Catalog) l
 		}),
 	)
 }
+
+// layoutKeep draws the switches of what the cache keeps that Telegram
+// takes back.
+func (p *settingsPage) layoutKeep(gtx layout.Context, l localization.Catalog) layout.Dimensions {
+	sc := scheme(gtx)
+	k := p.keep()
+	var want []string
+	if k.Deleted {
+		want = append(want, "deleted")
+	}
+	if k.Edits {
+		want = append(want, "edits")
+	}
+	if !slices.Equal(want, p.keepOpts.GetValues()) {
+		p.keepOpts.SetValues(want)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return label(gtx, l.T("keep.title"), token.TypestyleTitleMedium, sc.Surface.OnColor, 1)
+		}),
+		vspace(4),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return label(gtx, l.T("keep.body"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+		}),
+		vspace(8),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return p.keepOpts.Layout(gtx, map[string]string{"deleted": l.T("keep.deleted"), "edits": l.T("keep.edits")})
+		}),
+		vspace(4),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return label(gtx, l.T("keep.deleted_body"), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 0)
+		}),
+	)
+}

@@ -80,6 +80,12 @@ func (p *chatPage) rightsFor(parts []model.Message) model.MessageRights {
 			}
 		}
 	}
+	for _, m := range parts {
+		// Telegram deleted it: only this computer has it.
+		if m.Deleted {
+			r.Forward = false
+		}
+	}
 	if _, ok := p.source.(model.MessageForwarder); !ok {
 		r.Forward = false
 	}

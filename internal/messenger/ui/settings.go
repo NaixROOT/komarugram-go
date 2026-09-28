@@ -7,6 +7,7 @@ import (
 	"image"
 	"log"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -131,6 +132,10 @@ type settingsPage struct {
 	ghost     func() preferences.Ghost
 	setGhost  func(preferences.Ghost)
 	ghostOpts *toggle.Toggle[string]
+	// keep and setKeep read and change what the cache keeps.
+	keep     func() preferences.Keep
+	setKeep  func(preferences.Keep)
+	keepOpts *toggle.Toggle[string]
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -196,6 +201,11 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	p.ghostOpts = toggle.NewToggle(ghostOptions, nil, func(values []string) {
 		if p.setGhost != nil {
 			p.setGhost(ghostFromOptions(values))
+		}
+	})
+	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
+		if p.setKeep != nil {
+			p.setKeep(preferences.Keep{Deleted: slices.Contains(values, "deleted"), Edits: slices.Contains(values, "edits")})
 		}
 	})
 	p.composer = radio.NewRadios([]preferences.ComposerStyle{preferences.ComposerClassic, preferences.ComposerFloating}, preferences.ComposerFloating, func(style preferences.ComposerStyle) {
@@ -363,6 +373,14 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 						}
 						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.layoutGhost(gtx, l) }, defaultCardPadding)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.keep == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.layoutKeep(gtx, l) }, defaultCardPadding)
 						})
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return card(gtx, p.privacy.Layout, defaultCardPadding) }),

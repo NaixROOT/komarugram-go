@@ -403,6 +403,10 @@ func messageFooterIn(gtx layout.Context, m model.Message, l localization.Catalog
 	if !m.EditedAt.IsZero() {
 		parts = append(parts, l.T("history.edited"))
 	}
+	if m.Deleted {
+		// Kept after Telegram deleted it, with AyuGram's mark.
+		parts = append(parts, l.T("history.deleted_mark"))
+	}
 	parts = append(parts, m.Date.Local().Format("15:04"))
 	text(strings.Join(parts, " · "))
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, items...)

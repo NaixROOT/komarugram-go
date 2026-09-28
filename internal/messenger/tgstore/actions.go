@@ -53,6 +53,12 @@ func (s *Store) MessageRights(chat int64, msgs []model.Message) model.MessageRig
 	channel := peer.Kind == "channel"
 	r.Everyone = channel
 	for _, m := range msgs {
+		if m.Deleted {
+			// Kept after Telegram deleted it: it is only this computer's,
+			// which deletes it alone.
+			r.Forward = false
+			continue
+		}
 		service := m.Kind == model.MessageService
 		if service || m.NoForwards {
 			r.Forward = false

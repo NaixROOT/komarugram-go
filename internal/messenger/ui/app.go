@@ -199,6 +199,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.keep = func() preferences.Keep { return a.preferences.Global().Keep }
+	a.settings.setKeep = func(k preferences.Keep) {
+		if err := services.Preferences.SetKeep(k); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.ghost = func() preferences.Ghost { return a.preferences.Global().Ghost }
 	a.settings.setGhost = func(g preferences.Ghost) {
 		if err := services.Preferences.SetGhost(g); err != nil {
@@ -833,6 +839,10 @@ func (a *App) tellGhost() {
 	p := a.preferences.Global().Ghost
 	g.SetGhost(model.Ghost{SendRead: p.SendRead, SendOnline: p.SendOnline, SendTyping: p.SendTyping, ReadOnInteract: p.ReadOnInteract})
 	g.SetOnline(a.focused)
+	if k, ok := a.store.(model.KeepStore); ok {
+		keep := a.preferences.Global().Keep
+		k.SetKeep(model.Keep{Deleted: keep.Deleted, Edits: keep.Edits})
+	}
 }
 
 // SetMinimized is called for an explicit minimize or a suspended window.

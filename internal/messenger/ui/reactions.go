@@ -36,7 +36,7 @@ type reactionStrip struct {
 
 // canReact reports whether the account may react to m in the open chat.
 func (p *chatPage) canReact(m model.Message) bool {
-	return m.Kind != model.MessageService && m.Key.MessageID > 0 && !p.frozen.Frozen()
+	return m.Kind != model.MessageService && m.Key.MessageID > 0 && !m.Deleted && !p.frozen.Frozen()
 }
 
 // menuReactions are the reactions the menu of m offers, with the chosen ones

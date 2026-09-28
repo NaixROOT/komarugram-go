@@ -77,6 +77,16 @@ type Global struct {
 	// Ghost is what the accounts tell others of themselves, as AyuGram's
 	// Ghost Mode, the same for all of them.
 	Ghost Ghost `json:"ghost"`
+	// Keep is what the cache keeps that Telegram takes back, as AyuGram's
+	// saved deleted messages and edits history.
+	Keep Keep `json:"keep"`
+}
+
+// Keep is what the cache keeps: see model.Keep. Both are on by default,
+// as in AyuGram.
+type Keep struct {
+	Deleted bool `json:"deleted"`
+	Edits   bool `json:"edits"`
 }
 
 // Ghost is what the accounts tell others: see model.Ghost. Nothing is told
@@ -120,6 +130,7 @@ func defaults() Global {
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
 		Ghost:          Ghost{ReadOnInteract: true},
+		Keep:           Keep{Deleted: true, Edits: true},
 	}
 }
 
@@ -248,6 +259,11 @@ func (s *Store) SetWindowLock(minutes int, minimize, close bool) error {
 // SetGhost changes what the accounts tell others of themselves.
 func (s *Store) SetGhost(g Ghost) error {
 	return s.change(func(global *Global) { global.Ghost = g })
+}
+
+// SetKeep changes what the cache keeps that Telegram takes back.
+func (s *Store) SetKeep(k Keep) error {
+	return s.change(func(global *Global) { global.Keep = k })
 }
 
 // SetComposer changes the message composer style for all windows.

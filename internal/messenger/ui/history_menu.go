@@ -44,6 +44,7 @@ const (
 	actionEmojiPacks
 	actionReacted
 	actionRead
+	actionEdits
 	menuActions
 )
 
@@ -163,7 +164,7 @@ func (p *chatPage) menuSelectedText(m model.Message) string {
 
 // canReply reports whether what is sent to the open chat may reply to m.
 func (p *chatPage) canReply(m model.Message) bool {
-	if p.composer == nil || p.composer.source == nil || p.frozen.Frozen() || m.Key.MessageID <= 0 {
+	if p.composer == nil || p.composer.source == nil || p.frozen.Frozen() || m.Key.MessageID <= 0 || m.Deleted {
 		return false
 	}
 	rights, ok := p.source.(model.RightsSource)
@@ -223,6 +224,9 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 	}
 	if _, ok := p.source.(model.ReactionLister); ok && m.ReactionsListed {
 		out = append(out, actionReacted)
+	}
+	if _, ok := p.source.(model.KeepStore); ok && !m.EditedAt.IsZero() && !m.Outgoing {
+		out = append(out, actionEdits)
 	}
 	// Without read receipts, a message is read when asked, as AyuGram's
 	// Read Message does.
@@ -302,6 +306,8 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		p.clearSelection()
 	case actionReacted:
 		p.reacted.open(p, m)
+	case actionEdits:
+		p.edits.open(p, m)
 	case actionRead:
 		if g, ok := p.source.(model.GhostStore); ok {
 			last := m.Key.MessageID
@@ -348,6 +354,8 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.clear_selection")
 	case actionRead:
 		return l.T("menu.read")
+	case actionEdits:
+		return l.T("menu.edits")
 	case actionReacted:
 		total := 0
 		for _, r := range p.messageMenu.reactedOf {
@@ -384,6 +392,8 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconReacted
 	case actionRead:
 		return iconRead
+	case actionEdits:
+		return iconHistory
 	}
 	return iconEmoji
 }

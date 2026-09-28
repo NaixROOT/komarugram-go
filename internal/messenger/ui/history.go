@@ -60,8 +60,10 @@ type messageRow struct {
 type chatPage struct {
 	// pinned is the bar of the chat's pinned messages.
 	pinned pinnedBar
-	// reacted lists who reacted to a message.
+	// reacted lists who reacted to a message; edits, the versions of an
+	// edited one.
 	reacted reactedDialog
+	edits   editsDialog
 	// chatSearch searches the chat; chatMenu is the menu of its header.
 	chatSearch chatSearch
 	chatMenu   chatMenu
@@ -319,6 +321,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.stickers.stop()
 		p.emojiPacks.stop()
 		p.reacted.stop()
+		p.edits.stop()
 		p.closeChatSearch()
 		p.chatMenu.open = false
 		p.closeMenu()
@@ -558,6 +561,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	p.emojiPacks.layout(gtx, p, l)
 	p.stickers.layout(gtx, p, l)
 	p.reacted.layout(gtx, p, l)
+	p.edits.layout(gtx, p, l)
 }
 
 // hasMessage reports whether the history shows the message.

@@ -582,6 +582,12 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 	if e == nil {
 		e = s.persistDialogs(ctx)
 	}
+	// Telegram's page lacks the messages kept deleted; the cache has them.
+	for _, m := range cached {
+		if m.Deleted {
+			msgs = append(msgs, m)
+		}
+	}
 	s.finishPageAt(epoch, chat, dir, msgs, len(modified.GetMessages()) >= req.Limit, e, start)
 }
 func (s *Store) finishPage(chat int64, dir int, msgs []model.Message, more bool, err error, generation ...uint64) {
@@ -612,7 +618,10 @@ func (s *Store) finishPageAt(epoch uint64, chat int64, dir int, msgs []model.Mes
 				merged[m.Key.MessageID] = m
 			}
 			for _, m := range msgs {
-				if !c.deleted[m.Key] && !(m.Key.ChatID > -1000000000000 && c.globalDeleted[int(m.Key.MessageID)]) && (len(generation) == 0 || c.touched[m.Key] <= generation[0]) {
+				gone := c.deleted[m.Key] || m.Key.ChatID > -1000000000000 && c.globalDeleted[int(m.Key.MessageID)]
+				// A message kept deleted stays, as its tombstone keeps
+				// Telegram's version of it out.
+				if (!gone || m.Deleted) && (len(generation) == 0 || c.touched[m.Key] <= generation[0]) {
 					merged[m.Key.MessageID] = m
 				}
 			}
@@ -811,7 +820,7 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			}
 		}
 		if len(ids) > 0 {
-			tops, e := s.deleteMessages(ctx, chat, ids)
+			tops, e := s.deleteFromUpdate(ctx, chat, ids)
 			if e != nil {
 				return e
 			}
@@ -956,15 +965,23 @@ func (s *Store) replaceDeletedPreviews(ctx context.Context, tops map[int64]int) 
 		c.mu.Lock()
 		var last *model.Message
 		if h := c.histories[chat]; h != nil && !h.HasNewer && len(h.Messages) > 0 {
-			m := h.Messages[len(h.Messages)-1]
-			last = &m
+			// A message kept deleted is not the chat's last one.
+			for i := len(h.Messages) - 1; i >= 0 && last == nil; i-- {
+				if m := h.Messages[i]; !m.Deleted {
+					last = &m
+				}
+			}
 		}
 		cache, api, peer, start := c.cache, c.api, c.peers[chat], c.generation
 		c.mu.Unlock()
 		exact := last != nil
 		if last == nil && cache != nil {
-			if ms, e := cache.Page(ctx, chat, top, -1, 1); e == nil && len(ms) > 0 {
-				last = &ms[0]
+			if ms, e := cache.Page(ctx, chat, top, -1, 20); e == nil {
+				for i := len(ms) - 1; i >= 0 && last == nil; i-- {
+					if !ms[i].Deleted {
+						last = &ms[i]
+					}
+				}
 			}
 		}
 		top = s.replacePreview(chat, top, last)
@@ -1144,11 +1161,12 @@ func (s *Store) reconcile(ctx context.Context, chat int64, raw []tg.MessageClass
 	}
 	cache := c.cache
 	c.mu.Unlock()
-	ids, e := cache.Reconcile(ctx, chat, low, high, keep)
+	ids, kept, e := cache.Reconcile(ctx, chat, low, high, keep)
 	c.mu.Lock()
 	if e != nil {
 		return e
 	}
+	s.showKept(kept)
 	removed := map[int]bool{}
 	for _, id := range ids {
 		removed[id] = true

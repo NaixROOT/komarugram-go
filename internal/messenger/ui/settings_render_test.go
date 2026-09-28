@@ -76,6 +76,9 @@ func TestRenderSettingsAccounts(t *testing.T) {
 		ghost := preferences.Ghost{ReadOnInteract: true}
 		p.ghost = func() preferences.Ghost { return ghost }
 		p.setGhost = func(g preferences.Ghost) { ghost = g }
+		keep := preferences.Keep{Deleted: true, Edits: true}
+		p.keep = func() preferences.Keep { return keep }
+		p.setKeep = func(k preferences.Keep) { keep = k }
 	}
 	if os.Getenv("SETTINGS_SECTION") == "integrations" {
 		p.section = settingsIntegrations

@@ -36,6 +36,7 @@ var (
 	iconExpandLess   = wdk.RequireIconWidget(icons.NavigationExpandLess)
 	iconToTop        = wdk.RequireIconWidget(icons.EditorVerticalAlignTop)
 	iconRead         = wdk.RequireIconWidget(icons.ActionDoneAll)
+	iconHistory      = wdk.RequireIconWidget(icons.ActionHistory)
 	iconDevices      = wdk.RequireIconWidget(icons.DeviceDevices)
 	iconChevronLeft  = wdk.RequireIconWidget(icons.NavigationChevronLeft)
 	iconOpenInNew    = wdk.RequireIconWidget(icons.ActionOpenInNew)
