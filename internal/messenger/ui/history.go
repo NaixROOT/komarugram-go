@@ -65,6 +65,8 @@ type chatPage struct {
 	// edited one.
 	reacted reactedDialog
 	edits   editsDialog
+	// translation shows a message translated.
+	translation translateDialog
 	// chatSearch searches the chat; chatMenu is the menu of its header.
 	chatSearch chatSearch
 	chatMenu   chatMenu
@@ -333,6 +335,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.reacted.stop()
 		p.edits.stop()
 		p.shot.stop()
+		p.translation.stop()
 		p.closeChatSearch()
 		p.chatMenu.open = false
 		p.closeMenu()
@@ -575,6 +578,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	p.reacted.layout(gtx, p, l)
 	p.edits.layout(gtx, p, l)
 	p.shot.layout(gtx, p, l)
+	p.translation.layout(gtx, p, l)
 }
 
 // hasMessage reports whether the history shows the message.

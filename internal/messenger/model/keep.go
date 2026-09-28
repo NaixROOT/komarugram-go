@@ -26,3 +26,10 @@ type BlockedSource interface {
 	// starts loading the list, and nothing is blocked until it is known.
 	Blocked(peer int64) bool
 }
+
+// Translator translates messages, as Telegram Desktop's translate box does.
+type Translator interface {
+	// Translate translates message id of chat, or text when id is 0, to
+	// the language to, a two-letter code.
+	Translate(ctx context.Context, chat int64, id MessageID, text string, to string) (string, error)
+}

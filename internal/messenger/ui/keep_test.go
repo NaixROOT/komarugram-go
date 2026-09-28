@@ -66,3 +66,38 @@ func TestKeptMessages(t *testing.T) {
 		t.Fatalf("the mark is %q", got)
 	}
 }
+
+// translateStore translates.
+type translateStore struct {
+	*menuStore
+	asked []model.MessageID
+}
+
+func (s *translateStore) Translate(_ context.Context, _ int64, id model.MessageID, text string, to string) (string, error) {
+	s.asked = append(s.asked, id)
+	return to + ": " + text, nil
+}
+
+// The menu translates a message into the interface's language.
+func TestTranslateMenu(t *testing.T) {
+	h := newMenuHarnessOn(t, nil, func(s *menuStore) model.ConversationStore {
+		return &translateStore{menuStore: s}
+	})
+	p := h.page
+	h.openMenu(4)
+	if !slices.Contains(p.messageMenu.shown, actionTranslate) {
+		t.Fatal("the menu does not translate")
+	}
+	h.choose(actionTranslate)
+	deadline := time.Now().Add(5 * time.Second)
+	for !p.translation.loaded {
+		if time.Now().After(deadline) {
+			t.Fatal("the translation did not come")
+		}
+		time.Sleep(time.Millisecond)
+		h.frame()
+	}
+	if p.translation.result != "en: Message 4" {
+		t.Fatalf("translated %q", p.translation.result)
+	}
+}

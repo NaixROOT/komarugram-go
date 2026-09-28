@@ -48,6 +48,7 @@ const (
 	actionRead
 	actionEdits
 	actionFilter
+	actionTranslate
 	menuActions
 )
 
@@ -228,6 +229,9 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 	if _, ok := p.source.(model.ReactionLister); ok && m.ReactionsListed {
 		out = append(out, actionReacted)
 	}
+	if _, ok := p.source.(model.Translator); ok && !m.Deleted && (menuText(m) != "" || p.menuSelectedText(m) != "") {
+		out = append(out, actionTranslate)
+	}
 	if p.addFilter != nil && p.menuSelectedText(m) != "" {
 		out = append(out, actionFilter)
 	}
@@ -314,6 +318,8 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		p.reacted.open(p, m)
 	case actionEdits:
 		p.edits.open(p, m)
+	case actionTranslate:
+		p.translation.open(p, m, p.menuSelectedText(m), string(l.Language()))
 	case actionFilter:
 		// A filter of the words selected, in every chat, as AyuGram's
 		// quick filter.
@@ -369,6 +375,11 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.edits")
 	case actionFilter:
 		return l.T("menu.filter")
+	case actionTranslate:
+		if m, ok := p.menuMessage(); ok && p.menuSelectedText(m) != "" {
+			return l.T("menu.translate_selected")
+		}
+		return l.T("menu.translate")
 	case actionReacted:
 		total := 0
 		for _, r := range p.messageMenu.reactedOf {
@@ -409,6 +420,8 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconHistory
 	case actionFilter:
 		return iconFilter
+	case actionTranslate:
+		return iconTranslate
 	}
 	return iconEmoji
 }
