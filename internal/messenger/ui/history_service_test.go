@@ -92,3 +92,48 @@ func TestRenderService(t *testing.T) {
 		p.images.EndFrame()
 	})
 }
+
+// lookupStore finds messages the history has not loaded.
+type lookupStore struct {
+	*menuStore
+	asked []model.MessageID
+}
+
+func (s *lookupStore) LookupMessage(chat int64, id model.MessageID) (model.Message, model.LookupState) {
+	s.asked = append(s.asked, id)
+	if id == 404 {
+		return model.Message{}, model.LookupGone
+	}
+	return model.Message{Key: model.MessageKey{ChatID: chat, MessageID: id}, Text: "Far away"}, model.LookupFound
+}
+
+// What a pin or a reply names beyond the loaded history is looked up.
+func TestServiceLooksUpUnloaded(t *testing.T) {
+	var store *lookupStore
+	h := newMenuHarnessOn(t, func(_ *menuStore, messages []model.Message) {
+		pin := &messages[18]
+		pin.Kind, pin.Text, pin.ReplyToMessageID = model.MessageService, "", 999
+		pin.Service = &model.ServiceAction{Kind: model.ServicePin}
+		messages[19].ReplyToMessageID = 404
+	}, func(s *menuStore) model.ConversationStore {
+		store = &lookupStore{menuStore: s}
+		return store
+	})
+	p := h.page
+	pin, _ := p.messageByID(19)
+	if got, want := p.serviceText(pin, localization.For("en")), `Ann pinned "Far away"`; got != want {
+		t.Fatalf("pin reads %q, want %q", got, want)
+	}
+	unpinned := pin
+	unpinned.ReplyToMessageID = 404
+	if got, want := p.serviceText(unpinned, localization.For("en")), `Ann pinned Deleted message`; got != want {
+		t.Fatalf("a pin of a deleted message reads %q, want %q", got, want)
+	}
+	found := false
+	for _, id := range store.asked {
+		found = found || id == 404
+	}
+	if !found {
+		t.Fatalf("the reply's message was never looked up: %v", store.asked)
+	}
+}

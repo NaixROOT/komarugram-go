@@ -111,6 +111,8 @@ type conversation struct {
 	// threadIDs those ids by post.
 	threads   map[int64]*thread
 	threadIDs map[model.MessageKey]int64
+	// lookups are single messages found apart from their history's pages.
+	lookups map[model.MessageKey]*lookup
 }
 type viewSave struct {
 	view    model.Viewport
@@ -818,6 +820,10 @@ func (s *Store) mergeUpdate(m model.Message) {
 	c.mu.Lock()
 	isNew := int(m.Key.MessageID) > c.top[m.Key.ChatID]
 	c.top[m.Key.ChatID] = max(c.top[m.Key.ChatID], int(m.Key.MessageID))
+	if l := c.lookups[m.Key]; l != nil {
+		// An edit of a message looked up, as the one a reply quotes.
+		c.lookups[m.Key] = &lookup{msg: m, state: model.LookupFound}
+	}
 	if h := c.histories[m.Key.ChatID]; h != nil {
 		h.Revision++
 		found := false
@@ -902,6 +908,11 @@ func (s *Store) deleteMessages(ctx context.Context, chat int64, ids []int) (map[
 		}
 		if chat != 0 {
 			c.deleted[model.MessageKey{AccountID: c.account, ChatID: chat, MessageID: model.MessageID(id)}] = true
+		}
+	}
+	for key, l := range c.lookups {
+		if removed[int(key.MessageID)] && (key.ChatID == chat || chat == 0 && key.ChatID > -1000000000000) {
+			l.state, l.msg = model.LookupGone, model.Message{}
 		}
 	}
 	threads := c.threadsOf(chat)

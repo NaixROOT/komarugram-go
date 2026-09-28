@@ -486,10 +486,16 @@ func (p *chatPage) reactionIcon(gtx layout.Context, reaction model.Reaction, ani
 // replyQuote draws the message a message replies to, as a quote with a bar
 // in its sender's color; a click shows it.
 func (p *chatPage) replyQuote(gtx layout.Context, r *messageRow, m model.Message, l localization.Catalog) layout.Dimensions {
-	replied, ok := p.messageByID(m.ReplyToMessageID)
+	replied, state, known := p.referenced(m.Key.ChatID, m.ReplyToMessageID)
 	name, text := l.T("history.reply_missing"), ""
+	switch {
+	case known && state == model.LookupLoading:
+		text = l.T("service.loading")
+	case known && state == model.LookupGone:
+		text = l.T("service.deleted_message")
+	}
 	color := scheme(gtx).Primary.Color
-	if ok {
+	if state == model.LookupFound {
 		if replied.SenderName != "" {
 			name = replied.SenderName
 		} else if replied.Post && p.title != "" {
@@ -530,6 +536,20 @@ func (p *chatPage) replyQuote(gtx layout.Context, r *messageRow, m model.Message
 		call.Add(gtx.Ops)
 		return layout.Dimensions{Size: size}
 	})
+}
+
+// referenced is a message another one names, as the one it replies to:
+// the loaded one, or else one the store looks up, which may be on its way
+// or gone. known is false when the store cannot look it up.
+func (p *chatPage) referenced(chat int64, id model.MessageID) (m model.Message, state model.LookupState, known bool) {
+	if m, ok := p.messageByID(id); ok {
+		return m, model.LookupFound, true
+	}
+	if s, ok := p.source.(model.MessageLookup); ok && chat != 0 {
+		m, state = s.LookupMessage(chat, id)
+		return m, state, true
+	}
+	return model.Message{}, model.LookupGone, false
 }
 
 // messageByID is the loaded message with the id, a part of an album too.

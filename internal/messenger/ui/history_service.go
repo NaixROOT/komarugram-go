@@ -18,8 +18,11 @@ import (
 func (p *chatPage) serviceText(m model.Message, l localization.Catalog) string {
 	ctx := localization.ServiceContext{Chat: p.title, Channel: p.kind == model.KindChannel}
 	if m.Service != nil && m.Service.Kind == model.ServicePin && m.ReplyToMessageID != 0 {
-		if pinned, ok := p.messageByID(m.ReplyToMessageID); ok {
+		switch pinned, state, _ := p.referenced(m.Key.ChatID, m.ReplyToMessageID); state {
+		case model.LookupFound:
 			ctx.Pinned = &pinned
+		case model.LookupGone:
+			ctx.PinnedGone = true
 		}
 	}
 	return l.Service(m, ctx)

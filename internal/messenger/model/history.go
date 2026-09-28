@@ -306,3 +306,23 @@ type ConversationStore interface {
 	Layouts(int64, RenderEnvironment) []MessageLayout
 	Media(context.Context, Message) ([]byte, error)
 }
+
+// LookupState tells how far finding a single message has gone.
+type LookupState uint8
+
+const (
+	// LookupLoading: the message is on its way.
+	LookupLoading LookupState = iota
+	// LookupFound: the message is at hand.
+	LookupFound
+	// LookupGone: Telegram has no such message, as a deleted one.
+	LookupGone
+)
+
+// MessageLookup finds single messages that a chat's loaded history does
+// not hold, such as the one a reply quotes or a pin names. It never
+// blocks: the first ask starts the search, and the store tells of its end
+// as of any change.
+type MessageLookup interface {
+	LookupMessage(chat int64, id MessageID) (Message, LookupState)
+}
