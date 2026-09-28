@@ -16,6 +16,8 @@ func init() {
 		"menu.read":               {"Прочитать", "Read Message"},
 		"menu.edits":              {"История правок", "Edits History"},
 		"menu.filter":             {"Добавить фильтр", "Add Filter"},
+		"privacy.streamer":        {"Режим стримера", "Streamer Mode"},
+		"privacy.streamer_body":   {"Окна мессенджера не попадают в запись и трансляцию экрана: там, где они, будет пусто. Как режим стримера AyuGram.", "The messenger's windows stay out of screen recordings and streams, which show nothing where they are, as AyuGram's Streamer Mode."},
 		"filters.added":           {"Фильтр добавлен в общие.", "Filter added to the shared filters."},
 		"filters.title":           {"Фильтры сообщений", "Message Filters"},
 		"filters.body":            {"Скрывают чужие сообщения, в которых находится выражение (синтаксис Go regexp), или, «наоборот», не находится.", "Hide others' messages an expression (Go regexp syntax) finds, or, reversed, does not."},

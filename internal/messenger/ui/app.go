@@ -220,6 +220,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.streamer = func() bool { return a.preferences.Global().StreamerMode }
+	a.settings.setStreamer = func(on bool) {
+		if err := services.Preferences.SetStreamerMode(on); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.composerStyle = a.composerStyle
 	a.settings.setComposerStyle = func(style preferences.ComposerStyle) {
 		if err := services.Preferences.SetComposer(style); err != nil {
@@ -268,6 +274,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	}
 	if source, ok := store.(model.SessionsSource); ok {
 		a.settings.sessions = newSessionsView(source, w.Invalidate)
+		a.settings.sessions.private = a.private
 	}
 	a.security = a.settings.security
 	if services.Security != nil {
@@ -662,6 +669,7 @@ func (a *App) Layout(gtx layout.Context) {
 		return
 	}
 	a.tellGhost()
+	a.window.SetCaptureExcluded(a.preferences.Global().StreamerMode)
 	a.history.filter = a.messageFilter()
 	if a.comments != nil {
 		a.comments.filter = a.history.filter

@@ -26,6 +26,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 
+	"komarugram/internal/appwindow"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
 	"komarugram/internal/messenger/preferences"
@@ -127,6 +128,11 @@ type settingsPage struct {
 	private    func() bool
 	setPrivate func(bool)
 	visual     *toggle.Toggle[string]
+	// streamer and setStreamer read and switch Streamer Mode, where the
+	// platform has it.
+	streamer     func() bool
+	setStreamer  func(bool)
+	streamerMode *toggle.Toggle[string]
 	// ghost and setGhost read and change what the accounts tell others;
 	// without them the section is hidden.
 	ghost     func() preferences.Ghost
@@ -198,6 +204,11 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	p.visual = toggle.NewToggle([]string{"visual"}, nil, func(values []string) {
 		if p.setPrivate != nil {
 			p.setPrivate(len(values) == 1)
+		}
+	})
+	p.streamerMode = toggle.NewToggle([]string{"streamer"}, nil, func(values []string) {
+		if p.setStreamer != nil {
+			p.setStreamer(len(values) == 1)
 		}
 	})
 	p.ghostOpts = toggle.NewToggle(ghostOptions, nil, func(values []string) {
@@ -434,7 +445,15 @@ func (p *settingsPage) layoutVisualPrivacy(gtx layout.Context, l localization.Ca
 			p.visual.SetValues(nil)
 		}
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	streamer := p.streamer != nil && appwindow.CaptureExclusionSupported
+	if streamer && p.streamer() != (len(p.streamerMode.GetValues()) == 1) {
+		if p.streamer() {
+			p.streamerMode.SetValues([]string{"streamer"})
+		} else {
+			p.streamerMode.SetValues(nil)
+		}
+	}
+	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return p.visual.Layout(gtx, map[string]string{"visual": l.T("privacy.visual")})
 		}),
@@ -442,7 +461,19 @@ func (p *settingsPage) layoutVisualPrivacy(gtx layout.Context, l localization.Ca
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return label(gtx, l.T("privacy.visual_body"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
 		}),
-	)
+	}
+	if streamer {
+		children = append(children, vspace(8),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return p.streamerMode.Layout(gtx, map[string]string{"streamer": l.T("privacy.streamer")})
+			}),
+			vspace(4),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return label(gtx, l.T("privacy.streamer_body"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+			}),
+		)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func (p *settingsPage) layoutMain(gtx layout.Context, mode themeMode, dark bool, l localization.Catalog) layout.Dimensions {

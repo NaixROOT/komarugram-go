@@ -54,6 +54,9 @@ type Global struct {
 	// account's identifiers in its profile with spoilers, for showing the
 	// screen to others: streams, recordings, screenshots.
 	VisualPrivacy bool `json:"visual_privacy,omitempty"`
+	// StreamerMode hides the windows from screen capture, as AyuGram's
+	// Streamer Mode, where the platform allows it.
+	StreamerMode bool `json:"streamer_mode,omitempty"`
 	// Window locking only covers the UI; account connections stay running.
 	AutoLockMinutes int           `json:"auto_lock_minutes,omitempty"`
 	LockOnMinimize  bool          `json:"lock_on_minimize,omitempty"`
@@ -278,6 +281,11 @@ func (s *Store) SetMotion(mode powersave.Mode, lowBattery int) error {
 // SetVisualPrivacy switches visual privacy mode for every window.
 func (s *Store) SetVisualPrivacy(on bool) error {
 	return s.change(func(g *Global) { g.VisualPrivacy = on })
+}
+
+// SetStreamerMode hides the windows from screen capture, or shows them.
+func (s *Store) SetStreamerMode(on bool) error {
+	return s.change(func(g *Global) { g.StreamerMode = on })
 }
 
 func (s *Store) SetWindowLock(minutes int, minimize, close bool) error {
