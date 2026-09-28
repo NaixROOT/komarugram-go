@@ -151,7 +151,16 @@ The history is drawn as materialgram draws it:
   binary: `chatmedia/avcdec.go` downloads it the first time it is needed
   from [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), at a
   pinned commit, checks its SHA-256 and keeps it in the cache directory;
-  `KOMARUGRAM_AVCDEC` names a build of the user's instead (a path or a URL). A GIF shown still starts no process either: it shows Telegram's
+  `KOMARUGRAM_AVCDEC` names a build of the user's instead (a path or a URL).
+  Every FFmpeg the client runs, voice messages' and the `ffprobe` beside it
+  for videos sent as media included, is `video.ResolveFFmpeg` of the path in
+  the settings, else PATH. Without one, the microphone (`composer_voice.go`)
+  opens the system's file chooser for Opus in OGG, MP3 or M4A
+  (`voice.FileExtensions`) and sends the file as a voice message, its
+  duration read from its headers (`voice.FileDuration`), without a waveform;
+  the file is the user's and is not removed. `program.LookPath` and
+  `FindFlatpak` are the only searches for external programs:
+  `-no-integrations` turns them off. A GIF shown still starts no process either: it shows Telegram's
   thumbnail, fetched before the file (a real GIF file's first frame is
   decoded in Go); large GIFs have none and stay blank until played, as in the
   official clients. `ffprobe` and `ffmpeg` start when it plays, and `ffmpeg`

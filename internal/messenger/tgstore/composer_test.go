@@ -368,37 +368,39 @@ func TestStickerSetCacheFindsByNameAndID(t *testing.T) {
 	}
 }
 
-// A recording is sent as a voice message: OGG with its duration and
-// waveform, not as a file.
+// A recording, or an audio file chosen for want of an FFmpeg, is sent as a
+// voice message: with its type, duration and waveform, not as a file.
 func TestSendVoice(t *testing.T) {
-	s := testStore(t)
-	s.history.peers[5] = peerRecord{Kind: "user", ID: 5}
-	path := t.TempDir() + "/voice.ogg"
-	if err := os.WriteFile(path, []byte("OggS voice"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var sent *tg.InputMediaUploadedDocument
-	s.history.api = composerAPI(func(in bin.Encoder) (bin.Encoder, error) {
-		switch r := in.(type) {
-		case *tg.UploadSaveFilePartRequest:
-			return &tg.BoolTrue{}, nil
-		case *tg.MessagesSendMediaRequest:
-			sent, _ = r.Media.(*tg.InputMediaUploadedDocument)
-			return &tg.Updates{}, nil
-		default:
-			return nil, fmt.Errorf("unexpected %T", in)
+	for name, mime := range map[string]string{"voice.ogg": "audio/ogg", "chosen.mp3": "audio/mpeg", "chosen.m4a": "audio/mp4"} {
+		s := testStore(t)
+		s.history.peers[5] = peerRecord{Kind: "user", ID: 5}
+		path := t.TempDir() + "/" + name
+		if err := os.WriteFile(path, []byte("voice"), 0o600); err != nil {
+			t.Fatal(err)
 		}
-	})
-	waveform := []byte{1, 2, 3}
-	if err := s.Send(context.Background(), 5, model.OutgoingMessage{RandomID: 1, Path: path, Voice: &model.VoiceNote{Duration: 2600 * time.Millisecond, Waveform: waveform}}); err != nil {
-		t.Fatal(err)
-	}
-	if sent == nil || sent.MimeType != "audio/ogg" || sent.ForceFile || len(sent.Attributes) != 1 {
-		t.Fatalf("sent %+v", sent)
-	}
-	audio, ok := sent.Attributes[0].(*tg.DocumentAttributeAudio)
-	if !ok || !audio.Voice || audio.Duration != 3 || string(audio.Waveform) != string(waveform) {
-		t.Fatalf("attribute %+v", sent.Attributes[0])
+		var sent *tg.InputMediaUploadedDocument
+		s.history.api = composerAPI(func(in bin.Encoder) (bin.Encoder, error) {
+			switch r := in.(type) {
+			case *tg.UploadSaveFilePartRequest:
+				return &tg.BoolTrue{}, nil
+			case *tg.MessagesSendMediaRequest:
+				sent, _ = r.Media.(*tg.InputMediaUploadedDocument)
+				return &tg.Updates{}, nil
+			default:
+				return nil, fmt.Errorf("unexpected %T", in)
+			}
+		})
+		waveform := []byte{1, 2, 3}
+		if err := s.Send(context.Background(), 5, model.OutgoingMessage{RandomID: 1, Path: path, Voice: &model.VoiceNote{Duration: 2600 * time.Millisecond, Waveform: waveform}}); err != nil {
+			t.Fatal(err)
+		}
+		if sent == nil || sent.MimeType != mime || sent.ForceFile || len(sent.Attributes) != 1 {
+			t.Fatalf("%s: sent %+v", name, sent)
+		}
+		audio, ok := sent.Attributes[0].(*tg.DocumentAttributeAudio)
+		if !ok || !audio.Voice || audio.Duration != 3 || string(audio.Waveform) != string(waveform) {
+			t.Fatalf("%s: attribute %+v", name, sent.Attributes[0])
+		}
 	}
 }
 

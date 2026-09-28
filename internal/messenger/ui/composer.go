@@ -120,10 +120,14 @@ type messageComposer struct {
 	fileResults                 chan fileChoice
 	choosing                    bool
 	// voice records voice messages; recording is the one being recorded,
-	// voiceResults the recordings encoded for sending.
+	// voiceResults the recordings encoded for sending, voicePicks the audio
+	// files chosen instead for want of an FFmpeg, and recorded the
+	// temporary files of recordings, removed once sent.
 	voice                 voiceTools
 	recording             *voiceRecording
 	voiceResults          chan voiceResult
+	voicePicks            chan voicePick
+	recorded              map[string]bool
 	micClick, voiceCancel surface
 	// ffmpeg is the FFmpeg the user set, "" for the one on PATH.
 	ffmpeg func() string
@@ -131,7 +135,7 @@ type messageComposer struct {
 
 func newMessageComposer(source model.ConversationStore, invalidate func()) *messageComposer {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
+	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), voicePicks: make(chan voicePick, 1), recorded: map[string]bool{}, packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
 	c.source, _ = source.(model.ComposerStore)
 	c.search.SingleLine = true
 	c.path.SingleLine = true
@@ -303,7 +307,8 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 				if d.reply != nil && r.request.ReplyTo == d.reply.Key.MessageID {
 					d.reply = nil
 				}
-				if r.request.Voice != nil {
+				if c.recorded[r.request.Path] {
+					delete(c.recorded, r.request.Path)
 					os.Remove(r.request.Path)
 				}
 				if r.chat == c.chat {
@@ -351,7 +356,16 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 				c.draft(r.chat).err = r.err
 			} else if r.path != "" {
 				note := r.note
+				c.recorded[r.path] = true
 				c.submit(r.chat, model.OutgoingMessage{Path: r.path, Voice: &note})
+			}
+		case p := <-c.voicePicks:
+			c.choosing = false
+			if p.err != nil {
+				c.draft(p.chat).err = p.err
+			} else if p.path != "" {
+				note := p.note
+				c.submit(p.chat, model.OutgoingMessage{Path: p.path, Voice: &note})
 			}
 		case f := <-c.fileResults:
 			c.choosing = false
@@ -688,13 +702,15 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			return layout.Dimensions{Size: s}
 		}
 		button(0, &c.attach, iconAttach, l.T("composer.attach"))
-		button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		sendWidth := 0
 		if c.canRecord(d) {
-			// With nothing written, the microphone takes Send's place.
+			// With nothing written, the microphone takes the far right, as
+			// in Telegram Desktop, and the emoji button moves left of it.
 			sendWidth = iconWidth
-			button(s.X-2*iconWidth, &c.micClick, iconMic, l.T("record.voice"))
+			button(s.X-iconWidth, &c.micClick, iconMic, l.T("record.voice"))
+			button(s.X-2*iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		} else if strings.TrimSpace(d.editor.Text()) != "" || d.sending || d.pending != nil {
+			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 			sendWidth = min(gtx.Dp(92), s.X/3)
 			inRect(gtx, image.Rect(s.X-iconWidth-sendWidth, 0, s.X-iconWidth, s.Y), func(gtx layout.Context) layout.Dimensions {
 				if d.sending {
@@ -711,6 +727,8 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 					return textButton(gtx, &c.send, txt)
 				})
 			})
+		} else {
+			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		}
 		inRect(gtx, image.Rect(iconWidth, 0, max(iconWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
 			if d.sending || c.source == nil {

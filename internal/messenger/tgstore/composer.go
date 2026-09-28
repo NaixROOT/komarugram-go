@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/voice"
 
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
@@ -358,7 +359,11 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 			return err
 		}
 		if v := msg.Voice; v != nil {
-			typ = "audio/ogg"
+			typ = voice.FileMIME(msg.Path)
+			if typ == "" {
+				// A recording is encoded to a temporary .ogg file.
+				typ = "audio/ogg"
+			}
 			attrs = []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Voice: true, Duration: int(v.Duration.Round(time.Second) / time.Second), Waveform: v.Waveform}}
 		}
 		file, err := uploader.NewUploader(api).FromPath(ctx, msg.Path)

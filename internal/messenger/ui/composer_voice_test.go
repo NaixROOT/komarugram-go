@@ -4,8 +4,10 @@ package ui
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"gioui.org/io/key"
 
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/voice"
 )
 
 // fakeRecorder has recorded a second of a loud tone.
@@ -58,8 +61,108 @@ func voiceHarness(t *testing.T) (*menuHarness, *[]*fakeRecorder) {
 		encode: func(_ context.Context, _ string, _ []int16, path string) error {
 			return os.WriteFile(path, []byte("OggS"), 0o600)
 		},
+		choose: func(context.Context, string) fileChoice {
+			t.Error("a file was asked for with an FFmpeg")
+			return fileChoice{}
+		},
 	}
 	return h, &recorders
+}
+
+// sentMessages waits for the composer to send something.
+func sentMessages(t *testing.T, h *menuHarness) []model.OutgoingMessage {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		h.frame()
+		h.store.mu.Lock()
+		sent := append([]model.OutgoingMessage(nil), h.store.sent...)
+		h.store.mu.Unlock()
+		if len(sent) > 0 {
+			return sent
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("nothing sent")
+		}
+	}
+}
+
+// oggOpus is an OGG file of Opus that plays for two seconds, as far as its
+// headers tell.
+func oggOpus() []byte {
+	page := func(packet []byte, granule uint64) []byte {
+		b := append([]byte("OggS\x00\x00"), binary.LittleEndian.AppendUint64(nil, granule)...)
+		b = append(b, make([]byte, 12)...)
+		b = append(b, 1, byte(len(packet)))
+		return append(b, packet...)
+	}
+	head := binary.LittleEndian.AppendUint16([]byte("OpusHead\x01\x01"), 312)
+	return append(page(head, 0), page([]byte("sound"), 2*48000+312)...)
+}
+
+// Without an FFmpeg, the microphone asks for an audio file and sends it as
+// a voice message, with the duration its headers tell; the file is the
+// user's, and stays.
+func TestComposerSendsChosenVoiceFile(t *testing.T) {
+	h, _ := voiceHarness(t)
+	c := h.page.composer
+	c.ffmpeg = func() string { return "/opt/ffmpeg/ffmpeg" }
+	var asked []string
+	c.voice.record = func(_ context.Context, ffmpeg string) (voiceRecorder, error) {
+		asked = append(asked, ffmpeg)
+		return nil, voice.ErrNoFFmpeg
+	}
+	path := filepath.Join(t.TempDir(), "note.ogg")
+	if err := os.WriteFile(path, oggOpus(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.voice.choose = func(context.Context, string) fileChoice { return fileChoice{path: path} }
+	c.micClick.click.Click()
+	h.frames(2)
+	m := sentMessages(t, h)[0]
+	if len(asked) != 1 || asked[0] != "/opt/ffmpeg/ffmpeg" {
+		t.Fatalf("recorded with %q", asked)
+	}
+	if m.Path != path || m.Voice == nil || m.Voice.Duration != 2*time.Second || m.FFmpeg != "/opt/ffmpeg/ffmpeg" {
+		t.Fatalf("sent %+v", m)
+	}
+	if c.draft(1).err != nil {
+		t.Fatalf("error %v", c.draft(1).err)
+	}
+	h.frames(5)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the chosen file went: %v", err)
+	}
+}
+
+// A file that is not a voice message's format is not sent, and the
+// composer says why; a cancelled chooser does nothing.
+func TestComposerRejectsVoiceFile(t *testing.T) {
+	h, _ := voiceHarness(t)
+	c := h.page.composer
+	c.voice.record = func(context.Context, string) (voiceRecorder, error) { return nil, voice.ErrNoFFmpeg }
+	c.voice.choose = func(context.Context, string) fileChoice { return fileChoice{} }
+	c.micClick.click.Click()
+	h.frames(4)
+	if c.draft(1).err != nil || c.choosing {
+		t.Fatalf("a cancelled chooser left %v, choosing %t", c.draft(1).err, c.choosing)
+	}
+	path := filepath.Join(t.TempDir(), "song.mp3")
+	if err := os.WriteFile(path, []byte("not a sound"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.voice.choose = func(context.Context, string) fileChoice { return fileChoice{path: path} }
+	c.micClick.click.Click()
+	for deadline := time.Now().Add(5 * time.Second); c.draft(1).err == nil; {
+		if time.Now().After(deadline) {
+			t.Fatal("no error for a file that is not a voice message")
+		}
+		h.frame()
+	}
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	if len(h.store.sent) != 0 {
+		t.Fatalf("sent %+v", h.store.sent)
+	}
 }
 
 // The microphone records while the text is empty; Send sends the
@@ -77,17 +180,7 @@ func TestComposerRecordsVoice(t *testing.T) {
 	}
 	c.send.click.Click()
 	h.frames(2)
-	var sent []model.OutgoingMessage
-	for deadline := time.Now().Add(5 * time.Second); len(sent) == 0; {
-		if time.Now().After(deadline) {
-			t.Fatal("nothing sent")
-		}
-		h.frame()
-		h.store.mu.Lock()
-		sent = append([]model.OutgoingMessage(nil), h.store.sent...)
-		h.store.mu.Unlock()
-	}
-	m := sent[0]
+	m := sentMessages(t, h)[0]
 	if m.Voice == nil || m.Voice.Duration != time.Second || len(m.Voice.Waveform) != 63 || m.Path == "" || !(*recorders)[0].stopped {
 		t.Fatalf("sent %+v", m)
 	}

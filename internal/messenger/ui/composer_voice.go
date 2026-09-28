@@ -33,11 +33,14 @@ type voiceRecorder interface {
 }
 
 // voiceTools record the microphone and encode what it recorded, with the
-// FFmpeg the user set or else the one on PATH. Tests replace them.
+// FFmpeg the user set or else the one on PATH; without one, they choose an
+// audio file to send instead. Tests replace them.
 type voiceTools struct {
 	// record fails with voice.ErrNoFFmpeg when there is no FFmpeg.
 	record func(ctx context.Context, ffmpeg string) (voiceRecorder, error)
 	encode func(ctx context.Context, ffmpeg string, pcm []int16, path string) error
+	// choose asks for an audio file in the system's chooser.
+	choose func(ctx context.Context, name string) fileChoice
 }
 
 // ffmpegVoice records and encodes with ffmpeg.
@@ -56,6 +59,18 @@ var ffmpegVoice = voiceTools{
 		}
 		return voice.Encode(ctx, ffmpeg, pcm, path)
 	},
+	choose: func(ctx context.Context, name string) fileChoice {
+		return chooseFile(ctx, &fileFilter{name: name, extensions: voice.FileExtensions})
+	},
+}
+
+// voicePick is an audio file chosen to be sent as a voice message, or why
+// it cannot be.
+type voicePick struct {
+	chat int64
+	path string
+	note model.VoiceNote
+	err  error
 }
 
 // voiceRecording is a voice message being recorded, as Telegram Desktop's
@@ -93,11 +108,12 @@ func (c *messageComposer) ffmpegPath() string {
 }
 
 // startRecording starts recording a voice message for the open chat.
+// Without an FFmpeg, it asks for an audio file to send instead.
 func (c *messageComposer) startRecording(l localization.Catalog) {
 	d := c.draft(c.chat)
 	rec, err := c.voice.record(c.ctx, c.ffmpegPath())
 	if errors.Is(err, voice.ErrNoFFmpeg) {
-		d.err = errors.New(l.T("record.no_ffmpeg"))
+		c.chooseVoiceFile(l)
 		return
 	}
 	if err != nil {
@@ -108,6 +124,40 @@ func (c *messageComposer) startRecording(l localization.Catalog) {
 	d.err = nil
 	c.pickerOpen, c.attachOpen, c.form = false, false, 0
 	c.recording = &voiceRecording{rec: rec, chat: c.chat}
+}
+
+// chooseVoiceFile asks for an audio file and sends it as a voice message,
+// its duration read from its headers. It has no waveform: Telegram Desktop
+// draws one itself once it has the file.
+func (c *messageComposer) chooseVoiceFile(l localization.Catalog) {
+	if c.choosing {
+		return
+	}
+	c.choosing = true
+	ctx, chat, choose := c.ctx, c.chat, c.voice.choose
+	name, noFFmpeg, badFile := l.T("record.audio_files"), l.T("record.no_ffmpeg"), l.T("record.bad_file")
+	go func() {
+		f := choose(ctx, name)
+		pick := voicePick{chat: chat, path: f.path}
+		switch {
+		case errors.Is(f.err, errNoChooser):
+			pick.err = errors.New(noFFmpeg)
+		case f.err != nil:
+			pick.err = f.err
+		case f.path != "":
+			d, err := voice.FileDuration(f.path)
+			if err != nil {
+				log.Printf("voice file: %v", err)
+				pick.err = errors.New(badFile)
+			}
+			pick.note = model.VoiceNote{Duration: d}
+		}
+		select {
+		case c.voicePicks <- pick:
+			c.invalidate()
+		case <-ctx.Done():
+		}
+	}()
 }
 
 // cancelRecording drops the recording.
