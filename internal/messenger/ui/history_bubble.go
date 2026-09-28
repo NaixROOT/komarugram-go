@@ -154,6 +154,11 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 	if m.ReplyToMessageID != 0 && r.reply.Clicked(gtx) {
 		p.jumpTo(m.ReplyToMessageID)
 	}
+	if m.Service != nil && m.Service.Kind == model.ServiceHidden && !date {
+		// Telegram Desktop shows nothing for it, as a group's migration.
+		r.bodySize = image.Point{}
+		return layout.Dimensions{}
+	}
 	top, bottom := unit.Dp(4), unit.Dp(4)
 	if join&joinAbove != 0 {
 		top = 1
@@ -182,8 +187,12 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 				if m.Outgoing {
 					align = layout.E
 				}
-				if m.Kind == model.MessageService {
-					align = layout.Center
+				if m.ServicePill() {
+					dims := layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return p.servicePill(gtx, r, m, l)
+					})
+					r.bodySize = dims.Size
+					return dims
 				}
 				return align.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(660))
@@ -301,11 +310,10 @@ func (p *chatPage) bubbleContent(gtx layout.Context, r *messageRow, m model.Mess
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.richText(gtx, r, l, animate) }))
 	} else if m.Media == nil && m.Poll == nil {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			key := "history.empty_message"
 			if m.Kind == model.MessageService {
-				key = "history.service"
+				return label(gtx, p.serviceText(m, l), token.TypestyleBodyMedium, sc.Surface.OnColor, 0)
 			}
-			return label(gtx, l.T(key), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+			return label(gtx, l.T("history.empty_message"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
 		}))
 	}
 	for y, row := range m.Buttons {

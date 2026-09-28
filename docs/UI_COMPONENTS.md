@@ -160,6 +160,11 @@ The history is drawn as materialgram draws it:
   clipped to its shape; the comments open in a second `chatPage` under a
   `chatHead` — `layoutChatPageHead` with a back button in place of the
   avatar — over their channel.
+- **Service messages** (`history_service.go`): an action, as a user added or
+  a message pinned, is its words on a plate across the middle of the
+  history (`servicePill`), worded in the UI's language by
+  `localization.Catalog.Service` from `model.ServiceAction`. A pin's plate
+  quotes the message and shows it on a click; a call is a bubble.
 - **Reply strip** (`composer_reply.go`): the message a draft replies to, over
   the composer; the history's end and what opens from the composer move up by
   its height (`replyHeight`).
@@ -188,13 +193,14 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`,
-  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
+  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations.
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the
-  header of the comments page; `UNWRAPPED_PNG`, stickers and lone emoji.
+  header of the comments page; `UNWRAPPED_PNG`, stickers and lone emoji; `SERVICE_PNG`, service messages
+  and calls.
 - **The app itself.** `go run ./cmd/messenger -demo` runs without an account.
   On Linux under X11, `xdotool` drives a window (`mousemove --window … click`)
   and `xfce4-screenshooter -w` saves the active one.

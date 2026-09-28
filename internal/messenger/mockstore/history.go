@@ -94,6 +94,17 @@ func (s *Store) History(chat int64) model.History {
 	add("", model.MessageSticker, &model.MessageMedia{ID: "demo/tgs", MIMEType: "application/x-tgsticker", Width: 512, Height: 512}, nil, nil)
 	messages[len(messages)-1].ReplyToMessageID = messages[len(messages)-2].Key.MessageID
 	add("Следующая дата остаётся у верхнего края при прокрутке.", model.MessageText, nil, nil, nil)
+	// Service messages: what happened in the chat, worded by the UI.
+	service := func(a model.ServiceAction, reply model.MessageID) {
+		add("", model.MessageService, nil, nil, nil)
+		messages[len(messages)-1].Service = &a
+		messages[len(messages)-1].ReplyToMessageID = reply
+	}
+	service(model.ServiceAction{Kind: model.ServiceAddUser, Peers: []model.ServicePeer{{ID: 7, Name: "Ольга"}, {ID: 8, Name: "Павел"}}}, 0)
+	service(model.ServiceAction{Kind: model.ServicePin}, messages[len(messages)-2].Key.MessageID)
+	service(model.ServiceAction{Kind: model.ServiceEditTitle, Title: "Команда разработки"}, 0)
+	service(model.ServiceAction{Kind: model.ServiceTTL, Count: 7 * 86400}, 0)
+	service(model.ServiceAction{Kind: model.ServicePhoneCall, Count: 754}, 0)
 	spoiler := "Спойлер на нескольких строках: " + strings.Repeat("Нажмите здесь — текст откроется волной от места клика. ", 4)
 	add(spoiler, model.MessageText, nil, []model.Entity{{Kind: "spoiler", Offset: 0, Length: len(utf16.Encode([]rune(spoiler)))}}, nil)
 	add("Выделите часть этого текста и нажмите Ctrl/Cmd+C. Для выборки сообщений проведите по свободному месту рядом с пузырьками. Escape отменяет выделение.", model.MessageText, nil, nil, nil)

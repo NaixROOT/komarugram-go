@@ -179,8 +179,19 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 		out.Key.ChatID = peerID(m.PeerID)
 		out.Date = time.Unix(int64(m.Date), 0)
 		out.Kind = model.MessageService
-		// Preserve the action type without leaking Go type names into the UI.
-		out.Text = ""
+		out.Outgoing = m.Out
+		out.Post = m.Post
+		if m.FromID != nil {
+			out.SenderID = peerID(m.FromID)
+			out.SenderName = names[out.SenderID]
+		}
+		if r, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
+			out.ReplyToMessageID = model.MessageID(r.ReplyToMsgID)
+		}
+		if reactions, ok := m.GetReactions(); ok {
+			out.Reactions = convertReactions(reactions)
+		}
+		out.Service = serviceAction(m.Action, names)
 	}
 	b, _ := json.Marshal(out)
 	h := fnv.New64a()

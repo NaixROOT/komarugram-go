@@ -89,10 +89,13 @@ func (m *MessageMedia) Variant(w, h int) *MessageMedia {
 // ContentRevision must change when anything affecting layout changes (an edit,
 // media metadata becoming available, reply preview update, and so on).
 type Message struct {
-	WebPage          *WebPreview `json:",omitempty"`
-	Gift             *Gift       `json:",omitempty"`
-	Poll             *Poll       `json:",omitempty"`
-	Attachments      []Message   `json:"-"`
+	WebPage *WebPreview `json:",omitempty"`
+	Gift    *Gift       `json:",omitempty"`
+	Poll    *Poll       `json:",omitempty"`
+	// Service is what a service message tells. Messages cached before
+	// it existed have none, and show as a service message only.
+	Service          *ServiceAction `json:",omitempty"`
+	Attachments      []Message      `json:"-"`
 	Key              MessageKey
 	SenderID         int64
 	Kind             MessageKind

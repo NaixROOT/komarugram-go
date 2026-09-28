@@ -1026,6 +1026,9 @@ func (s *Store) replacePreview(chat int64, top int, m *model.Message) int {
 // from Telegram show it.
 func setPreview(chat *model.Chat, m model.Message) {
 	text := strings.Join(strings.Fields(m.Text), " ")
+	if m.Kind == model.MessageService && m.Service != nil {
+		text = serviceSummary(m, *chat)
+	}
 	if kind := messageKindName(m); kind != "" {
 		if text == "" {
 			text = kind
