@@ -24,10 +24,19 @@ import (
 type fakeSource struct {
 	calls atomic.Int32
 	data  []byte
+	// gate, when set, holds loads until it is closed.
+	gate chan struct{}
 }
 
-func (s *fakeSource) Media(context.Context, model.Message) ([]byte, error) {
+func (s *fakeSource) Media(ctx context.Context, _ model.Message) ([]byte, error) {
 	s.calls.Add(1)
+	if s.gate != nil {
+		select {
+		case <-s.gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return s.data, nil
 }
 func loadedManager(t *testing.T) (*Manager, *fakeSource, model.Message) {
@@ -90,7 +99,11 @@ func TestVisibleMediaSurvivesIdleAndPressure(t *testing.T) {
 	}
 }
 func TestAnimationStopsOffscreenWithoutDroppingFrame(t *testing.T) {
-	m, _, msg := loadedManager(t)
+	m, source, msg := loadedManager(t)
+	// The restarted load waits, so that the frame shown meanwhile is the
+	// one kept, not one the load decoded again.
+	source.gate = make(chan struct{})
+	defer close(source.gate)
 	frame, _ := m.Frame(msg, true)
 	entry := m.entries[msg.Media.ID]
 	entry.mu.Lock()
