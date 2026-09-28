@@ -134,6 +134,9 @@ func (p *chatPage) fileLayout(gtx layout.Context, r *messageRow, m model.Message
 			title = m.Media.Performer + " — " + title
 		}
 	}
+	if title == "" && m.Kind == model.MessageVoice {
+		title = l.T("history.voice")
+	}
 	if title == "" {
 		title = l.T("history.file")
 	}

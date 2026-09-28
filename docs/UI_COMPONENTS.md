@@ -211,7 +211,8 @@ new piece sits next to its neighbours.
   variable (`COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`,
   `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
-  with `COMPOSER_PNG` shows the picker's recommendations.
+  with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
+  a voice message being recorded.
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the

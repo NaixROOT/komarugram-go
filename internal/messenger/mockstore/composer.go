@@ -72,7 +72,11 @@ func (s *Store) Send(ctx context.Context, chat int64, out model.OutgoingMessage)
 		m.Kind = out.Item.Media.Kind
 		m.Media = out.Item.Media.Media
 	}
-	if out.Path != "" {
+	if out.Voice != nil {
+		// A voice message, as Telegram returns one: no name, its duration.
+		m.Kind = model.MessageVoice
+		m.Media = &model.MessageMedia{MIMEType: "audio/ogg", Duration: out.Voice.Duration}
+	} else if out.Path != "" {
 		m.Text = filepath.Base(out.Path)
 	}
 	for _, task := range out.Tasks {

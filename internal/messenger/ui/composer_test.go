@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -284,6 +285,16 @@ func TestRenderComposer(t *testing.T) {
 		h.p.list.Position.BeforeEnd = true
 		h.p.list.Position.First = len(h.p.messages) - 4
 		h.p.list.Position.Offset = 120
+	case "voice":
+		// A voice message being recorded.
+		h.p.composer.pickerOpen = false
+		h.chat = 2
+		h.frame()
+		levels := make([]float32, 200)
+		for i := range levels {
+			levels[i] = float32(math.Abs(math.Sin(float64(i)/5))) * 0.6
+		}
+		h.p.composer.recording = &voiceRecording{rec: &fakeRecorder{}, chat: 2, levels: levels, sampled: h.now.Add(time.Hour)}
 	case "tasks":
 		h.p.composer.pickerOpen = false
 		h.p.composer.form = 3

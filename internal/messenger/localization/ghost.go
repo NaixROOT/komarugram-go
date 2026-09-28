@@ -21,6 +21,8 @@ func init() {
 		"info.username_copied":     {"Имя пользователя скопировано.", "Username copied to clipboard."},
 		"info.link_copied":         {"Ссылка скопирована.", "Link copied to clipboard."},
 		"info.copy_link":           {"Копировать ссылку", "Copy Link"},
+		"record.voice":             {"Записать голосовое сообщение", "Record voice message"},
+		"record.no_ffmpeg":         {"Для голосовых сообщений нужен ffmpeg: установите его и попробуйте снова.", "Voice messages need ffmpeg: install it and try again."},
 		"info.registration":        {"Дата регистрации (примерно, по ID)", "Registration date (estimated from the ID)"},
 		"info.registered_about":    {"~ {date}", "~ {date}"},
 		"info.registered_before":   {"раньше {date}", "before {date}"},

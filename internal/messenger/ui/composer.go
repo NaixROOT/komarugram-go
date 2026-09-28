@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -118,11 +119,17 @@ type messageComposer struct {
 	browse, confirm, cancelForm surface
 	fileResults                 chan fileChoice
 	choosing                    bool
+	// voice records voice messages; recording is the one being recorded,
+	// voiceResults the recordings encoded for sending.
+	voice                 voiceTools
+	recording             *voiceRecording
+	voiceResults          chan voiceResult
+	micClick, voiceCancel surface
 }
 
 func newMessageComposer(source model.ConversationStore, invalidate func()) *messageComposer {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
+	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
 	c.source, _ = source.(model.ComposerStore)
 	c.search.SingleLine = true
 	c.path.SingleLine = true
@@ -291,6 +298,9 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 				if d.reply != nil && r.request.ReplyTo == d.reply.Key.MessageID {
 					d.reply = nil
 				}
+				if r.request.Voice != nil {
+					os.Remove(r.request.Path)
+				}
 				if r.chat == c.chat {
 					c.form = 0
 				}
@@ -331,6 +341,13 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 					c.list.Position = layout.Position{}
 				}
 			}
+		case r := <-c.voiceResults:
+			if r.err != nil {
+				c.draft(r.chat).err = r.err
+			} else if r.path != "" {
+				note := r.note
+				c.submit(r.chat, model.OutgoingMessage{Path: r.path, Voice: &note})
+			}
 		case f := <-c.fileResults:
 			c.choosing = false
 			if f.chat != c.chat || f.form != c.form {
@@ -347,6 +364,7 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 	}
 drained:
 	d := c.draft(chat)
+	c.updateRecording(gtx, l)
 	for {
 		_, ok := gtx.Event(pointer.Filter{Target: &c.editorHit, Kinds: pointer.Press})
 		if !ok {
@@ -653,10 +671,25 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 				})
 			})
 		}
+		if c.recording != nil {
+			// While it records, the cross drops the recording and Send
+			// sends it.
+			button(0, &c.voiceCancel, iconClear, l.T("record.cancel"))
+			sendWidth := min(gtx.Dp(92), s.X/3)
+			inRect(gtx, image.Rect(s.X-sendWidth-gtx.Dp(8), 0, s.X-gtx.Dp(8), s.Y), func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &c.send, l.T("composer.send")) })
+			})
+			inRect(gtx, image.Rect(iconWidth, 0, max(iconWidth, s.X-sendWidth-gtx.Dp(8)), s.Y), c.layoutRecording)
+			return layout.Dimensions{Size: s}
+		}
 		button(0, &c.attach, iconAttach, l.T("composer.attach"))
 		button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		sendWidth := 0
-		if strings.TrimSpace(d.editor.Text()) != "" || d.sending || d.pending != nil {
+		if c.canRecord(d) {
+			// With nothing written, the microphone takes Send's place.
+			sendWidth = iconWidth
+			button(s.X-2*iconWidth, &c.micClick, iconMic, l.T("record.voice"))
+		} else if strings.TrimSpace(d.editor.Text()) != "" || d.sending || d.pending != nil {
 			sendWidth = min(gtx.Dp(92), s.X/3)
 			inRect(gtx, image.Rect(s.X-iconWidth-sendWidth, 0, s.X-iconWidth, s.Y), func(gtx layout.Context) layout.Dimensions {
 				if d.sending {

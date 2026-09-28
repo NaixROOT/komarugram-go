@@ -357,6 +357,10 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 		if err != nil {
 			return err
 		}
+		if v := msg.Voice; v != nil {
+			typ = "audio/ogg"
+			attrs = []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Voice: true, Duration: int(v.Duration.Round(time.Second) / time.Second), Waveform: v.Waveform}}
+		}
 		file, err := uploader.NewUploader(api).FromPath(ctx, msg.Path)
 		if err != nil {
 			return err
@@ -364,7 +368,7 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 		if msg.AsMedia && (typ == "image/jpeg" || typ == "image/png") {
 			media = &tg.InputMediaUploadedPhoto{File: file}
 		} else {
-			media = &tg.InputMediaUploadedDocument{File: file, MimeType: typ, ForceFile: !msg.AsMedia, Attributes: attrs}
+			media = &tg.InputMediaUploadedDocument{File: file, MimeType: typ, ForceFile: !msg.AsMedia && msg.Voice == nil, Attributes: attrs}
 		}
 	}
 	var res tg.UpdatesClass

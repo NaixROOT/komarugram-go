@@ -39,6 +39,7 @@ Two applications built on the same base:
 | `pkg/vp9`                   | VP9 decoder: libvpx compiled to wasm, run by wazero                 |
 | `pkg/sandbox`               | Limits for the wasm sandboxes: memory per sandbox, a shared budget, slow-operation cutoff |
 | `pkg/player`                | mpv or VLC as an external window, driven over its IPC socket         |
+| `pkg/voice`                 | Voice messages: the microphone through ffmpeg, Opus encoding, Telegram's waveform |
 | `pkg/program`               | Running external programs: `--version` checks, process groups, flatpak launchers |
 | `pkg/tdata`                 | Telegram Desktop tdata (and Telethon/Pyrogram sessions): read and write |
 | `pkg/set`, `pkg/helpers`    | Small generic helpers used by `pkg/tdata`                          |
@@ -396,6 +397,12 @@ a native file chooser (`kdialog` or `zenity` on Linux), with a path field as a
 fallback. Video upload uses `ffprobe` for dimensions and duration. Creating native
 Telegram checklists requires Premium; received checklists display their items and
 completion state. The demo simulates sending locally without network traffic.
+
+With nothing written, a microphone takes Send's place: it records a voice
+message (`pkg/voice`) through `ffmpeg` — PulseAudio/PipeWire or ALSA on Linux,
+DirectShow on Windows, AVFoundation on macOS — into PCM for its time, loudness
+and waveform, and encodes it to Opus in OGG when it is sent. The cross or Escape
+drops it; recordings under 0.2 s are dropped, as in Telegram Desktop.
 
 The smile opens Emoji / Stickers / GIF with a debounced search and recent items.
 Installed sticker/custom-emoji packs are fetched through Telegram, standard emoji
