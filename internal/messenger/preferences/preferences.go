@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"gio-mw/exp/powersave"
@@ -80,6 +81,30 @@ type Global struct {
 	// Keep is what the cache keeps that Telegram takes back, as AyuGram's
 	// saved deleted messages and edits history.
 	Keep Keep `json:"keep"`
+	// Filters hide messages, as AyuGram's message filters.
+	Filters Filters `json:"filters"`
+}
+
+// Filters hide others' messages that match a pattern, or that blocked
+// users sent; all are off by default, as in AyuGram.
+type Filters struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// InChats applies the filters in groups and private chats too; without
+	// it they apply in channels only.
+	InChats bool `json:"in_chats,omitempty"`
+	// HideBlocked hides what blocked users sent, in every chat.
+	HideBlocked bool            `json:"hide_blocked,omitempty"`
+	Patterns    []FilterPattern `json:"patterns,omitempty"`
+}
+
+// FilterPattern is a regular expression, in Go's syntax, that hides the
+// messages it matches, or, Reversed, the ones it does not; in Chat alone,
+// or in every chat for 0.
+type FilterPattern struct {
+	Text            string `json:"text"`
+	Reversed        bool   `json:"reversed,omitempty"`
+	CaseInsensitive bool   `json:"case_insensitive,omitempty"`
+	Chat            int64  `json:"chat,omitempty"`
 }
 
 // Keep is what the cache keeps: see model.Keep. Both are on by default,
@@ -96,6 +121,13 @@ type Ghost struct {
 	SendOnline     bool `json:"send_online,omitempty"`
 	SendTyping     bool `json:"send_typing,omitempty"`
 	ReadOnInteract bool `json:"read_on_interact"`
+}
+
+// Equal reports whether g and o are the same preferences, as saved.
+func (g Global) Equal(o Global) bool {
+	a, errA := json.Marshal(g)
+	b, errB := json.Marshal(o)
+	return errA == nil && errB == nil && string(a) == string(b)
 }
 
 // PlayerPaths are the players the user pointed at, by kind.
@@ -266,6 +298,12 @@ func (s *Store) SetKeep(k Keep) error {
 	return s.change(func(global *Global) { global.Keep = k })
 }
 
+// SetFilters changes the message filters.
+func (s *Store) SetFilters(f Filters) error {
+	f.Patterns = slices.Clone(f.Patterns)
+	return s.change(func(global *Global) { global.Filters = f })
+}
+
 // SetComposer changes the message composer style for all windows.
 func (s *Store) SetComposer(value ComposerStyle) error {
 	return s.change(func(g *Global) { g.Composer = value })
@@ -308,7 +346,7 @@ func (s *Store) change(update func(*Global)) error {
 	s.mu.Lock()
 	next := s.global
 	update(&next)
-	if next == s.global {
+	if next.Equal(s.global) {
 		s.mu.Unlock()
 		return nil
 	}

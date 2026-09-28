@@ -136,6 +136,8 @@ type settingsPage struct {
 	keep     func() preferences.Keep
 	setKeep  func(preferences.Keep)
 	keepOpts *toggle.Toggle[string]
+	// filtersView edits the message filters; hidden without its functions.
+	filtersView *filterSettings
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -203,6 +205,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 			p.setGhost(ghostFromOptions(values))
 		}
 	})
+	p.filtersView = newFilterSettings()
 	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
 		if p.setKeep != nil {
 			p.setKeep(preferences.Keep{Deleted: slices.Contains(values, "deleted"), Edits: slices.Contains(values, "edits")})
@@ -320,6 +323,7 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 	}
 	if p.section == settingsPrivacy {
 		p.security.UpdateSettings(gtx)
+		p.filtersView.Update(gtx)
 	}
 }
 
@@ -373,6 +377,14 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 						}
 						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.layoutGhost(gtx, l) }, defaultCardPadding)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.filtersView.filters == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.filtersView.Layout(gtx, l) }, defaultCardPadding)
 						})
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {

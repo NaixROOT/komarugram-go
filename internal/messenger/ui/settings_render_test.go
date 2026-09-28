@@ -72,13 +72,17 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	}
 	if os.Getenv("SETTINGS_SECTION") == "privacy" {
 		p.section = settingsPrivacy
-		size.Y = 1600
+		size.Y = 2300
 		ghost := preferences.Ghost{ReadOnInteract: true}
 		p.ghost = func() preferences.Ghost { return ghost }
 		p.setGhost = func(g preferences.Ghost) { ghost = g }
 		keep := preferences.Keep{Deleted: true, Edits: true}
 		p.keep = func() preferences.Keep { return keep }
 		p.setKeep = func(k preferences.Keep) { keep = k }
+		filters := preferences.Filters{Enabled: true, Patterns: []preferences.FilterPattern{{Text: "реклама|промокод", CaseInsensitive: true}, {Text: "^#", Reversed: true, Chat: 5}}}
+		p.filtersView.filters = func() preferences.Filters { return filters }
+		p.filtersView.setFilters = func(f preferences.Filters) { filters = f }
+		p.filtersView.remove = make([]surface, 2)
 	}
 	if os.Getenv("SETTINGS_SECTION") == "integrations" {
 		p.section = settingsIntegrations

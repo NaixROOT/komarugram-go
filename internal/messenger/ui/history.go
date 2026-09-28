@@ -14,6 +14,7 @@ import (
 	"komarugram/internal/messenger/chatmedia"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/preferences"
 	"komarugram/internal/messenger/styledtext"
 	"komarugram/pkg/player"
 
@@ -72,8 +73,16 @@ type chatPage struct {
 	highlight      model.MessageID
 	highlightUntil time.Time
 	infoAsked      bool
-	deletion       messageDeletion
-	stickers       stickerSetDialog
+	// filter hides messages, as the settings ask; filtered counts what it
+	// hid in the open chat, and showFiltered are the chats that show it.
+	filter       *messageFilter
+	filterShown  *messageFilter
+	filtered     int
+	showFiltered map[int64]bool
+	// addFilter saves a pattern made from selected text.
+	addFilter func(preferences.FilterPattern)
+	deletion  messageDeletion
+	stickers  stickerSetDialog
 	// dialogStickers are the media of the sticker sets shown in the dialog
 	// in this chat; switching chats forgets them.
 	dialogStickers map[string]bool
@@ -349,6 +358,11 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		w.WatchChat(p, c.ID)
 	}
 	snapshotEnd := p.trace.Begin("history.snapshot+albums")
+	if p.filterShown != p.filter {
+		// Other filters: the history is read and filtered again.
+		p.filterShown = p.filter
+		p.revision = 0
+	}
 	var history model.History
 	fresh := true
 	if source, ok := p.source.(interface {
@@ -360,7 +374,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	p.threadRoot = history.ThreadRoot
 	if fresh {
-		history.Messages = model.GroupAlbums(history.Messages)
+		history.Messages = p.filterMessages(model.GroupAlbums(history.Messages), c.ID)
 		p.revision = history.Revision
 	} else {
 		history.Messages = p.messages

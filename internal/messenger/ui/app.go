@@ -6,6 +6,7 @@ import (
 	"image"
 	"komarugram/internal/diagnostics"
 	"log"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -44,7 +45,9 @@ type App struct {
 
 	preferences *preferences.Store
 	// focused is set while the window has the focus.
-	focused    bool
+	focused bool
+	// filter hides messages as the settings ask.
+	filter     *messageFilter
 	lightTheme *token.Theme
 	darkTheme  *token.Theme
 
@@ -199,6 +202,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.filtersView.filters = func() preferences.Filters { return a.preferences.Global().Filters }
+	a.settings.filtersView.setFilters = func(f preferences.Filters) {
+		if err := services.Preferences.SetFilters(f); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.keep = func() preferences.Keep { return a.preferences.Global().Keep }
 	a.settings.setKeep = func(k preferences.Keep) {
 		if err := services.Preferences.SetKeep(k); err != nil {
@@ -304,7 +313,25 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
+	p.addFilter = func(pattern preferences.FilterPattern) {
+		f := a.preferences.Global().Filters
+		f.Patterns = append(slices.Clone(f.Patterns), pattern)
+		f.Enabled = true
+		if err := a.preferences.SetFilters(f); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	return p
+}
+
+// messageFilter is the filter the settings ask for, compiled again only
+// when they change.
+func (a *App) messageFilter() *messageFilter {
+	f := a.preferences.Global().Filters
+	if a.filter == nil || !a.filter.same(f) {
+		a.filter = compileFilter(f)
+	}
+	return a.filter
 }
 
 // Close releases process-wide subscriptions when this window closes.
@@ -635,6 +662,10 @@ func (a *App) Layout(gtx layout.Context) {
 		return
 	}
 	a.tellGhost()
+	a.history.filter = a.messageFilter()
+	if a.comments != nil {
+		a.comments.filter = a.history.filter
+	}
 	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked()) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)

@@ -19,3 +19,10 @@ type KeepStore interface {
 	// first.
 	MessageEdits(ctx context.Context, msg Message) ([]Message, error)
 }
+
+// BlockedSource knows the peers the account blocked.
+type BlockedSource interface {
+	// Blocked reports whether the account blocked peer; the first ask
+	// starts loading the list, and nothing is blocked until it is known.
+	Blocked(peer int64) bool
+}

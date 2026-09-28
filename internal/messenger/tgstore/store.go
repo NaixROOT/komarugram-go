@@ -53,6 +53,7 @@ type Store struct {
 	reactions     reactionState
 	recent        recentChats
 	ghost         ghostState
+	blocked       blockedState
 }
 
 // New returns an empty store that calls changed whenever Load has read more.

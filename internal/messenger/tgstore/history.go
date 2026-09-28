@@ -797,6 +797,8 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			chat = peerID(&tg.PeerChannel{ChannelID: u.ChannelID})
 		case *tg.UpdateMessageReactions:
 			s.applyReactions(peerID(u.Peer), u.MsgID, u.Reactions)
+		case *tg.UpdatePeerBlocked:
+			s.applyBlocked(u)
 		case *tg.UpdatePinnedMessages:
 			s.applyPinned(ctx, peerID(u.Peer), u.Messages, u.Pinned)
 		case *tg.UpdatePinnedChannelMessages:

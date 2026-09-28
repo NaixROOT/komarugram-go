@@ -28,6 +28,7 @@ const (
 	chatMenuSearch chatMenuAction = iota
 	chatMenuInfo
 	chatMenuBeginning
+	chatMenuFiltered
 	chatMenuActions
 )
 
@@ -57,6 +58,9 @@ func (p *chatPage) chatMenuActions() []chatMenuAction {
 	if _, ok := p.source.(model.MessageRevealer); ok && p.threadRoot == 0 {
 		out = append(out, chatMenuBeginning)
 	}
+	if p.filtered > 0 {
+		out = append(out, chatMenuFiltered)
+	}
 	return out
 }
 
@@ -74,6 +78,11 @@ func (p *chatPage) chatMenuLabel(a chatMenuAction, l localization.Catalog) strin
 		return l.T("chat_menu.profile")
 	case chatMenuBeginning:
 		return l.T("chat_menu.beginning")
+	case chatMenuFiltered:
+		if p.showFiltered[p.chat] {
+			return l.T("chat_menu.hide_filtered")
+		}
+		return l.T("chat_menu.show_filtered")
 	}
 	return ""
 }
@@ -84,6 +93,8 @@ func chatMenuIcon(a chatMenuAction) wdk.IconWidget {
 		return iconSearch
 	case chatMenuInfo:
 		return iconInfo
+	case chatMenuFiltered:
+		return iconFilter
 	}
 	return iconToTop
 }
@@ -176,6 +187,13 @@ func (p *chatPage) chatMenuUpdate(gtx layout.Context) {
 		case chatMenuBeginning:
 			// The chat's first message, or the history around where it was.
 			p.jumpTo(1)
+		case chatMenuFiltered:
+			if p.showFiltered == nil {
+				p.showFiltered = map[int64]bool{}
+			}
+			p.showFiltered[p.chat] = !p.showFiltered[p.chat]
+			// The history is read and filtered again.
+			p.revision = 0
 		}
 		p.invalidate()
 	}

@@ -6,11 +6,13 @@ import (
 	"context"
 	"image"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/preferences"
 
 	"gio-mw/token"
 	"gio-mw/wdk"
@@ -45,6 +47,7 @@ const (
 	actionReacted
 	actionRead
 	actionEdits
+	actionFilter
 	menuActions
 )
 
@@ -225,6 +228,9 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 	if _, ok := p.source.(model.ReactionLister); ok && m.ReactionsListed {
 		out = append(out, actionReacted)
 	}
+	if p.addFilter != nil && p.menuSelectedText(m) != "" {
+		out = append(out, actionFilter)
+	}
 	if _, ok := p.source.(model.KeepStore); ok && !m.EditedAt.IsZero() && !m.Outgoing {
 		out = append(out, actionEdits)
 	}
@@ -308,6 +314,11 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		p.reacted.open(p, m)
 	case actionEdits:
 		p.edits.open(p, m)
+	case actionFilter:
+		// A filter of the words selected, in every chat, as AyuGram's
+		// quick filter.
+		p.addFilter(preferences.FilterPattern{Text: regexp.QuoteMeta(strings.TrimSpace(p.menuSelectedText(m))), CaseInsensitive: true})
+		p.selectionNotice = l.T("filters.added")
 	case actionRead:
 		if g, ok := p.source.(model.GhostStore); ok {
 			last := m.Key.MessageID
@@ -356,6 +367,8 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.read")
 	case actionEdits:
 		return l.T("menu.edits")
+	case actionFilter:
+		return l.T("menu.filter")
 	case actionReacted:
 		total := 0
 		for _, r := range p.messageMenu.reactedOf {
@@ -394,6 +407,8 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconRead
 	case actionEdits:
 		return iconHistory
+	case actionFilter:
+		return iconFilter
 	}
 	return iconEmoji
 }
