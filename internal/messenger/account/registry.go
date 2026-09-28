@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -306,8 +305,10 @@ func (r *registry) migrateLocked() error {
 	}
 	// The attached file is named by URI to read it through the ordinary VFS
 	// rather than the encrypting one of the connection.
-	plain := url.URL{Scheme: "file", Path: filepath.ToSlash(r.plainPath()), RawQuery: "vfs=os&mode=ro"}
-	_, err = secure.Exec(`ATTACH DATABASE ? AS plain`, plain.String())
+	plain, err := securedb.FileURI(r.plainPath(), url.Values{"vfs": {"os"}, "mode": {"ro"}})
+	if err == nil {
+		_, err = secure.Exec(`ATTACH DATABASE ? AS plain`, plain)
+	}
 	if err == nil {
 		_, err = secure.Exec(`INSERT INTO main.accounts SELECT * FROM plain.accounts`)
 	}

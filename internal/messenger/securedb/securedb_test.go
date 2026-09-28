@@ -5,9 +5,12 @@ package securedb
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"komarugram/internal/messenger/security"
@@ -63,5 +66,37 @@ func TestEncryptedDatabaseIsAccountScoped(t *testing.T) {
 	var count int
 	if err := wrong.QueryRow("SELECT count(*) FROM messages").Scan(&count); err == nil {
 		t.Fatalf("database opened with another account key, rows=%d", count)
+	}
+}
+
+func TestCopyEncryptedErrorHidesKey(t *testing.T) {
+	root := t.TempDir()
+	protection, err := security.OpenPath(filepath.Join(root, "security.json"), new(testTPM))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protection.Enable(context.Background(), "password"); err != nil {
+		t.Fatal(err)
+	}
+	source, err := sql.Open("sqlite3", filepath.Join(root, "plain.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if _, err := source.Exec(`CREATE TABLE messages(body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	key, err := protection.DeriveKey("sqlite/account-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SQLite cannot create a file in a missing directory.
+	target := filepath.Join(root, "missing", "history.db")
+	err = CopyEncrypted(source, target, "account-a", protection)
+	if err == nil {
+		t.Fatal("copy into a missing directory succeeded")
+	}
+	if strings.Contains(err.Error(), hex.EncodeToString(key)) {
+		t.Fatalf("error contains the database key: %v", err)
 	}
 }
