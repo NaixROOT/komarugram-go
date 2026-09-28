@@ -55,6 +55,8 @@ type messageRow struct {
 	tileSize image.Point
 }
 type chatPage struct {
+	// pinned is the bar of the chat's pinned messages.
+	pinned   pinnedBar
 	deletion messageDeletion
 	stickers stickerSetDialog
 	// dialogStickers are the media of the sticker sets shown in the dialog
@@ -256,7 +258,25 @@ func (p *chatPage) save(force bool) {
 	p.view = v
 	p.saved = time.Now()
 }
+
+// Layout draws the chat's pinned bar, if it has pinned messages, and its
+// history under it.
 func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
+	bar := p.pinnedHeight(gtx, c.ID)
+	if bar == 0 {
+		return p.layoutHistory(gtx, c, l, animate)
+	}
+	size := gtx.Constraints.Max
+	body := gtx
+	body.Constraints = layout.Exact(image.Pt(size.X, max(size.Y-bar, 0)))
+	offset(body, image.Pt(0, bar), func(gtx layout.Context) layout.Dimensions {
+		return p.layoutHistory(gtx, c, l, animate)
+	})
+	p.layoutPinned(gtx, c.ID, l)
+	return layout.Dimensions{Size: size}
+}
+
+func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
 	p.animate = animate
 	p.updateDelete(c.ID)
 	p.trace = diagnostics.From(gtx.Values)

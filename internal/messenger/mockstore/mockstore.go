@@ -28,6 +28,8 @@ type Store struct {
 	// recent is the search history; query, the search asked for last.
 	recent []model.Chat
 	query  model.SearchQuery
+	// pinnedHidden are the chats whose pinned messages were hidden.
+	pinnedHidden map[int64]bool
 }
 
 // New returns a store with demo chats whose times are relative to now, and

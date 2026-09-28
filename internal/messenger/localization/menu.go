@@ -16,6 +16,8 @@ func init() {
 		"menu.private_link": "lng_context_about_private_link",
 		"composer.reply_to": "lng_preview_reply_to", "composer.reply_remove": "lng_reply_remove",
 		"emoji_packs.title": "lng_custom_emoji_used_sets",
+		"pinned.title":      "lng_pinned_message", "pinned.previous": "lng_pinned_previous",
+		"pinned.hide": "lng_pinned_hide_all",
 	} {
 		TelegramKeys[key] = telegram
 	}
@@ -41,6 +43,9 @@ func init() {
 		"composer.reply_remove":  "Не отвечать",
 		"emoji_packs.title":      "Наборы использованных эмодзи",
 		"emoji_packs.failed":     "Не удалось загрузить наборы",
+		"pinned.title":           "Закреплённое сообщение",
+		"pinned.previous":        "Предыдущее сообщение",
+		"pinned.hide":            "Не показывать закреплённые",
 	} {
 		russian[key] = value
 	}
@@ -65,6 +70,9 @@ func init() {
 		"composer.reply_remove":  "Do Not Reply",
 		"emoji_packs.title":      "Sets of used emoji",
 		"emoji_packs.failed":     "Could not load the sets",
+		"pinned.title":           "Pinned message",
+		"pinned.previous":        "Previous message",
+		"pinned.hide":            "Don't show pinned messages",
 	} {
 		english[key] = value
 	}

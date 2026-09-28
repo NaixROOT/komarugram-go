@@ -113,6 +113,8 @@ type conversation struct {
 	threadIDs map[model.MessageKey]int64
 	// lookups are single messages found apart from their history's pages.
 	lookups map[model.MessageKey]*lookup
+	// pinned are the chats' pinned messages.
+	pinned map[int64]*pinned
 }
 type viewSave struct {
 	view    model.Viewport
@@ -786,6 +788,10 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			chat = peerID(&tg.PeerChannel{ChannelID: u.ChannelID})
 		case *tg.UpdateMessageReactions:
 			s.applyReactions(peerID(u.Peer), u.MsgID, u.Reactions)
+		case *tg.UpdatePinnedMessages:
+			s.applyPinned(ctx, peerID(u.Peer), u.Messages, u.Pinned)
+		case *tg.UpdatePinnedChannelMessages:
+			s.applyPinned(ctx, peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.Messages, u.Pinned)
 		case *tg.UpdateChannelMessageViews:
 			s.changeMessage(peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.ID, func(m *model.Message) { m.Views = max(m.Views, u.Views) })
 		}

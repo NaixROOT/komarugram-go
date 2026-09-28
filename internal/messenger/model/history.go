@@ -326,3 +326,15 @@ const (
 type MessageLookup interface {
 	LookupMessage(chat int64, id MessageID) (Message, LookupState)
 }
+
+// PinnedSource knows the pinned messages of chats.
+type PinnedSource interface {
+	// PinnedMessages returns the ids of chat's pinned messages, oldest
+	// first, as far as they are known, and none while the account hid
+	// them. The first ask starts loading them; the store tells of changes
+	// as of any other.
+	PinnedMessages(chat int64) []MessageID
+	// HidePinned hides chat's pinned messages until another one is pinned,
+	// as Telegram Desktop does for a member who may not unpin them.
+	HidePinned(chat int64)
+}

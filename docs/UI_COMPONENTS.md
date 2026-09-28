@@ -165,6 +165,10 @@ The history is drawn as materialgram draws it:
   history (`servicePill`), worded in the UI's language by
   `localization.Catalog.Service` from `model.ServiceAction`. A pin's plate
   quotes the message and shows it on a click; a call is a bubble.
+- **Pinned bar** (`pinned_bar.go`): under the chat's header, the latest
+  pinned message above the history's bottom (`model.PinnedSource`); a click
+  goes to it and shows the one before, as Telegram Desktop's does. Its line
+  has a segment for each pinned message, up to four.
 - **Reply strip** (`composer_reply.go`): the message a draft replies to, over
   the composer; the history's end and what opens from the composer move up by
   its height (`replyHeight`).
@@ -193,7 +197,7 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`,
-  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
+  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations.
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the

@@ -101,7 +101,7 @@ func (s *Store) History(chat int64) model.History {
 		messages[len(messages)-1].ReplyToMessageID = reply
 	}
 	service(model.ServiceAction{Kind: model.ServiceAddUser, Peers: []model.ServicePeer{{ID: 7, Name: "Ольга"}, {ID: 8, Name: "Павел"}}}, 0)
-	service(model.ServiceAction{Kind: model.ServicePin}, messages[len(messages)-2].Key.MessageID)
+	service(model.ServiceAction{Kind: model.ServicePin}, demoPinned[len(demoPinned)-1])
 	service(model.ServiceAction{Kind: model.ServiceEditTitle, Title: "Команда разработки"}, 0)
 	service(model.ServiceAction{Kind: model.ServiceTTL, Count: 7 * 86400}, 0)
 	service(model.ServiceAction{Kind: model.ServicePhoneCall, Count: 754}, 0)
