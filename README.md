@@ -25,6 +25,8 @@ wazero is used as a high-performance WebAssembly sandbox for rendering stickers.
 
 FFmpeg, mpv, VLC and Chromium are available as external integrations that you must provide yourself. However, the application will work even without them, if the user is satisfied with that.
 
+Without FFmpeg, or when chosen in the settings, GIFs and animated avatars play with FFmpeg's H.264 decoder compiled to WebAssembly. It is not built into the application: it is downloaded the first time it is needed from [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), which holds its sources and build script. To use your own build, point the `KOMARUGRAM_AVCDEC` environment variable at an `avcdec.wasm` file or its URL.
+
 ## How to get started
 
 Make a copy of this repository. Ensure that **Go 1.27.1** is installed on your machine — it is the minimum required version. On Linux, Wayland and X11 development libraries may be required.
@@ -64,3 +66,5 @@ We thank the creator of gotd/td for the excellent library and Gio for an archite
 ## License
 
 When working with this project, you have no licensing obligations regarding the modification or distribution of the code. Some dependencies require that you respect copyright, but they do not impose any restrictions on the code itself (permissive MIT-compatible licenses).
+
+The one exception is the H.264 decoder, which is FFmpeg's and licensed under the LGPL 2.1 or later. It is kept out of this repository and out of the binary, in [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), and loaded at run time, where `KOMARUGRAM_AVCDEC` can replace it.

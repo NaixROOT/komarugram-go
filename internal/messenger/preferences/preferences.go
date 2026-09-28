@@ -78,6 +78,9 @@ type Global struct {
 	FFmpegPath  string `json:"ffmpeg_path,omitempty"`
 	// StickerPlayer is empty for automatic selection, or ffmpeg/wasm.
 	StickerPlayer string `json:"sticker_player,omitempty"`
+	// AnimationPlayer plays GIFs and animated avatars, which are MP4: empty
+	// for automatic selection, or ffmpeg/wasm.
+	AnimationPlayer string `json:"animation_player,omitempty"`
 	// Ghost is what the accounts tell others of themselves, as AyuGram's
 	// Ghost Mode, the same for all of them.
 	Ghost Ghost `json:"ghost"`
@@ -264,6 +267,9 @@ func validate(g Global) error {
 	if g.StickerPlayer != "" && g.StickerPlayer != "ffmpeg" && g.StickerPlayer != "wasm" {
 		return errors.New("invalid sticker player")
 	}
+	if g.AnimationPlayer != "" && g.AnimationPlayer != "ffmpeg" && g.AnimationPlayer != "wasm" {
+		return errors.New("invalid animation player")
+	}
 	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
 		return errors.New("invalid external player")
 	}
@@ -286,6 +292,10 @@ func (s *Store) SetFFmpegPath(path string) error {
 
 func (s *Store) SetStickerPlayer(value string) error {
 	return s.change(func(g *Global) { g.StickerPlayer = value })
+}
+
+func (s *Store) SetAnimationPlayer(value string) error {
+	return s.change(func(g *Global) { g.AnimationPlayer = value })
 }
 
 func (s *Store) SetTheme(value Theme) error {

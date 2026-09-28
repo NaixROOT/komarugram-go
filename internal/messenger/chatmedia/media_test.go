@@ -342,7 +342,7 @@ func TestWebMPreviewCachesLoopAndReusesItAfterScrolling(t *testing.T) {
 	}
 	source := &fakeSource{data: data}
 	m := NewShared(source, func() {})
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	defer m.Close()
 	msg := model.Message{Kind: model.MessageSticker, Media: &model.MessageMedia{ID: "cached-webm", MIMEType: "video/webm", Width: 512, Height: 512}}
 	var clip *stickerClip
@@ -606,7 +606,7 @@ func TestPlayedStickerKeepsItsStillWhenEvicted(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := New(&fakeSource{data: data}, func() {})
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	defer m.Close()
 	sticker := func(i int) model.Message {
 		return model.Message{Kind: model.MessageSticker, Media: &model.MessageMedia{ID: fmt.Sprintf("played/%d", i), MIMEType: "video/webm", Width: 512, Height: 512}}
@@ -671,7 +671,7 @@ func webmManager(t *testing.T, changed func()) *Manager {
 		t.Fatal(err)
 	}
 	m := New(&fakeSource{data: data}, changed)
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	t.Cleanup(m.Close)
 	return m
 }

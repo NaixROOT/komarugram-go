@@ -166,7 +166,7 @@ type settingsPage struct {
 	// players chooses the external player for videos and audio; browser,
 	// the browser Mini Apps run in.
 	players  *playerSettings
-	stickers *stickerPlayerSettings
+	decoders *decoderSettings
 	// sessions are the account's devices; nil hides the section.
 	sessions   *sessionsView
 	browser    *programSetting
@@ -202,7 +202,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 		confirmLogOut: button.Filled(),
 		cancelLogOut:  button.Text(),
 		players:       newPlayerSettings(),
-		stickers:      newStickerPlayerSettings(),
+		decoders:      newDecoderSettings(),
 		browser:       newBrowserSetting(),
 		invalidate:    invalidate,
 	}
@@ -352,7 +352,7 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 	p.privacy.Update(gtx)
 	if p.section == settingsIntegrations {
 		p.players.Update(gtx)
-		p.stickers.Update(gtx)
+		p.decoders.Update(gtx)
 		p.browser.Update(gtx)
 	}
 	if p.section == settingsDevices && p.sessions != nil {

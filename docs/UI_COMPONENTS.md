@@ -144,7 +144,14 @@ The history is drawn as materialgram draws it:
   through WASM, then close the decoder instances. FFmpeg only starts for
   playback; dormant previews wait for an event without a frame timer. The
   choice does not affect Lottie, GIFs or avatars. Stickers do not require
-  `ffprobe`. A GIF shown still starts no process either: it shows Telegram's
+  `ffprobe`. The internal MP4 animation player (`decoderSettings.animations`,
+  `sticker_player.go`) is the same choice for GIFs and animated avatars:
+  FFmpeg when found, otherwise, or when chosen, FFmpeg's H.264 decoder in a
+  WASM sandbox, one GIF at a time on hover. That decoder is not in the
+  binary: `chatmedia/avcdec.go` downloads it the first time it is needed
+  from [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), at a
+  pinned commit, checks its SHA-256 and keeps it in the cache directory;
+  `KOMARUGRAM_AVCDEC` names a build of the user's instead (a path or a URL). A GIF shown still starts no process either: it shows Telegram's
   thumbnail, fetched before the file (a real GIF file's first frame is
   decoded in Go); large GIFs have none and stay blank until played, as in the
   official clients. `ffprobe` and `ffmpeg` start when it plays, and `ffmpeg`

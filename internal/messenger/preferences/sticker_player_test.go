@@ -36,3 +36,30 @@ func TestStickerPlayerPreferences(t *testing.T) {
 		t.Fatal("invalid player changed settings")
 	}
 }
+
+func TestAnimationPlayerPreferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Global().AnimationPlayer != "" {
+		t.Fatal("default must select an available decoder automatically")
+	}
+	if err := s.SetAnimationPlayer("wasm"); err != nil {
+		t.Fatal(err)
+	}
+	s, err = OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Global().AnimationPlayer != "wasm" || s.Global().StickerPlayer != "" {
+		t.Fatal("animation player not persisted apart")
+	}
+	if err := s.SetAnimationPlayer("unknown"); err == nil {
+		t.Fatal("invalid player accepted")
+	}
+	if s.Global().AnimationPlayer != "wasm" {
+		t.Fatal("invalid player changed settings")
+	}
+}

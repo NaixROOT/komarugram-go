@@ -13,16 +13,26 @@ import (
 	"komarugram/pkg/video"
 )
 
-type stickerPlayerSettings struct {
-	program *programSetting
-	radios  *radio.Radios[string]
-	chosen  func() string
-	choose  func(string)
+// decoderSettings are the internal players: one FFmpeg, and for video
+// stickers (WebM) and for GIFs and animated avatars (MP4) the choice between
+// it and a WASM sandbox.
+type decoderSettings struct {
+	program              *programSetting
+	stickers, animations *decoderChoice
 }
 
-func newStickerPlayerSettings() *stickerPlayerSettings {
-	s := &stickerPlayerSettings{}
-	s.program = &programSetting{
+// decoderChoice is the player of one kind of media.
+type decoderChoice struct {
+	// title and hint are localization keys; hint may be empty.
+	title, hint string
+	program     *programSetting
+	radios      *radio.Radios[string]
+	chosen      func() string
+	choose      func(string)
+}
+
+func newDecoderSettings() *decoderSettings {
+	program := &programSetting{
 		title:  "FFmpeg",
 		custom: func() string { return "" }, save: func(string) {},
 		check: video.CheckFFmpeg,
@@ -35,32 +45,47 @@ func newStickerPlayerSettings() *stickerPlayerSettings {
 			return path, about, err
 		},
 	}
-	s.radios = radio.NewRadios([]string{"ffmpeg", "wasm"}, "wasm", func(value string) {
-		if s.choose != nil {
-			s.choose(value)
-		}
-	})
-	return s
+	return &decoderSettings{
+		program:    program,
+		stickers:   newDecoderChoice(program, "sticker_player.title", ""),
+		animations: newDecoderChoice(program, "sticker_player.mp4_title", "sticker_player.mp4_hint"),
+	}
 }
 
-func (s *stickerPlayerSettings) current() string {
-	if s.chosen != nil && s.chosen() != "" {
-		return s.chosen()
+func newDecoderChoice(program *programSetting, title, hint string) *decoderChoice {
+	c := &decoderChoice{title: title, hint: hint, program: program}
+	c.radios = radio.NewRadios([]string{"ffmpeg", "wasm"}, "wasm", func(value string) {
+		if c.choose != nil {
+			c.choose(value)
+		}
+	})
+	return c
+}
+
+func (c *decoderChoice) current() string {
+	if c.chosen != nil && c.chosen() != "" {
+		return c.chosen()
 	}
-	if video.ResolveFFmpeg(s.program.custom()) != "" {
+	if video.ResolveFFmpeg(c.program.custom()) != "" {
 		return "ffmpeg"
 	}
 	return "wasm"
 }
 
-func (s *stickerPlayerSettings) Update(gtx layout.Context) {
+func (s *decoderSettings) Update(gtx layout.Context) {
 	s.program.Update(gtx)
-	s.radios.SetValue(s.current())
-	s.radios.Update(gtx)
+	for _, c := range []*decoderChoice{s.stickers, s.animations} {
+		c.radios.SetValue(c.current())
+		c.radios.Update(gtx)
+	}
 }
 
-func (s *stickerPlayerSettings) Layout(gtx layout.Context, l localization.Catalog) layout.Dimensions {
-	return settingsChoiceCard(gtx, l.T("sticker_player.title"), "", func(gtx layout.Context) layout.Dimensions {
-		return s.radios.Layout(gtx, radio.LeadingKind, map[string]string{"ffmpeg": "FFmpeg", "wasm": l.T("sticker_player.wasm")})
+func (c *decoderChoice) Layout(gtx layout.Context, l localization.Catalog) layout.Dimensions {
+	hint := ""
+	if c.hint != "" {
+		hint = l.T(c.hint)
+	}
+	return settingsChoiceCard(gtx, l.T(c.title), hint, func(gtx layout.Context) layout.Dimensions {
+		return c.radios.Layout(gtx, radio.LeadingKind, map[string]string{"ffmpeg": "FFmpeg", "wasm": l.T("sticker_player.wasm")})
 	})
 }

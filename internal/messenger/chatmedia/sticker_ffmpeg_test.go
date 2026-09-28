@@ -103,7 +103,7 @@ func TestStickerFFmpegFailureFallsBack(t *testing.T) {
 	}
 	m := NewShared(&fakeSource{data: data}, func() {})
 	defer m.Close()
-	m.ConfigureDecoders(false, bad)
+	m.ConfigureDecoders(false, false, bad)
 	msg := model.Message{Kind: model.MessageSticker, Media: &model.MessageMedia{ID: "fallback", MIMEType: "video/webm"}}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -129,7 +129,7 @@ func TestStickerDecoderChangePreservesCancelledDownloads(t *testing.T) {
 	m := New(&fakeSource{}, func() {})
 	defer m.Close()
 	m.cancelled["photo"] = true
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	if !m.cancelled["photo"] {
 		t.Fatal("changing the sticker decoder restarted a cancelled download")
 	}

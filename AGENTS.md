@@ -63,7 +63,9 @@ GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/messenger
 
 Render tests save PNGs when their variable is set, and are skipped
 otherwise: `COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`
-(see `docs/UI_COMPONENTS.md`).
+(see `docs/UI_COMPONENTS.md`). `pkg/h264`'s test needs `KOMARUGRAM_AVCDEC`
+set to the absolute path of an `avcdec.wasm`, which is not in this repository
+([libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm)).
 
 ## Rules
 

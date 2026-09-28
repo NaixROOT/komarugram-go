@@ -253,14 +253,20 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
-	a.settings.stickers.chosen = func() string { return a.preferences.Global().StickerPlayer }
-	a.settings.stickers.choose = func(value string) {
+	a.settings.decoders.stickers.chosen = func() string { return a.preferences.Global().StickerPlayer }
+	a.settings.decoders.stickers.choose = func(value string) {
 		if err := services.Preferences.SetStickerPlayer(value); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
-	a.settings.stickers.program.custom = func() string { return a.preferences.Global().FFmpegPath }
-	a.settings.stickers.program.save = func(path string) {
+	a.settings.decoders.animations.chosen = func() string { return a.preferences.Global().AnimationPlayer }
+	a.settings.decoders.animations.choose = func(value string) {
+		if err := services.Preferences.SetAnimationPlayer(value); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.decoders.program.custom = func() string { return a.preferences.Global().FFmpegPath }
+	a.settings.decoders.program.save = func(path string) {
 		if err := services.Preferences.SetFFmpegPath(path); err != nil {
 			log.Printf("save settings: %v", err)
 		}
@@ -647,7 +653,7 @@ func (a *App) Layout(gtx layout.Context) {
 	}
 	decoderPrefs := a.preferences.Global()
 	configureMedia := func(m *chatmedia.Manager) {
-		m.ConfigureDecoders(decoderPrefs.StickerPlayer == "wasm", decoderPrefs.FFmpegPath)
+		m.ConfigureDecoders(decoderPrefs.StickerPlayer == "wasm", decoderPrefs.AnimationPlayer == "wasm", decoderPrefs.FFmpegPath)
 	}
 	if a.info != nil {
 		configureMedia(a.info.renderer.media)
