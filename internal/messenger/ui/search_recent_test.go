@@ -152,9 +152,16 @@ func TestSearchHistory(t *testing.T) {
 // findButton clicks over the middle of the window, where the confirmation
 // is, until done.
 func (h *searchHarness) findButton(done func() bool) bool {
+	confirm := &h.list.panel.recent.confirm
 	for y := float32(300); y < 420 && !done(); y += 6 {
 		for x := float32(200); x < 360 && !done(); x += 30 {
 			h.press(pointer.ButtonPrimary, f32.Pt(x, y))
+			if !done() && !confirm.Shown() {
+				// The click fell on the scrim, which closes the dialog: where
+				// the dialog ends depends on the fonts of the machine.
+				confirm.Open()
+				h.frames(20)
+			}
 		}
 	}
 	return done()
