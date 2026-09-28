@@ -104,7 +104,7 @@ func TestFromTData(t *testing.T) {
 // testManager returns a manager keeping everything under root.
 func testManager(t *testing.T, root string, protection *security.Manager) *Manager {
 	t.Helper()
-	m, err := newManager(TDesktopWindows, protection, filepath.Join(root, "config"), filepath.Join(root, "locks"))
+	m, err := newManager(TDesktop(), protection, filepath.Join(root, "config"), filepath.Join(root, "locks"))
 	if err != nil {
 		t.Fatal(err)
 	}

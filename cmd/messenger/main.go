@@ -333,7 +333,7 @@ func checkAccounts(manager *account.Manager, imports []*account.TData) error {
 // newManager returns an account manager that connects through the MTProxy
 // in proxy, or directly if it is empty.
 func newManager(proxy string, protection *security.Manager) (*account.Manager, error) {
-	manager, err := account.NewManager(account.TDesktopWindows, protection)
+	manager, err := account.NewManager(account.TDesktop(), protection)
 	if err != nil {
 		return nil, err
 	}

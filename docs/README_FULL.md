@@ -38,6 +38,7 @@ Two applications built on the same base:
 | `pkg/webm`                  | Matroska/WebM demuxer written in Go                                 |
 | `pkg/vp9`                   | VP9 decoder: libvpx compiled to wasm, run by wazero                 |
 | `pkg/sandbox`               | Limits for the wasm sandboxes: memory per sandbox, a shared budget, slow-operation cutoff |
+| `pkg/deviceinfo`            | The device model and system version, named as Telegram Desktop names them |
 | `pkg/player`                | mpv or VLC as an external window, driven over its IPC socket         |
 | `pkg/program`               | Running external programs: `--version` checks, process groups, flatpak launchers |
 | `pkg/tdata`                 | Telegram Desktop tdata (and Telethon/Pyrogram sessions): read and write |
@@ -229,9 +230,14 @@ Two things make the server end a session, and both are easy to do by mistake:
 - **Connecting under another application.** An authorization belongs to the
   api_id it was created with. A session from Telegram Desktop has to connect
   as Telegram Desktop — api_id 2040 with its api_hash, the current version
-  (`7.2.9 x64` on 64-bit Windows), language pack `tdesktop`, a device name
-  and a system version. `account.TDesktopWindows` holds all of it; keep the
-  version current when Telegram Desktop updates.
+  (`7.2.9 x64` on 64-bit Windows, `7.2.9` on x86-64 Linux), language pack
+  `tdesktop`, a device name and a system version. `account.TDesktop()` builds
+  all of it; keep the version current when Telegram Desktop updates. The
+  device and the system are named as Telegram Desktop names them
+  (`pkg/deviceinfo`, a port of lib_base's `DeviceModelPretty` and
+  `SystemVersionPretty`): the model from the firmware, or `Desktop` when it
+  gives only placeholders, and `Windows 11 x64` or
+  `Linux XFCE X11 glibc 2.39`.
 - **Two connections on one auth key.** A duplicated key looks like a stolen
   one. The account manager refuses a second connection to the same key, in
   the same process and — through a lock file in the user cache directory — in
