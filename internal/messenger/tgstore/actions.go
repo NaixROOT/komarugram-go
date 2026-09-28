@@ -98,6 +98,26 @@ func (s *Store) CanSend(chat int64) bool {
 	return known && !muted && s.Freeze() == (model.Freeze{})
 }
 
+// userUsername is a user's username, or its first active one.
+func userUsername(u *tg.User) string {
+	if u.Username != "" {
+		return u.Username
+	}
+	for _, name := range u.Usernames {
+		if name.Active {
+			return name.Username
+		}
+	}
+	return ""
+}
+
+// Username implements model.UsernameSource.
+func (s *Store) Username(chat int64) string {
+	s.history.mu.Lock()
+	defer s.history.mu.Unlock()
+	return s.history.peers[chat].Username
+}
+
 // channelUsername is the username of a public channel or supergroup: its
 // own, or the first active of its collectible ones.
 func channelUsername(ch *tg.Channel) string {

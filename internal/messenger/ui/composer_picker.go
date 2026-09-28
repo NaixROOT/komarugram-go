@@ -167,6 +167,9 @@ func (c *messageComposer) chooseIn(gtx layout.Context, tab model.PickerTab, item
 		d.pending = nil
 		d.err = nil
 		gtx.Execute(key.FocusCmd{Tag: &d.editor})
+	} else if c.asksConfirmation(tab) {
+		c.sendConfirm.ask(tab, item)
+		c.pickerOpen = false
 	} else {
 		c.submit(c.chat, model.OutgoingMessage{Item: &item})
 		c.pickerOpen = false

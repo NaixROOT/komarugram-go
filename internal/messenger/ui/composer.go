@@ -60,6 +60,10 @@ type featuredPackResult struct {
 	err        error
 }
 type messageComposer struct {
+	// confirmations tells whether a sticker and a GIF are sent only once
+	// confirmed; sendConfirm is the dialog that asks.
+	confirmations          func() (sticker, gif bool)
+	sendConfirm            sendConfirm
 	editorHit              struct{}
 	notice, lastNotice     string
 	noticeUntil            time.Time

@@ -232,6 +232,15 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.confirmations = func() (bool, bool) {
+		g := a.preferences.Global()
+		return g.ConfirmSticker, g.ConfirmGIF
+	}
+	a.settings.setConfirmations = func(sticker, gif bool) {
+		if err := services.Preferences.SetConfirmations(sticker, gif); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.composerStyle = a.composerStyle
 	a.settings.setComposerStyle = func(style preferences.ComposerStyle) {
 		if err := services.Preferences.SetComposer(style); err != nil {
@@ -326,6 +335,12 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
+	if p.composer != nil {
+		p.composer.confirmations = func() (bool, bool) {
+			g := a.preferences.Global()
+			return g.ConfirmSticker, g.ConfirmGIF
+		}
+	}
 	p.addFilter = func(pattern preferences.FilterPattern) {
 		f := a.preferences.Global().Filters
 		f.Patterns = append(slices.Clone(f.Patterns), pattern)

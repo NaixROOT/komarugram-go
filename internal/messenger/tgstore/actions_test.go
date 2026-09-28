@@ -63,3 +63,20 @@ func TestMessageRights(t *testing.T) {
 		t.Error("a subscriber can post to a channel")
 	}
 }
+
+// A user's username is kept, as a channel's is, and a min user without one
+// does not clear it.
+func TestUserUsername(t *testing.T) {
+	s := testStore(t)
+	s.rememberPeers([]tg.UserClass{
+		&tg.User{ID: 5, FirstName: "Ann", Username: "ann"},
+		&tg.User{ID: 6, FirstName: "Bob", Usernames: []tg.Username{{Username: "old"}, {Username: "bob", Active: true}}},
+	}, nil)
+	s.rememberPeers([]tg.UserClass{&tg.User{ID: 5, Min: true, FirstName: "Ann"}}, nil)
+	if got := s.Username(5); got != "ann" {
+		t.Errorf("user 5: %q", got)
+	}
+	if got := s.Username(6); got != "bob" {
+		t.Errorf("user 6: %q", got)
+	}
+}

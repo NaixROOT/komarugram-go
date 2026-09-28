@@ -5,6 +5,8 @@ package ui
 import (
 	"context"
 	"image"
+	"io"
+	"strings"
 	"time"
 
 	"komarugram/internal/crash"
@@ -16,6 +18,7 @@ import (
 	"gio-mw/wdk"
 	"gio-mw/widget/scroll"
 
+	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -57,13 +60,20 @@ type chatInfo struct {
 	modal             modal
 	sections          map[model.SharedKind]*settingsItem
 	themesButton      settingsItem
-	themePage         bool
-	themes            *chatThemeController
+	// username copies the chat's @username, and usernameLink its link, as
+	// AyuGram's Copy Username and Copy Username as Link; copied tells
+	// what was copied.
+	usernames              model.UsernameSource
+	username, usernameLink settingsItem
+	copied                 string
+	themePage              bool
+	themes                 *chatThemeController
 }
 
 func newChatInfo(source model.ConversationStore, images *imageOps, invalidate func()) *chatInfo {
 	p := &chatInfo{invalidate: invalidate, sections: map[model.SharedKind]*settingsItem{}}
 	p.source, _ = source.(model.SharedMediaSource)
+	p.usernames, _ = source.(model.UsernameSource)
 	p.collection, _ = source.(model.SharedCollectionSource)
 	p.renderer = newChatPage(source, invalidate)
 	p.renderer.media.Close()
@@ -91,6 +101,7 @@ func (p *chatInfo) Open(c model.Chat) {
 	p.visible = true
 	p.modal.Open()
 	p.chat = c
+	p.copied = ""
 	p.kinds = append([]model.SharedKind{}, model.SharedKinds...)
 	if p.collection != nil {
 		if c.Kind != model.KindGroup {
@@ -267,6 +278,16 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 			p.selectSection(k)
 		}
 	}
+	if name := p.chatUsername(); name != "" {
+		if p.username.click.Clicked(gtx) {
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("@" + name))})
+			p.copied = l.T("info.username_copied")
+		}
+		if p.usernameLink.click.Clicked(gtx) {
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("https://t.me/" + name))})
+			p.copied = l.T("info.link_copied")
+		}
+	}
 	if p.themesButton.click.Clicked(gtx) {
 		p.stop()
 		p.themePage = true
@@ -371,6 +392,28 @@ func (p *chatInfo) layoutInfo(gtx layout.Context, l localization.Catalog) layout
 					return label(gtx, chatStatus(p.chat, l), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.status(gtx, l) }), vspace(12),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					name := p.chatUsername()
+					if name == "" {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return card(gtx, func(gtx layout.Context) layout.Dimensions {
+							subtitle := l.T("info.username")
+							if p.copied != "" {
+								subtitle = p.copied
+							}
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return p.username.Layout(gtx, iconCopy, "@"+name, subtitle)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return p.usernameLink.Layout(gtx, iconLink, l.T("info.copy_link"), "t.me/"+name)
+								}),
+							)
+						}, 6)
+					})
+				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if p.themes == nil {
 						return layout.Dimensions{}
@@ -542,4 +585,12 @@ var sharedIcons = map[model.SharedKind]wdk.IconWidget{
 	model.SharedPolls: wdk.RequireIconWidget(icons.SocialPoll), model.SharedGIFs: wdk.RequireIconWidget(icons.ActionGIF),
 	model.SharedSaved: iconSaved, model.SharedStories: wdk.RequireIconWidget(icons.AVPlayCircleOutline),
 	model.SharedGifts: wdk.RequireIconWidget(icons.ActionCardGiftcard), model.SharedGroups: iconGroups,
+}
+
+// chatUsername is the open chat's public username, when it has one.
+func (p *chatInfo) chatUsername() string {
+	if p.usernames == nil || p.chat.ID == 0 {
+		return ""
+	}
+	return p.usernames.Username(p.chat.ID)
 }

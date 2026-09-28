@@ -37,6 +37,8 @@ type menuStore struct {
 	sent       []model.OutgoingMessage
 	muted      bool
 	noForwards bool
+	// forwarded are the forwards asked for, as "from:ids→to".
+	forwarded []string
 	// sets maps a custom emoji to its set.
 	sets map[int64]int64
 }
@@ -54,7 +56,10 @@ func (s *menuStore) MessageRights(int64, []model.Message) model.MessageRights {
 	return model.MessageRights{Forward: !s.noForwards, Save: !s.noForwards, Delete: true}
 }
 func (s *menuStore) CanSend(int64) bool { return !s.muted }
-func (s *menuStore) ForwardMessages(context.Context, int64, []model.MessageID, int64) error {
+func (s *menuStore) ForwardMessages(_ context.Context, from int64, ids []model.MessageID, to int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forwarded = append(s.forwarded, fmt.Sprintf("%d:%v→%d", from, ids, to))
 	return nil
 }
 func (s *menuStore) DeleteMessages(context.Context, int64, []model.MessageID, bool) error {
@@ -187,7 +192,7 @@ func (h *menuHarness) choose(a menuAction) {
 func TestMessageMenuShowsTelegramActions(t *testing.T) {
 	h := newMenuHarness(t, nil)
 	h.openMenu(3)
-	want := []menuAction{actionReply, actionCopyText, actionCopyLink, actionForward, actionDelete, actionSelect}
+	want := []menuAction{actionReply, actionCopyText, actionCopyLink, actionForward, actionDelete, actionSelect, actionRepeat}
 	if !reflect.DeepEqual(h.page.messageMenu.shown, want) {
 		t.Fatalf("actions %v, want %v", h.page.messageMenu.shown, want)
 	}
@@ -212,7 +217,7 @@ func TestMessageMenuFollowsRights(t *testing.T) {
 	h := newMenuHarness(t, func(s *menuStore, _ []model.Message) { s.muted, s.noForwards = true, true })
 	h.openMenu(3)
 	for _, a := range h.page.messageMenu.shown {
-		if a == actionReply || a == actionForward {
+		if a == actionReply || a == actionForward || a == actionRepeat {
 			t.Fatalf("forbidden action shown: %v", h.page.messageMenu.shown)
 		}
 	}
@@ -222,6 +227,40 @@ func TestMessageMenuFollowsRights(t *testing.T) {
 		if a == actionCopyText {
 			t.Fatal("protected text may be copied")
 		}
+	}
+}
+
+// Repeat sends the message again to its own chat, as a forward, as
+// AyuGram's does; a channel's posts are not repeated.
+func TestMessageMenuRepeats(t *testing.T) {
+	h := newMenuHarness(t, nil)
+	h.openMenu(3)
+	h.choose(actionRepeat)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.store.mu.Lock()
+		forwarded := append([]string(nil), h.store.forwarded...)
+		h.store.mu.Unlock()
+		if len(forwarded) > 0 {
+			if !reflect.DeepEqual(forwarded, []string{"1:[3]→1"}) {
+				t.Fatalf("forwarded %v", forwarded)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("nothing repeated")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	m := h.page.messages[2]
+	h.page.kind = model.KindChannel
+	if h.page.canRepeat(m) {
+		t.Fatal("a channel's post may be repeated")
+	}
+	h.page.kind = model.KindGroup
+	m.Kind = model.MessageService
+	if h.page.canRepeat(m) {
+		t.Fatal("a service message may be repeated")
 	}
 }
 
@@ -438,4 +477,52 @@ func TestRenderMessageMenu(t *testing.T) {
 			p.images.EndFrame()
 		})
 	}
+}
+
+// With confirmations on, a sticker picked is sent only once confirmed, as
+// AyuGram asks; a GIF without its confirmation is sent at once.
+func TestStickerWaitsForConfirmation(t *testing.T) {
+	h := newMenuHarness(t, nil)
+	c := h.page.composer
+	c.confirmations = func() (bool, bool) { return true, false }
+	sent := func() []model.OutgoingMessage {
+		h.store.mu.Lock()
+		defer h.store.mu.Unlock()
+		return append([]model.OutgoingMessage(nil), h.store.sent...)
+	}
+	wait := func(n int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for len(sent()) < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("sent %d, want %d", len(sent()), n)
+			}
+			h.frame()
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	gtx := layout.Context{Ops: new(op.Ops)}
+	c.pickerOpen = true
+	c.chooseIn(gtx, model.PickerStickers, model.PickerItem{ID: "sticker/1"})
+	h.frames(20)
+	if len(sent()) != 0 || !c.sendConfirm.modal.Shown() || c.pickerOpen {
+		t.Fatalf("sticker not held for confirmation: sent %d, asked %v", len(sent()), c.sendConfirm.modal.Shown())
+	}
+	c.sendConfirm.cancel.click.Click()
+	h.frames(30)
+	if len(sent()) != 0 || c.sendConfirm.modal.Shown() {
+		t.Fatal("cancelled sticker sent")
+	}
+	c.chooseIn(gtx, model.PickerStickers, model.PickerItem{ID: "sticker/2"})
+	h.frames(20)
+	c.sendConfirm.send.click.Click()
+	wait(1)
+	if got := sent()[0]; got.Item == nil || got.Item.ID != "sticker/2" {
+		t.Fatalf("sent %+v", got)
+	}
+	for deadline := time.Now().Add(5 * time.Second); c.draft(1).sending && time.Now().Before(deadline); {
+		h.frame()
+	}
+	c.chooseIn(gtx, model.PickerGIF, model.PickerItem{ID: "gif/1"})
+	wait(2)
 }

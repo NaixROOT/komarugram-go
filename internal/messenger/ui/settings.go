@@ -155,6 +155,11 @@ type settingsPage struct {
 	composerBlur    func() bool
 	setComposerBlur func(bool)
 	blur            *checkbox.Checkboxes[string]
+	// confirmations and setConfirmations read and change whether stickers
+	// and GIFs are sent only once confirmed.
+	confirmations    func() (sticker, gif bool)
+	setConfirmations func(sticker, gif bool)
+	confirmBoxes     *checkbox.Checkboxes[string]
 	// premium is the account's Premium; nil hides the section.
 	premium   model.PremiumSource
 	subscribe *button.Button
@@ -227,6 +232,11 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	p.composer = radio.NewRadios([]preferences.ComposerStyle{preferences.ComposerClassic, preferences.ComposerFloating}, preferences.ComposerFloating, func(style preferences.ComposerStyle) {
 		if p.setComposerStyle != nil {
 			p.setComposerStyle(style)
+		}
+	})
+	p.confirmBoxes = checkbox.NewCheckboxes([]string{"sticker", "gif"}, nil, func(values []string) {
+		if p.setConfirmations != nil {
+			p.setConfirmations(slices.Contains(values, "sticker"), slices.Contains(values, "gif"))
 		}
 	})
 	p.blur = checkbox.NewCheckboxes([]string{"blur"}, nil, func(values []string) {
@@ -323,6 +333,20 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 			p.blur.Disable()
 		}
 		p.blur.Update(gtx)
+	}
+	if p.confirmations != nil {
+		sticker, gif := p.confirmations()
+		var want []string
+		if sticker {
+			want = append(want, "sticker")
+		}
+		if gif {
+			want = append(want, "gif")
+		}
+		if !slices.Equal(want, p.confirmBoxes.GetValues()) {
+			p.confirmBoxes.SetValues(want)
+		}
+		p.confirmBoxes.Update(gtx)
 	}
 	p.animations.Update(gtx)
 	p.privacy.Update(gtx)
@@ -698,6 +722,21 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 							return layout.Dimensions{}
 						}
 						return p.blur.Layout(gtx, map[string]string{"blur": l.T("settings.composer_blur")})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.confirmations == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Inset{Top: 8, Left: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return label(gtx, l.T("settings.confirm"), token.TypestyleTitleSmall, scheme(gtx).Primary.Color, 1)
+								})
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return p.confirmBoxes.Layout(gtx, map[string]string{"sticker": l.T("settings.confirm_sticker"), "gif": l.T("settings.confirm_gif")})
+							}),
+						)
 					}),
 				)
 			})

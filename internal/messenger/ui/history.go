@@ -579,6 +579,9 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	p.edits.layout(gtx, p, l)
 	p.shot.layout(gtx, p, l)
 	p.translation.layout(gtx, p, l)
+	if p.composer != nil {
+		p.composer.layoutConfirm(gtx, p, l)
+	}
 }
 
 // hasMessage reports whether the history shows the message.

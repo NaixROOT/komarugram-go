@@ -49,6 +49,7 @@ const (
 	actionEdits
 	actionFilter
 	actionTranslate
+	actionRepeat
 	menuActions
 )
 
@@ -223,6 +224,9 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 		}
 		out = append(out, actionSelect)
 	}
+	if !selected && p.canRepeat(m) {
+		out = append(out, actionRepeat)
+	}
 	if p.messageMenu.packs.id == m.Key.MessageID && len(p.messageMenu.packs.found.refs) > 0 {
 		out = append(out, actionEmojiPacks)
 	}
@@ -320,6 +324,8 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		p.edits.open(p, m)
 	case actionTranslate:
 		p.translation.open(p, m, p.menuSelectedText(m), string(l.Language()))
+	case actionRepeat:
+		p.repeat(m)
 	case actionFilter:
 		// A filter of the words selected, in every chat, as AyuGram's
 		// quick filter.
@@ -375,6 +381,8 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.edits")
 	case actionFilter:
 		return l.T("menu.filter")
+	case actionRepeat:
+		return l.T("menu.repeat")
 	case actionTranslate:
 		if m, ok := p.menuMessage(); ok && p.menuSelectedText(m) != "" {
 			return l.T("menu.translate_selected")
@@ -422,6 +430,8 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconFilter
 	case actionTranslate:
 		return iconTranslate
+	case actionRepeat:
+		return iconRepeat
 	}
 	return iconEmoji
 }

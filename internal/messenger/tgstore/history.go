@@ -237,9 +237,12 @@ func (s *Store) rememberPeers(users []tg.UserClass, chats []tg.ChatClass) {
 		if u, ok := u.(*tg.User); ok {
 			key := peerID(&tg.PeerUser{UserID: u.ID})
 			if old, ok := c.peers[key]; !u.Min || !ok {
-				c.peers[key] = peerRecord{ID: u.ID, Hash: u.AccessHash, Kind: "user", Name: userName(u), Rights: peerRights{Bot: u.Bot, Self: u.Self, Muted: u.Deleted}}
+				c.peers[key] = peerRecord{ID: u.ID, Hash: u.AccessHash, Kind: "user", Name: userName(u), Rights: peerRights{Bot: u.Bot, Self: u.Self, Muted: u.Deleted}, Username: userUsername(u)}
 			} else {
 				old.Name = userName(u)
+				if name := userUsername(u); name != "" {
+					old.Username = name
+				}
 				c.peers[key] = old
 			}
 			p := c.peers[key]

@@ -89,6 +89,10 @@ type Global struct {
 	// Look is how messages and avatars are drawn, as AyuGram's
 	// customization.
 	Look Look `json:"look"`
+	// ConfirmSticker and ConfirmGIF ask before a sticker or a GIF chosen
+	// in the composer is sent, as AyuGram's confirmations.
+	ConfirmSticker bool `json:"confirm_sticker,omitempty"`
+	ConfirmGIF     bool `json:"confirm_gif,omitempty"`
 }
 
 // Look is how messages and avatars are drawn.
@@ -343,6 +347,12 @@ func (s *Store) SetFilters(f Filters) error {
 // SetLook changes how messages and avatars are drawn.
 func (s *Store) SetLook(l Look) error {
 	return s.change(func(global *Global) { global.Look = l })
+}
+
+// SetConfirmations chooses whether stickers and GIFs are sent only once
+// confirmed.
+func (s *Store) SetConfirmations(sticker, gif bool) error {
+	return s.change(func(g *Global) { g.ConfirmSticker, g.ConfirmGIF = sticker, gif })
 }
 
 // SetComposer changes the message composer style for all windows.

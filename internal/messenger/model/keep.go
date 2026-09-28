@@ -33,3 +33,9 @@ type Translator interface {
 	// the language to, a two-letter code.
 	Translate(ctx context.Context, chat int64, id MessageID, text string, to string) (string, error)
 }
+
+// UsernameSource knows the usernames of chats.
+type UsernameSource interface {
+	// Username is chat's public username, without "@", or "".
+	Username(chat int64) string
+}

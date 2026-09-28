@@ -462,3 +462,33 @@ func picturesDir() string {
 	}
 	return home
 }
+
+// canRepeat reports whether m may be sent again, as AyuGram's Repeat
+// Message does: a message that may be forwarded, in a private chat or a
+// group, where the account may write.
+func (p *chatPage) canRepeat(m model.Message) bool {
+	if _, ok := p.source.(model.MessageForwarder); !ok || p.threadRoot != 0 || p.kind == model.KindChannel || !p.canReply(m) {
+		return false
+	}
+	return m.Kind != model.MessageService && p.rightsFor(messageParts(m)).Forward
+}
+
+// repeat forwards m to its own chat, "+1".
+func (p *chatPage) repeat(m model.Message) {
+	forwarder, ok := p.source.(model.MessageForwarder)
+	if !ok {
+		return
+	}
+	var ids []model.MessageID
+	for _, part := range messageParts(m) {
+		ids = append(ids, part.Key.MessageID)
+	}
+	chat := p.chat
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := forwarder.ForwardMessages(ctx, chat, ids, chat); err != nil {
+			p.reportMedia(err)
+		}
+	}()
+}

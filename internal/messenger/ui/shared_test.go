@@ -324,3 +324,51 @@ func TestSharedReleaseDropsGiftPixelsWithoutLosingNavigation(t *testing.T) {
 		t.Fatal("release changed navigation")
 	}
 }
+
+// usernameStore is the demo store whose chat 2 is public.
+type usernameStore struct{ *mockstore.Store }
+
+func (usernameStore) Username(chat int64) string {
+	if chat == 2 {
+		return "public_chat"
+	}
+	return ""
+}
+
+// The info of a public chat copies its @username and its link, as
+// AyuGram's; a chat without one shows neither.
+func TestChatInfoCopiesUsername(t *testing.T) {
+	store := usernameStore{mockstore.New(time.Now(), 0)}
+	var images imageOps
+	p := newChatInfo(store, &images, func() {})
+	defer p.Destroy()
+	var router input.Router
+	frame := func() {
+		ops := new(op.Ops)
+		gtx := sharedContext(ops, image.Pt(900, 800))
+		gtx.Source = router.Source()
+		p.Layout(gtx, localization.For("en"), false)
+		router.Frame(ops)
+	}
+	p.Open(model.Chat{ID: 3})
+	awaitShared(t, p)
+	if p.chatUsername() != "" {
+		t.Fatal("a private chat has a username")
+	}
+	p.Open(model.Chat{ID: 2})
+	awaitShared(t, p)
+	frame()
+	for _, c := range []struct {
+		item *settingsItem
+		want string
+	}{{&p.username, "@public_chat"}, {&p.usernameLink, "https://t.me/public_chat"}} {
+		c.item.click.Click()
+		frame()
+		if _, text, ok := router.WriteClipboard(); !ok || string(text) != c.want {
+			t.Fatalf("copied %q, want %q", text, c.want)
+		}
+		if p.copied == "" {
+			t.Fatal("no notice of the copy")
+		}
+	}
+}
