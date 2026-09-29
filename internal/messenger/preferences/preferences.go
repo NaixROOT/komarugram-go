@@ -57,6 +57,11 @@ type Global struct {
 	// StreamerMode hides the windows from screen capture, as AyuGram's
 	// Streamer Mode, where the platform allows it.
 	StreamerMode bool `json:"streamer_mode,omitempty"`
+	// LocalPremium makes the accounts signed in here look Premium to
+	// themselves, as AyuGram's Local Premium: the star beside their names,
+	// and the Premium section of the settings. Telegram does not know of it,
+	// so nothing else changes.
+	LocalPremium bool `json:"local_premium,omitempty"`
 	// Window locking only covers the UI; account connections stay running.
 	AutoLockMinutes int           `json:"auto_lock_minutes,omitempty"`
 	LockOnMinimize  bool          `json:"lock_on_minimize,omitempty"`
@@ -151,12 +156,14 @@ type Keep struct {
 	Edits   bool `json:"edits"`
 }
 
-// Ghost is what the accounts tell others: see model.Ghost. Nothing is told
-// by default; a chat is read on sending to it or reacting in it.
+// Ghost is what the accounts tell others: see model.Ghost. Everything is
+// told by default, as Telegram does, and Ghost Mode is choosing not to:
+// the fields are saved even when false, or a choice would come back as the
+// default. A chat is also read on sending to it or reacting in it.
 type Ghost struct {
-	SendRead       bool `json:"send_read,omitempty"`
-	SendOnline     bool `json:"send_online,omitempty"`
-	SendTyping     bool `json:"send_typing,omitempty"`
+	SendRead       bool `json:"send_read"`
+	SendOnline     bool `json:"send_online"`
+	SendTyping     bool `json:"send_typing"`
 	ReadOnInteract bool `json:"read_on_interact"`
 }
 
@@ -198,7 +205,7 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
-		Ghost:          Ghost{ReadOnInteract: true},
+		Ghost:          Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true},
 		Keep:           Keep{Deleted: true, Edits: true},
 		Look:           Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound},
 	}
@@ -333,6 +340,11 @@ func (s *Store) SetMotion(mode powersave.Mode, lowBattery int) error {
 // SetVisualPrivacy switches visual privacy mode for every window.
 func (s *Store) SetVisualPrivacy(on bool) error {
 	return s.change(func(g *Global) { g.VisualPrivacy = on })
+}
+
+// SetLocalPremium makes the accounts look Premium to themselves, or not.
+func (s *Store) SetLocalPremium(on bool) error {
+	return s.change(func(g *Global) { g.LocalPremium = on })
 }
 
 // SetStreamerMode hides the windows from screen capture, or shows them.

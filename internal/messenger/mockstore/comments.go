@@ -32,6 +32,9 @@ func (s *Store) OpenComments(post model.Message) model.Chat {
 			chat.Title = c.Title
 		}
 	}
+	if s.histories == nil {
+		s.histories = map[int64]model.History{}
+	}
 	if _, ok := s.histories[id]; ok {
 		return chat
 	}

@@ -54,6 +54,7 @@ type Store struct {
 	recent        recentChats
 	ghost         ghostState
 	blocked       blockedState
+	bots          botState
 }
 
 // New returns an empty store that calls changed whenever Load has read more.
@@ -233,6 +234,8 @@ type list struct {
 	chats   []model.Chat
 	entries map[int64]entry
 	seen    map[int64]bool
+	// pins counts the pinned dialogs seen; they come first, in pin order.
+	pins int
 }
 
 func newList(self int64) *list {
@@ -312,6 +315,10 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 	if until, ok := d.NotifySettings.GetMuteUntil(); ok && time.Unix(int64(until), 0).After(time.Now()) {
 		chat.Muted = true
 	}
+	if d.Pinned {
+		l.pins++
+		chat.PinRank = l.pins
+	}
 	e := entry{unreadMark: d.UnreadMark}
 
 	switch p := d.Peer.(type) {
@@ -339,6 +346,7 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 		if c := l.channels[p.ChannelID]; c != nil {
 			chat.Title = c.Title
 			chat.Badges = channelBadges(c, time.Now())
+			chat.Forum = c.Forum
 			if c.Broadcast {
 				chat.Kind = model.KindChannel
 			}

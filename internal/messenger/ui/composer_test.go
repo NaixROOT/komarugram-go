@@ -288,6 +288,30 @@ func TestRenderComposer(t *testing.T) {
 		h.p.list.Position.BeforeEnd = true
 		h.p.list.Position.First = len(h.p.messages) - 4
 		h.p.list.Position.Offset = 120
+	case "files", "files-one", "files-documents", "files-many", "files-caption":
+		// The box for sending files, with what it shows for each way.
+		h.p.composer.pickerOpen = false
+		h.chat = 2
+		// The composer moves to the chat before files are put in its box.
+		h.frame()
+		kinds := map[string][]string{
+			"files":           {"photo", "photo", "photo", "video", "file"},
+			"files-one":       {"photo"},
+			"files-documents": {"photo", "photo", "video", "file"},
+			"files-many":      {"photo", "photo", "photo", "photo", "photo", "photo", "photo"},
+			"files-caption":   {"photo", "photo"},
+		}[os.Getenv("COMPOSER_VIEW")]
+		h.p.composer.files.addPaths(h.p.composer, boxPaths(t, kinds...), os.Getenv("COMPOSER_VIEW") == "files-documents")
+		if os.Getenv("COMPOSER_VIEW") == "files-caption" {
+			h.p.composer.files.caption.SetText("Закат над озером, вид с вершины")
+		}
+		for range 200 {
+			h.frame()
+			time.Sleep(5 * time.Millisecond)
+			if h.p.composer.files.ready() {
+				break
+			}
+		}
 	case "voice":
 		// A voice message being recorded.
 		h.p.composer.pickerOpen = false

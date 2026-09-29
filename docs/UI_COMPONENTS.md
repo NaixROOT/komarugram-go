@@ -104,6 +104,40 @@ The history is drawn as materialgram draws it:
   panel with modes and filters. `recentSearch` (`search_recent.go`) is its
   history while nothing is typed, with a menu on a right click that takes
   the keyboard for its Escape (`key.FocusFilter`, then `key.FocusCmd`).
+- **Box for sending files** (`composer_send_files.go`): a `modal` of what was
+  chosen in the attachment menu, as Telegram Desktop's: media as a grid of
+  squares (one picture alone keeps its shape), other files and, with "Send as
+  documents", everything as rows with a thumbnail, a caption editor that takes
+  the composer's text and Enter to send, and the checkboxes that
+  `sendfiles` says apply (`HasGroupOption`, `HasDocumentsOption`,
+  `HasHighQualityOption`). Files are looked at in the background
+  (`sendfiles.Inspect`, `Thumbnail`; the first frame of a video from
+  FFmpeg, when there is one); a file that cannot be sent is told in the
+  dialog's toast. What it sends is `model.OutgoingFiles` in an
+  `OutgoingMessage`, so retries reuse the composer's identity handling.
+- **Bots** (`bot.go`): `botPage` on the chat page. The buttons under a message
+  are `textButton`s in the bubble (`history_bubble.go`); a callback asks the store
+  (`model.BotStore`) in a goroutine and comes back through `botUpdate` to the
+  toast. The reply keyboard is a strip under the composer's bar, over which the
+  reply strip stacks: `keyboardHeight` is added to `replyHeight` wherever the
+  history reserves room for the composer, and `composer.Layout` draws it.
+  An empty chat with a bot draws `layoutStart` in the bar's place. Typing
+  `/` lists commands over the composer (`layoutCommands`).
+- **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
+  opens it at the pointer, as a `contextMenu` in the header menu's style. The
+  rows and the list take the presses as `search_recent.go`'s do (`PassOp` areas
+  over what is clicked). Items are `chatRowPin`/`chatRowUnpin` (only in the list
+  of all chats) and `chatRowRead`; a pin over the limit is answered by the
+  list's `toast` without asking the store, and a store's failure comes back to
+  the toast on the next frame. A pinned chat with nothing unread draws
+  `drawPin` where its counter would be.
+- **Forum page** (`forum.go`): the topics of a forum chat in place of its
+  history, under the chat's header (which opens its info). A row is drawn as the
+  chat list's: `surface`, icon plate (`fillRounded`, the topic's colour, a house
+  for General, `drawPin`/lock for the marks), badges through `drawBadgeRight`.
+  A topic opens as `commentsView{topic: true}` shown by `layoutComments` on
+  the thread's `chatPage`, whose `topic` flag makes it read what it shows.
+  `FORUM_PNG` saves the list.
 - **Composer picker** (`composer_picker.go`): installed sticker/emoji packs and
   a Trending section for server-featured packs. A featured sticker is sent
   like an installed one; the pack's title row opens the sticker set dialog.
@@ -234,10 +268,14 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `COMPOSER_MOTION_PNG`, `SETTINGS_PNG`,
-  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
+  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `FORUM_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
-  a voice message being recorded.
+  a voice message being recorded; `files`, `files-one`, `files-documents`,
+  `files-many` and `files-caption`, the box for sending files.
+  `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
+  an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
+  off).
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the

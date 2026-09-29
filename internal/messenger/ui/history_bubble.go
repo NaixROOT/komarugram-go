@@ -342,11 +342,21 @@ func (p *chatPage) bubbleContent(gtx layout.Context, r *messageRow, m model.Mess
 			var cells []layout.FlexChild
 			for x, b := range row {
 				cells = append(cells, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					if b.Kind == "url" {
+					switch b.Kind {
+					case "url":
 						if r.buttons[y][x].Clicked(gtx) {
 							p.askLink(b.URL)
 						}
 						return textButton(gtx, &r.buttons[y][x], b.Text+" ↗")
+					case "callback", "copy":
+						if r.buttons[y][x].Clicked(gtx) {
+							p.pressButton(gtx, m, y, x, b, l)
+						}
+						text := b.Text
+						if b.Kind == "callback" && p.pending(m.Key, y, x) {
+							text += " …"
+						}
+						return textButton(gtx, &r.buttons[y][x], text)
 					}
 					return layout.UniformInset(7).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return label(gtx, b.Text+" · "+l.T("history.readonly"), token.TypestyleLabelMedium, sc.SurfaceVariant.OnColor, 2)

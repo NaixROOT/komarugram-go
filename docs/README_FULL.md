@@ -403,11 +403,37 @@ Shift+Enter adds a line. Draft text and custom-emoji entities stay with each cha
 while switching chats. Failed sends preserve the draft and retry with the same
 Telegram random ID, including attachment/checklist retries.
 
-The paperclip opens photo/video, file and checklist actions. Attachments use
-a native file chooser (`kdialog` or `zenity` on Linux), with a path field as a
-fallback. Video upload uses `ffprobe` for dimensions and duration. Creating native
-Telegram checklists requires Premium; received checklists display their items and
-completion state. The demo simulates sending locally without network traffic.
+The paperclip opens photo/video, file and checklist actions. Photos, videos and
+files are chosen, several at once, in the system's file chooser (`kdialog` or
+`zenity` on Linux), with a path field as a fallback, and appear in a box for
+sending files, as in Telegram Desktop: pictures in a grid, other files as rows, a
+caption (the composer's text to start with) and the choices "Group items", "Send
+as documents" and, for large photos, "High Quality". Photos are made ready as
+Telegram Desktop makes them (`internal/messenger/sendfiles`): turned as their
+Exif asks, scaled to fit 1280 pixels (2560 in high quality), alpha laid on white,
+saved as JPEG; what can go in an album goes in one (`messages.sendMultiMedia`,
+ten at most), the caption on the last message. Video upload uses `ffprobe` for
+dimensions and duration. Creating native Telegram checklists requires Premium;
+received checklists display their items and completion state. The demo simulates
+sending locally without network traffic.
+
+Bots work as in Telegram Desktop: the buttons under their messages ask the bot,
+open a link or copy a text; a keyboard a bot sets shows under the composer; an
+empty chat with a bot has a Start button; typing "/" lists the bot's commands.
+Inline mode and buttons that open web apps are not done.
+
+A right click on a chat of the list opens its menu: pin it to the top or unpin it
+(the pinned chats keep the order they were pinned in, and their number is
+limited by the server, more with Premium) and mark it read. Chats and the
+messages shown are marked read, and the account shows online and typing, as
+Telegram does, unless Ghost Mode in "Privacy and security" says otherwise.
+
+A forum (a group divided in topics) opens as the list of its topics instead of a
+history, as in Telegram Desktop: the icon of the topic's colour, its title, the last
+message, the unread and mention counters, a pin for a pinned topic and a lock for
+a closed one. A topic opens as a page of its own, like the comments to a post, with
+a way back; messages sent there reply to the topic's first message. Creating and
+editing topics is not done.
 
 With nothing written, a microphone takes Send's place: it records a voice
 message (`pkg/voice`) through `ffmpeg` — PulseAudio/PipeWire or ALSA on Linux,

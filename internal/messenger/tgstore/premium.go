@@ -89,6 +89,7 @@ func userBadges(u *tg.User, now time.Time) model.Badges {
 	return model.Badges{
 		Premium: u.Premium, EmojiStatus: emojiStatus(u.EmojiStatus, now),
 		Verified: u.Verified, Scam: u.Scam, Fake: u.Fake, BotVerification: u.BotVerificationIcon,
+		User: u.ID,
 	}
 }
 

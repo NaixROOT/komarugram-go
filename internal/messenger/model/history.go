@@ -97,15 +97,19 @@ type Message struct {
 	Poll    *Poll       `json:",omitempty"`
 	// Service is what a service message tells. Messages cached before
 	// it existed have none, and show as a service message only.
-	Service          *ServiceAction `json:",omitempty"`
-	Attachments      []Message      `json:"-"`
-	Key              MessageKey
-	SenderID         int64
-	Kind             MessageKind
-	Text             string
-	SenderName       string
-	Entities         []Entity
-	Buttons          [][]MessageButton
+	Service     *ServiceAction `json:",omitempty"`
+	Attachments []Message      `json:"-"`
+	Key         MessageKey
+	SenderID    int64
+	Kind        MessageKind
+	Text        string
+	SenderName  string
+	Entities    []Entity
+	Buttons     [][]MessageButton
+	// Keyboard is the reply keyboard the message sets for the chat, and
+	// KeyboardHide takes the last one away.
+	Keyboard         *ReplyKeyboard `json:",omitempty"`
+	KeyboardHide     bool           `json:",omitempty"`
 	Date             time.Time
 	EditedAt         time.Time
 	Outgoing         bool
@@ -139,6 +143,28 @@ type Message struct {
 	// ReplyToTopID is the root of the thread a reply is in, when it
 	// replies to another reply there.
 	ReplyToTopID MessageID `json:",omitempty"`
+	// ForumTopic is set when the message's reply header marks it as part of
+	// a forum topic: it replies to the topic's root, or to a message in it.
+	ForumTopic bool `json:",omitempty"`
+}
+
+// GeneralTopic is the id of the topic every forum has, whose messages have
+// no reply header.
+const GeneralTopic = 1
+
+// TopicID is the forum topic the message is in: the topic it names, the one
+// its creation opened, or else the General one. It means something only for
+// a message of a forum.
+func (m Message) TopicID() int {
+	switch {
+	case m.Service != nil && m.Service.Kind == ServiceTopicCreate:
+		return int(m.Key.MessageID)
+	case m.ForumTopic && m.ReplyToTopID != 0:
+		return int(m.ReplyToTopID)
+	case m.ForumTopic:
+		return int(m.ReplyToMessageID)
+	}
+	return GeneralTopic
 }
 
 // CommentsStore opens the comments of channel posts.
@@ -283,8 +309,16 @@ type Entity struct {
 	URL            string
 	DocumentID     int64
 }
+
+// MessageButton is a button of a bot's keyboard, under a message or in a
+// reply keyboard. Kind is "url" (opens URL), "callback" (asks the bot,
+// with Data, and shows its answer), "copy" (copies Copy), "text" (a reply
+// keyboard's button, which sends its own Text) or "action" for what this
+// client does not do: it shows the button disabled.
 type MessageButton struct {
 	Text, URL, Kind string
+	Data            []byte `json:",omitempty"`
+	Copy            string `json:",omitempty"`
 }
 
 // PhotoGallery pages a chat's photos independently of its visible history.

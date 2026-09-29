@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
@@ -52,5 +53,16 @@ func TestChatDetails(t *testing.T) {
 	}
 	if len(asked) != 1 || asked[0] != "*tg.InputPeerChannel" {
 		t.Errorf("asked for %v", asked)
+	}
+}
+
+// The badges of a user name it, which Local Premium needs to tell the
+// accounts of the app from other users.
+func TestUserBadgesNameTheirUser(t *testing.T) {
+	if got := userBadges(&tg.User{ID: 42, Premium: true}, time.Now()); got.User != 42 || !got.Premium {
+		t.Fatalf("badges %+v", got)
+	}
+	if got := channelBadges(&tg.Channel{ID: 9}, time.Now()); got.User != 0 {
+		t.Fatalf("a channel's badges name user %d", got.User)
 	}
 }

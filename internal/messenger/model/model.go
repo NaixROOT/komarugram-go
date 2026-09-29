@@ -32,9 +32,15 @@ type Chat struct {
 	LastTime   time.Time
 	Unread     int
 	Muted      bool
-	Pinned     bool
+	// Pinned chats stay at the top of the list, in the order PinRank gives:
+	// 1 for the first, 0 for a chat that is not pinned.
+	Pinned  bool
+	PinRank int
 	// Members is the member or subscriber count of groups and channels.
 	Members int
+	// Forum is set for a group divided in topics, which open as a list of
+	// them: see ForumSource.
+	Forum bool
 	// Badges are the marks beside the chat's name.
 	Badges
 }
@@ -54,6 +60,10 @@ type Badges struct {
 	// BotVerification is the custom emoji a verifying bot (a third party,
 	// such as a Mini App) put before the name, 0 for none.
 	BotVerification int64
+	// User is the user the badges belong to, 0 for a chat that is not one.
+	// It lets the client tell an account of its own, which Local Premium
+	// marks, from any other.
+	User int64
 }
 
 // Folder is a chat folder. It holds the chats Match accepts or, without

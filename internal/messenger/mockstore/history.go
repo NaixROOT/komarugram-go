@@ -42,6 +42,16 @@ func (s *Store) History(chat int64) model.History {
 	if h, ok := s.histories[chat]; ok {
 		return h
 	}
+	if chat == DemoNotesBot && s.isBot(chat) {
+		// A bot nobody has written to: its chat is empty, and starts with
+		// the Start button.
+		h := model.History{Revision: 1}
+		if s.histories == nil {
+			s.histories = map[int64]model.History{}
+		}
+		s.histories[chat] = h
+		return h
+	}
 	start := time.Date(2026, 9, 18, 12, 0, 0, 0, time.Local)
 	messages := make([]model.Message, 0, 328)
 	for i := 1; i <= 320; i++ {
@@ -92,7 +102,7 @@ func (s *Store) History(chat int64) model.History {
 	add("", model.MessageMusic, &model.MessageMedia{ID: "demo/music", MIMEType: "audio/mpeg", Size: int64(len(demoVoiceMP3)), Duration: 5 * time.Second, Title: "Ночной трамвай", Performer: "Демо-оркестр"}, nil, nil)
 	// An M4A voice message, as one sent from a file; its decoder is fetched.
 	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice-m4a", MIMEType: "audio/mp4", Size: int64(len(demoVoiceM4A)), Duration: 5 * time.Second}, nil, nil)
-	add("Кнопки бота: ссылки доступны, действия оставлены для будущей итерации.", model.MessageText, nil, nil, [][]model.MessageButton{{{Text: "Telegram", Kind: "url", URL: "https://telegram.org"}, {Text: "Обновить", Kind: "callback"}}})
+	add("Кнопки бота: ссылки и обратные вызовы работают.", model.MessageText, nil, nil, [][]model.MessageButton{{{Text: "Telegram", Kind: "url", URL: "https://telegram.org"}, {Text: "Обновить", Kind: "callback", Data: []byte("refresh")}}})
 	for i := 0; i < 3; i++ {
 		add("Альбом: несколько вложений в одном сообщении", model.MessagePhoto, demoPhoto(len(demoPhotoSizes)-3+i), nil, nil)
 		messages[len(messages)-1].GroupedID = 99
@@ -132,6 +142,9 @@ func (s *Store) History(chat int64) model.History {
 				m.Commenters = []int64{2, 5, 9}[:min(3, m.Comments)]
 			}
 		}
+	}
+	if s.isBot(chat) {
+		messages = append(messages, demoBotMenu(chat, messages[len(messages)-1].Key.MessageID+1, start.Add(30*24*time.Hour)))
 	}
 	h := model.History{Messages: messages, Revision: 1}
 	if s.histories == nil {

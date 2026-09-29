@@ -44,6 +44,9 @@ type App struct {
 	store  model.Store
 
 	preferences *preferences.Store
+	// ownUsers are the users of the accounts signed in here, which Local
+	// Premium marks.
+	ownUsers atomic.Pointer[map[int64]bool]
 	// focused is set while the window has the focus.
 	focused bool
 	// filter hides messages as the settings ask.
@@ -83,7 +86,10 @@ type App struct {
 	// shows over its channel while it is set.
 	comments *chatPage
 	thread   *commentsView
-	viewer   *photoViewer
+	// forum is the list of topics that shows in place of the history of a
+	// forum; a topic opens as thread, like comments.
+	forum  *forumPage
+	viewer *photoViewer
 	// openWindow and photoWindows are the viewer windows' host and list.
 	openWindow   func(appwindow.Spec)
 	photoWindows photoWindows
@@ -146,6 +152,9 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.profile.premium, _ = store.(model.PremiumSource)
 	a.profile.badges = a.badges
 	a.chats.badges = a.badges
+	a.chats.menu.store, _ = store.(model.ChatListActions)
+	a.chats.menu.premium, _ = store.(model.PremiumSource)
+	a.chats.menu.invalidate = w.Invalidate
 	if searcher, ok := store.(model.Searcher); ok {
 		a.chats.panel = newSearchPanel(searcher)
 	}
@@ -174,7 +183,11 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		w.Invalidate()
 	}))
 	if services.Accounts != nil {
-		a.unsubscribe = append(a.unsubscribe, services.Accounts.Subscribe(w.Invalidate))
+		a.refreshOwnUsers(services.Accounts)
+		a.unsubscribe = append(a.unsubscribe, services.Accounts.Subscribe(func() {
+			a.refreshOwnUsers(services.Accounts)
+			w.Invalidate()
+		}))
 	}
 	currentAccount := services.CurrentAccount
 	if currentAccount == nil {
@@ -229,6 +242,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.settings.streamer = func() bool { return a.preferences.Global().StreamerMode }
 	a.settings.setStreamer = func(on bool) {
 		if err := services.Preferences.SetStreamerMode(on); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.localPremium = func() bool { return a.preferences.Global().LocalPremium }
+	a.settings.setLocalPremium = func(on bool) {
+		if err := services.Preferences.SetLocalPremium(on); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
@@ -321,6 +340,15 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			a.history.openComments = a.openComments
 			a.comments = a.newChatPage(source, store, w)
 			a.comments.thread = true
+		}
+		if _, ok := store.(model.ForumSource); ok {
+			a.forum = newForumPage()
+			a.forum.open = a.openTopic
+			a.forum.emoji = a.layoutCustomEmoji
+			if a.comments == nil {
+				a.comments = a.newChatPage(source, store, w)
+				a.comments.thread = true
+			}
 		}
 		a.info.renderer.openPhoto = func(m model.Message) { a.viewer.Open(m.Key.ChatID, m, a.info.messages) }
 		if services.OpenWindow != nil {
@@ -711,7 +739,7 @@ func (a *App) Layout(gtx layout.Context) {
 	if a.comments != nil {
 		a.comments.filter = a.history.filter
 	}
-	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked()) {
+	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked() || a.forum != nil && a.forum.header.Clicked(gtx)) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)
 		}
@@ -798,6 +826,9 @@ func (a *App) Layout(gtx layout.Context) {
 		}
 		if a.thread != nil {
 			return a.layoutComments(gtx, a.catalog())
+		}
+		if c, ok := a.selectedChat(); ok && c.Forum && a.forum != nil {
+			return a.layoutForum(gtx, c, a.catalog())
 		}
 		if c, ok := a.selectedChat(); ok {
 			return layoutChatPage(gtx, c, a.catalog(), a.layoutAvatar, a.badges, func(gtx layout.Context) layout.Dimensions {

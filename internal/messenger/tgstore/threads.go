@@ -40,6 +40,10 @@ type thread struct {
 	top   int
 	// root is the root message, album parts included.
 	root []model.Message
+	// topic is set when the thread is a topic of a forum: its group and
+	// root are known from the start, and its messages are those of the
+	// topic.
+	topic bool
 }
 
 func isThread(chat int64) bool { return chat <= threadBase }
@@ -257,6 +261,10 @@ func (c *conversation) mergeThreads(m model.Message) {
 			continue
 		}
 		in := int(m.ReplyToTopID) == t.top || int(m.ReplyToMessageID) == t.top
+		if t.topic {
+			// The General topic's messages have no header to say so.
+			in = m.TopicID() == t.top
+		}
 		found := false
 		for i := range h.Messages {
 			if h.Messages[i].Key == m.Key {

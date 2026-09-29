@@ -66,7 +66,11 @@ func (s *Store) ghostSettings() model.Ghost {
 // MarkRead implements model.GhostStore with messages.readHistory, or
 // channels.readHistory in a channel. Each message is read once.
 func (s *Store) MarkRead(chat int64, id model.MessageID, asked bool) {
-	if isThread(chat) || id <= 0 {
+	if id <= 0 {
+		return
+	}
+	if isThread(chat) {
+		s.markTopicRead(chat, id, asked)
 		return
 	}
 	gs := &s.ghost

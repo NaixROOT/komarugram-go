@@ -34,11 +34,11 @@ type render struct {
 
 func renders() []render {
 	var all []render
-	for _, view := range []string{"emoji", "stickers", "gif", "featured-stickers", "featured-emoji", "floating", "classic", "blur", "avatars", "voice", "tasks", "toast", "toast-classic"} {
+	for _, view := range []string{"emoji", "stickers", "gif", "featured-stickers", "featured-emoji", "floating", "classic", "blur", "avatars", "voice", "files", "files-one", "files-documents", "files-many", "files-caption", "tasks", "toast", "toast-classic"} {
 		all = append(all, render{"composer-" + view, "TestRenderComposer", []string{"COMPOSER_VIEW=" + view, "COMPOSER_PNG={out}/composer-" + view + ".png"}})
 	}
 	all = append(all, render{"composer-motion", "TestRenderComposerMotion", []string{"COMPOSER_MOTION_PNG={out}/composer-motion"}})
-	for _, section := range []string{"main", "appearance", "privacy", "integrations"} {
+	for _, section := range []string{"main", "appearance", "privacy", "premium", "integrations"} {
 		all = append(all, render{"settings-" + section, "TestRenderSettingsAccounts", []string{"SETTINGS_SECTION=" + section, "SETTINGS_PNG={out}/settings-" + section + ".png"}})
 	}
 	return append(all,
@@ -53,6 +53,7 @@ func renders() []render {
 		render{"viewer-zoom", "TestRenderPhotoViewer", []string{"VIEWER_ZOOM=2", "VIEWER_PNG={out}/viewer-zoom.png"}},
 		render{"player", "TestRenderPlayerChoice", []string{"PLAYER_PNG={out}/player.png"}},
 		render{"comments", "TestRenderCommentsHead", []string{"COMMENTS_PNG={out}/comments.png"}},
+		render{"forum", "TestRenderForum", []string{"FORUM_PNG={out}/forum.png"}},
 		render{"unwrapped", "TestRenderUnwrapped", []string{"UNWRAPPED_PNG={out}/unwrapped.png"}},
 		render{"service", "TestRenderService", []string{"SERVICE_PNG={out}/service.png"}},
 		render{"pinned", "TestRenderPinned", []string{"PINNED_PNG={out}/pinned.png"}},

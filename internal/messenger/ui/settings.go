@@ -163,8 +163,13 @@ type settingsPage struct {
 	setConfirmations func(sticker, gif bool)
 	confirmBoxes     *checkbox.Checkboxes[string]
 	// premium is the account's Premium; nil hides the section.
-	premium   model.PremiumSource
-	subscribe *button.Button
+	premium model.PremiumSource
+	// localPremium and setLocalPremium read and switch Local Premium; the
+	// toggle shows it.
+	localPremium       func() bool
+	setLocalPremium    func(bool)
+	localPremiumToggle *toggle.Toggle[string]
+	subscribe          *button.Button
 	// players chooses the external player for videos and audio; browser,
 	// the browser Mini Apps run in.
 	players  *playerSettings
@@ -217,6 +222,11 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	p.streamerMode = toggle.NewToggle([]string{"streamer"}, nil, func(values []string) {
 		if p.setStreamer != nil {
 			p.setStreamer(len(values) == 1)
+		}
+	})
+	p.localPremiumToggle = toggle.NewToggle([]string{"local"}, nil, func(values []string) {
+		if p.setLocalPremium != nil {
+			p.setLocalPremium(len(values) == 1)
 		}
 	})
 	p.ghostOpts = toggle.NewToggle(ghostOptions, nil, func(values []string) {
@@ -577,7 +587,7 @@ func (p *settingsPage) layoutMain(gtx layout.Context, mode themeMode, dark bool,
 							name = l.T("settings.telegram_account")
 						}
 						row.badge = nil
-						if account.Premium {
+						if account.Premium || p.isLocalPremium() {
 							row.badge = func(gtx layout.Context) layout.Dimensions {
 								px := gtx.Dp(18)
 								return exact(gtx, image.Pt(px, px), func(gtx layout.Context) layout.Dimensions {
@@ -891,10 +901,18 @@ func (it *settingsItem) layout(gtx layout.Context, leading layout.Widget, leadin
 
 // premiumText is the subtitle of the Premium section.
 func (p *settingsPage) premiumText(l localization.Catalog) string {
-	if p.premium != nil && p.premium.Premium().Active {
+	switch {
+	case p.premium != nil && p.premium.Premium().Active:
 		return l.T("premium.on")
+	case p.isLocalPremium():
+		return l.T("premium.on_local")
 	}
 	return l.T("premium.off")
+}
+
+// isLocalPremium reports whether Local Premium is on.
+func (p *settingsPage) isLocalPremium() bool {
+	return p.localPremium != nil && p.localPremium()
 }
 
 // layoutPremium draws the Premium section: whether the account has it, how
@@ -905,6 +923,21 @@ func (p *settingsPage) layoutPremium(gtx layout.Context, l localization.Catalog)
 	status := l.T("premium.inactive")
 	if premium.Active {
 		status = l.T("premium.active")
+	}
+	// Local Premium shows the star but changes nothing Telegram knows: an
+	// account without Premium keeps its limits, and the offer to subscribe.
+	local := p.isLocalPremium() && !premium.Active
+	if local {
+		status = l.T("premium.local_active")
+	}
+	if p.localPremiumToggle != nil {
+		if want := p.isLocalPremium(); want != (len(p.localPremiumToggle.GetValues()) == 1) {
+			if want {
+				p.localPremiumToggle.SetValues([]string{"local"})
+			} else {
+				p.localPremiumToggle.SetValues(nil)
+			}
+		}
 	}
 	var offer []layout.FlexChild
 	switch {
@@ -921,8 +954,11 @@ func (p *settingsPage) layoutPremium(gtx layout.Context, l localization.Catalog)
 	head := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			title := l.T("premium.off")
-			if premium.Active {
+			switch {
+			case premium.Active:
 				title = l.T("premium.on")
+			case local:
+				title = l.T("premium.on_local")
 			}
 			return withBadges(gtx, nil, func(gtx layout.Context) layout.Dimensions {
 				return label(gtx, title, token.TypestyleTitleMedium, sc.Surface.OnColor, 1)
@@ -952,7 +988,7 @@ func (p *settingsPage) layoutPremium(gtx layout.Context, l localization.Catalog)
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			// The value the account has now is the emphasized one.
 			without, with := sc.Surface.OnColor, sc.SurfaceVariant.OnColor
-			if premium.Active {
+			if premium.Active && !local {
 				without, with = sc.SurfaceVariant.OnColor, sc.Primary.Color
 			}
 			return layout.Inset{Top: 6, Bottom: 6}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -980,6 +1016,24 @@ func (p *settingsPage) layoutPremium(gtx layout.Context, l localization.Catalog)
 			}, defaultCardPadding)
 		}),
 		vspace(12),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if p.localPremiumToggle == nil || p.setLocalPremium == nil {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return card(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return p.localPremiumToggle.Layout(gtx, map[string]string{"local": l.T("premium.local")})
+						}),
+						vspace(4),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return label(gtx, l.T("premium.local_body"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+						}),
+					)
+				}, defaultCardPadding)
+			})
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return card(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
