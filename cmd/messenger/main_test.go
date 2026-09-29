@@ -115,7 +115,7 @@ func TestStartupOffersProtectionForNewAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for run, wantAdded := range []int{1, 0} {
-		manager, err := account.NewManager(account.TDesktopWindows, protection)
+		manager, err := account.NewManager(account.TDesktop(), protection)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestStartupOffersProtectionForNewAccounts(t *testing.T) {
 // name and photo although no window of it has been opened in this process.
 func TestAccountListWithoutWindows(t *testing.T) {
 	root := testEnvironment(t)
-	manager, err := account.NewManager(account.TDesktopWindows, nil)
+	manager, err := account.NewManager(account.TDesktop(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestAccountListWithoutWindows(t *testing.T) {
 	}
 	manager.Close()
 
-	restarted, err := account.NewManager(account.TDesktopWindows, nil)
+	restarted, err := account.NewManager(account.TDesktop(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/vfs/adiantum"
@@ -33,8 +34,11 @@ func CopyPlain(source *sql.DB, target string) error {
 	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(tmp), RawQuery: "vfs=os"}
-	if _, err := source.Exec(`VACUUM main INTO ?`, u.String()); err != nil {
+	uri, err := FileURI(tmp, url.Values{"vfs": {"os"}})
+	if err != nil {
+		return err
+	}
+	if _, err := source.Exec(`VACUUM main INTO ?`, uri); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("securedb: copy to plaintext: %w", err)
 	}
@@ -42,7 +46,7 @@ func CopyPlain(source *sql.DB, target string) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	check, err := sql.Open("sqlite3", u.String())
+	check, err := sql.Open("sqlite3", uri)
 	if err != nil {
 		_ = os.Remove(tmp)
 		return err
@@ -82,14 +86,15 @@ func CopyEncrypted(source *sql.DB, target, accountID string, protection *securit
 		return err
 	}
 	defer clear(key)
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(tmp)}
-	query := u.Query()
-	query.Set("vfs", "adiantum")
-	query.Set("hexkey", hex.EncodeToString(key))
-	u.RawQuery = query.Encode()
-	if _, err := source.Exec(`VACUUM main INTO ?`, u.String()); err != nil {
+	hexKey := hex.EncodeToString(key)
+	uri, err := FileURI(tmp, url.Values{"vfs": {"adiantum"}, "hexkey": {hexKey}})
+	if err != nil {
+		return err
+	}
+	if _, err := source.Exec(`VACUUM main INTO ?`, uri); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("securedb: copy to encrypted: %w", err)
+		// SQLite names the file it could not open by the whole URI.
+		return fmt.Errorf("securedb: copy to encrypted: %w", redactedError{err, hexKey})
 	}
 	if err := os.Chmod(tmp, 0o600); err != nil {
 		_ = os.Remove(tmp)
@@ -145,23 +150,46 @@ func open(protection *security.Manager, path, purpose string) (*sql.DB, error) {
 		return nil, err
 	}
 	defer clear(key)
-	abs, err := filepath.Abs(path)
+	hexKey := hex.EncodeToString(key)
+	uri, err := FileURI(path, url.Values{"vfs": {"adiantum"}, "hexkey": {hexKey}})
 	if err != nil {
 		return nil, err
 	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
-	query := u.Query()
-	query.Set("vfs", "adiantum")
-	query.Set("hexkey", hex.EncodeToString(key))
-	u.RawQuery = query.Encode()
-	db, err := sql.Open("sqlite3", u.String())
+	db, err := sql.Open("sqlite3", uri)
 	if err != nil {
-		return nil, err
+		return nil, redactedError{err, hexKey}
 	}
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec("PRAGMA temp_store = memory"); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("securedb: initialize: %w", err)
+		return nil, fmt.Errorf("securedb: initialize: %w", redactedError{err, hexKey})
 	}
 	return db, nil
 }
+
+// FileURI returns a "file:" URI that names path, made absolute, with query.
+// The URI has no authority part: SQLite is built with
+// SQLITE_ALLOW_URI_AUTHORITY, so file://C:/x would name the UNC path //C:/x
+// on Windows, and without SQLITE_OS_WIN nothing drops the slash of
+// file:///C:/x.
+func FileURI(path string, query url.Values) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs), OmitHost: true, RawQuery: query.Encode()}
+	return u.String(), nil
+}
+
+// redactedError hides a database key that SQLite put in an error message
+// together with the URI it was given.
+type redactedError struct {
+	err    error
+	hexKey string
+}
+
+func (e redactedError) Error() string {
+	return strings.ReplaceAll(e.err.Error(), e.hexKey, "[key]")
+}
+
+func (e redactedError) Unwrap() error { return e.err }
