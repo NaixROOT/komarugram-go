@@ -145,7 +145,7 @@ func (h *menuHarness) messageAt(id model.MessageID) f32.Point {
 	p := h.page
 	for i, m := range p.messages {
 		if m.Key.MessageID == id {
-			y := 34 + p.heights.Prefix(i) - p.heights.Prefix(p.list.Position.First) - int64(p.list.Position.Offset)
+			y := p.heights.Prefix(i) - p.heights.Prefix(p.list.Position.First) - int64(p.list.Position.Offset)
 			return f32.Pt(120, float32(y)+float32(p.heights.Prefix(i+1)-p.heights.Prefix(i))/2)
 		}
 	}

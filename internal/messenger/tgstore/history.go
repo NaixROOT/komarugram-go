@@ -327,7 +327,7 @@ func (s *Store) OpenChat(chat int64) {
 			return
 		}
 		if revealing {
-			v = model.Viewport{AccountID: c.account, ChatID: chat, AnchorMessageID: reveal, UpdatedAt: time.Now()}
+			v = model.Viewport{AccountID: c.account, ChatID: chat, AnchorMessageID: reveal, AtEnd: reveal == 0, UpdatedAt: time.Now()}
 			found = true
 		}
 		anchor := 0
@@ -336,7 +336,7 @@ func (s *Store) OpenChat(chat int64) {
 		}
 		msgs, e := c.cache.Around(c.ctx, chat, anchor, 200)
 		s.profileHistory("cache.open-around", chat, 0, anchor, len(msgs), start, e)
-		if revealing && !slices.ContainsFunc(msgs, func(m model.Message) bool { return m.Key.MessageID == reveal }) {
+		if revealing && reveal != 0 && !slices.ContainsFunc(msgs, func(m model.Message) bool { return m.Key.MessageID == reveal }) {
 			// The cache does not have the message, so what it has around
 			// it is from elsewhere in the history: wait for Telegram's page.
 			msgs = nil
@@ -370,12 +370,37 @@ func (s *Store) Reveal(chat int64, id model.MessageID) {
 	if isThread(chat) {
 		return
 	}
+	s.reveal(chat, id, false)
+}
+
+// RevealFirst implements model.HistoryEnds: Telegram is asked for the
+// messages from id 1 on, which are the oldest the chat has. A thread's
+// history, which is not kept, is replaced at once: see revealThread.
+func (s *Store) RevealFirst(chat int64) bool {
+	if isThread(chat) {
+		return s.revealThread(chat, true)
+	}
+	s.reveal(chat, 1, false)
+	return true
+}
+
+// RevealLast implements model.HistoryEnds.
+func (s *Store) RevealLast(chat int64) bool {
+	if isThread(chat) {
+		return s.revealThread(chat, false)
+	}
+	s.reveal(chat, 0, true)
+	return true
+}
+
+// reveal drops chat's history to load it again around id, or at its end.
+func (s *Store) reveal(chat int64, id model.MessageID, atEnd bool) {
 	c := s.history
 	c.mu.Lock()
 	c.epochs[chat]++
 	delete(c.histories, chat)
 	c.reveals[chat] = id
-	c.views[chat] = model.Viewport{AccountID: c.account, ChatID: chat, AnchorMessageID: id, UpdatedAt: time.Now()}
+	c.views[chat] = model.Viewport{AccountID: c.account, ChatID: chat, AnchorMessageID: id, AtEnd: atEnd, UpdatedAt: time.Now()}
 	c.mu.Unlock()
 	s.changed()
 }
@@ -444,7 +469,13 @@ func (s *Store) LoadOlder(chat int64) {
 	}
 	s.page(chat, -1)
 }
-func (s *Store) LoadNewer(chat int64) { s.page(chat, 1) }
+func (s *Store) LoadNewer(chat int64) {
+	if isThread(chat) {
+		s.loadNewerComments(chat)
+		return
+	}
+	s.page(chat, 1)
+}
 func (s *Store) page(chat int64, dir int) {
 	c := s.history
 	c.mu.Lock()

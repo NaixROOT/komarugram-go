@@ -30,6 +30,8 @@ type forumServer struct {
 	replies  []*tg.MessagesGetRepliesRequest
 	sent     []*tg.MessagesSendMessageRequest
 	reads    []*tg.MessagesReadDiscussionRequest
+	// replyPage, if set, answers the requests for replies.
+	replyPage func(*tg.MessagesGetRepliesRequest) []tg.MessageClass
 }
 
 func topicMessage(id, topic int, out bool, text string) tg.MessageClass {
@@ -74,8 +76,12 @@ func (f *forumServer) client() *tg.Client {
 			res.Users = []tg.UserClass{&tg.User{ID: 5, FirstName: "Анна"}}
 		case *tg.MessagesGetRepliesRequest:
 			f.replies = append(f.replies, req)
+			page := []tg.MessageClass{topicMessage(46, 7, false, "second"), topicMessage(45, 7, false, "first")}
+			if f.replyPage != nil {
+				page = f.replyPage(req)
+			}
 			out.(*tg.MessagesMessagesBox).Messages = &tg.MessagesChannelMessages{
-				Messages: []tg.MessageClass{topicMessage(46, 7, false, "second"), topicMessage(45, 7, false, "first")},
+				Messages: page,
 				Users:    []tg.UserClass{&tg.User{ID: 5, FirstName: "Анна"}},
 			}
 		case *tg.MessagesSendMessageRequest:

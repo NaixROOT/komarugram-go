@@ -200,7 +200,7 @@ func TestGutterDragRoutesToSelectionAndChatSwitchClears(t *testing.T) {
 	}
 	render(1)
 	y := func(index int) float32 {
-		return float32(34 + int(p.heights.Prefix(index)-p.heights.Prefix(p.list.Position.First)) - p.list.Position.Offset + p.rows[messages[index].Key.MessageID].bodyTop + 10)
+		return float32(int(p.heights.Prefix(index)-p.heights.Prefix(p.list.Position.First)) - p.list.Position.Offset + p.rows[messages[index].Key.MessageID].bodyTop + 10)
 	}
 	event := func(kind pointer.Kind, ypos float32) {
 		router.Queue(pointer.Event{Kind: kind, Source: pointer.Mouse, Position: f32.Pt(2, ypos), Buttons: pointer.ButtonPrimary})
