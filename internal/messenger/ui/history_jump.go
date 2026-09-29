@@ -119,6 +119,9 @@ func (p *chatPage) jumpButtons(gtx layout.Context, size image.Point, end int, hi
 	if !p.restored || len(p.messages) == 0 && history.Err == nil {
 		return
 	}
+	if c := p.composer; c != nil && (c.pickerOpen || c.pickerDrawn) {
+		return // the picker is over the corner they are in
+	}
 	type button struct {
 		s     *surface
 		icon  wdk.IconWidget

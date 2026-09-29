@@ -8,7 +8,11 @@ var TelegramKeys = map[string]string{
 	"history.sticker": "lng_in_dlg_sticker", "history.empty_message": "lng_message_empty",
 	"stickers.count": "lng_stickers_count", "stickers.emoji_count": "lng_custom_emoji_count",
 	"stickers.add": "lng_stickers_add_pack", "stickers.remove": "lng_stickers_remove_pack_confirm",
-	"composer.featured": "lng_stickers_featured_tab",
+	"composer.featured":        "lng_stickers_featured_tab",
+	"composer.emoji_category1": "lng_emoji_category1", "composer.emoji_category2": "lng_emoji_category2",
+	"composer.emoji_category3": "lng_emoji_category3", "composer.emoji_category4": "lng_emoji_category4",
+	"composer.emoji_category5": "lng_emoji_category5", "composer.emoji_category6": "lng_emoji_category6",
+	"composer.emoji_category7": "lng_emoji_category7",
 }
 
 func (c Catalog) WithTelegram(values map[string]string) Catalog { c.server = values; return c }

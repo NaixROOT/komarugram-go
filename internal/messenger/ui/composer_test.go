@@ -253,13 +253,16 @@ func TestRenderComposer(t *testing.T) {
 		if os.Getenv("COMPOSER_VIEW") == "featured-stickers" {
 			h.p.composer.tab = model.PickerStickers
 		} else {
-			h.p.composer.page.Items = []model.PickerItem{{ID: "emoji/basic", Emoji: "🙂"}}
+			h.p.composer.page.Recent = []model.PickerItem{{ID: "emoji/basic", Emoji: "🙂"}}
 		}
 		h.p.composer.page.Featured = []model.PickerPack{{ID: 42, Title: "Коты и собаки",
 			Ref:   model.StickerSetRef{Type: "id", ID: 42, AccessHash: 4},
 			Items: []model.PickerItem{{ID: "preview/1", Emoji: "🐈"}, {ID: "preview/2", Emoji: "🐕"}, {ID: "preview/3", Emoji: "🐱"}}}}
 	case "gif":
 		h.p.composer.tab = model.PickerGIF
+	case "emoji-search":
+		// The emoji of the picker found for a word, before Telegram answers.
+		h.p.composer.search.SetText("кот")
 	case "classic", "floating", "toast", "toast-classic":
 		h.p.composer.pickerOpen = false
 		classic := strings.HasSuffix(os.Getenv("COMPOSER_VIEW"), "classic")
@@ -446,4 +449,135 @@ func TestRenderComposerMotion(t *testing.T) {
 	h.p.composer.tab = model.PickerGIF
 	frames(h, 5)
 	save(h, "tab-switching")
+}
+
+// emojiPage is an emoji tab that Telegram answers a little late, with nothing
+// of its own for it but the recent emoji.
+type emojiPage struct{}
+
+func (emojiPage) Picker(_ context.Context, r model.PickerRequest) (model.PickerPage, error) {
+	time.Sleep(50 * time.Millisecond)
+	return model.PickerPage{Recent: []model.PickerItem{{ID: "emoji/🅰", Emoji: "🅰"}}}, nil
+}
+func (emojiPage) Send(context.Context, int64, model.OutgoingMessage) error { return nil }
+
+func rowsItems(rows []pickerRow) map[string]bool {
+	ids := map[string]bool{}
+	for _, row := range rows {
+		for _, item := range row.items {
+			ids[item.ID] = true
+		}
+	}
+	return ids
+}
+
+// The emoji tab has Telegram Desktop's seven sections, each with its title,
+// and no emoji in two of them.
+func TestEmojiSections(t *testing.T) {
+	c := &messageComposer{tab: model.PickerEmoji}
+	l := localization.For("en")
+	rows := c.pickerRows(320, 40, l)
+	var titles []string
+	for _, row := range rows {
+		if row.title != "" {
+			titles = append(titles, row.title)
+			if row.section != len(titles) {
+				t.Fatalf("%q is section %d, want %d", row.title, row.section, len(titles))
+			}
+		}
+	}
+	want := []string{"Emoji & People", "Nature", "Food & Drink", "Activity", "Travel & Places", "Objects", "Symbols & Flags"}
+	if strings.Join(titles, "|") != strings.Join(want, "|") {
+		t.Fatalf("the titles are %q", titles)
+	}
+	seen := map[string]int{}
+	for _, row := range rows {
+		for _, item := range row.items {
+			if row.section == 0 {
+				t.Fatalf("%q is in no section", item.Emoji)
+			}
+			if seen[item.Emoji] != 0 {
+				t.Fatalf("%q is in sections %d and %d", item.Emoji, seen[item.Emoji], row.section)
+			}
+			seen[item.Emoji] = row.section
+		}
+	}
+	// One of each kind: a face, an animal, a fruit, a ball, a car, a bulb, a
+	// heart and a flag are where a user looks for them.
+	for emoji, section := range map[string]int{"😀": 1, "🐶": 2, "🍎": 3, "⚽": 4, "🚗": 5, "💡": 6, "🇺🇦": 7, "🏁": 7} {
+		if seen[emoji] != section && seen[emoji+"\ufe0f"] != section {
+			t.Errorf("%q is in section %d, want %d", emoji, seen[emoji], section)
+		}
+	}
+	if len(seen) < 1800 {
+		t.Errorf("only %d emoji", len(seen))
+	}
+}
+
+// The emoji tab, opened for the first time, does not show sections and then
+// others above them: what shows while the page loads is still there when it
+// has come, and the recent emoji, which come with it, are above the sections
+// only once.
+func TestEmojiPickerDoesNotReplaceWhatItShows(t *testing.T) {
+	h := newComposerHarness(t)
+	h.chat = 2
+	c := h.p.composer
+	c.source = emojiPage{}
+	h.frame()
+	l := localization.For("en")
+	c.pickerOpen = true
+	c.request(l, false)
+	h.frame()
+	if !c.loading {
+		t.Fatal("the page did not start to load")
+	}
+	before := rowsItems(c.pickerRows(320, 40, l))
+	if len(before) != 0 {
+		t.Fatalf("%d emoji shown while the page loads", len(before))
+	}
+	for deadline := time.Now().Add(3 * time.Second); c.loading && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+		h.frame()
+	}
+	after := rowsItems(c.pickerRows(320, 40, l))
+	if !after["emoji/🅰"] || !after["emoji/😀"] {
+		t.Fatalf("the loaded tab shows %d emoji, without the recent one or the sections", len(after))
+	}
+
+	// A page that did not come leaves the sections, which need none.
+	c.page, c.loading = model.PickerPage{}, false
+	if !rowsItems(c.pickerRows(320, 40, l))["emoji/😀"] {
+		t.Fatal("no emoji when Telegram sent none")
+	}
+}
+
+// A button of the footer takes the list to its section, and the button of the
+// section in view is the one that is lit.
+func TestEmojiFooterGoesToSection(t *testing.T) {
+	h := newComposerHarness(t)
+	h.chat = 2
+	c := h.p.composer
+	c.source = emojiPage{}
+	h.frame()
+	c.pickerOpen = true
+	c.request(localization.For("en"), false)
+	for deadline := time.Now().Add(3 * time.Second); (c.loading || len(c.page.Recent) == 0) && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+		h.frame()
+	}
+	for range 30 {
+		h.frame()
+	}
+	rows := c.pickerRows(352, 40, localization.For("en"))
+	// The footer's buttons are 44 dp wide from the picker's left edge; the
+	// first is the recent, then the seven sections.
+	button := func(n int) (float32, float32) { return 292 + 44*float32(n) + 22, 620 }
+	x, y := button(4)
+	h.click(x, y)
+	for range 5 {
+		h.frame()
+	}
+	if want := sectionRow(rows, 4); want <= 0 || c.list.Position.First != want {
+		t.Fatalf("the list is at row %d, section 4 starts at %d", c.list.Position.First, want)
+	}
 }

@@ -107,14 +107,22 @@ type messageComposer struct {
 	strip              layout.List
 	hover              hoverPlay
 	// pickerDrawn is whether the picker was drawn in the last frame.
-	pickerDrawn       bool
-	stripDrag         stripDrag
-	packClicks        map[int64]*surface
-	itemClicks        map[string]*surface
-	selectedPack      int64
-	recent            [3][]model.PickerItem
-	more, retry       surface
-	attachmentActions [3]surface
+	pickerDrawn bool
+	stripDrag   stripDrag
+	packClicks  map[int64]*surface
+	// sectionClicks are the footer's buttons of the static emoji sections.
+	sectionClicks [len(emojiSections) + 1]surface
+	// pageLoaded is whether the tab has had its page: what follows changes
+	// it, not replaces it. local is what the search of emoji found for
+	// localQuery, in localLanguage.
+	pageLoaded                bool
+	localQuery, localLanguage string
+	local                     []model.PickerItem
+	itemClicks                map[string]*surface
+	selectedPack              int64
+	recent                    [3][]model.PickerItem
+	more, retry               surface
+	attachmentActions         [3]surface
 	// replies is the strip of the message a draft replies to.
 	replies replyBar
 	// The picker, the attachment menu and the attachment forms open as
@@ -334,6 +342,7 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 				continue
 			}
 			c.loading = false
+			c.pageLoaded = true
 			c.pickerErr = r.err
 			if r.err == nil {
 				if r.append {
@@ -474,7 +483,8 @@ drained:
 			c.loadCancel()
 		}
 		c.loading = false
-		c.page.Items = nil
+		// What the last search found stays until the next one has come,
+		// so that the list does not empty and fill as a query is typed.
 		c.page.Next = ""
 		c.selectedPack = 0
 		c.list.Position = layout.Position{}
@@ -512,7 +522,7 @@ drained:
 		c.search.SetText("")
 		c.query = ""
 		c.due = time.Time{}
-		c.page = model.PickerPage{}
+		c.page, c.pageLoaded = model.PickerPage{}, false
 		c.selectedPack = 0
 		c.list.Position = layout.Position{}
 		c.strip.Position = layout.Position{}

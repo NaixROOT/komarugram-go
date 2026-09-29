@@ -211,3 +211,18 @@ func TestJumpInAThread(t *testing.T) {
 		}
 	}
 }
+
+// The picker opens over the corner the buttons are in, and covers them.
+func TestJumpButtonsGiveWayToThePicker(t *testing.T) {
+	h := newChatInputHarness(t)
+	c := h.page.composer
+	if c == nil {
+		t.Skip("no composer")
+	}
+	c.pickerOpen = true
+	h.frame()
+	h.click(h.jumpButton(0))
+	if !h.page.list.Position.BeforeEnd {
+		t.Fatal("the button to the end was there under the picker")
+	}
+}
