@@ -70,6 +70,9 @@ type Global struct {
 	// ComposerBlur blurs the history behind the floating composer, while
 	// animations are on.
 	ComposerBlur bool `json:"composer_blur"`
+	// Overlays is how the panels drawn over the messenger look: the
+	// floating composer, the context menus and the toasts.
+	Overlays Overlays `json:"overlays"`
 	// Player is the external player videos open in; empty until the user
 	// chooses one, which is asked only when more than one is installed.
 	Player player.Kind `json:"player,omitempty"`
@@ -105,6 +108,28 @@ type Global struct {
 	ConfirmSticker bool `json:"confirm_sticker,omitempty"`
 	ConfirmGIF     bool `json:"confirm_gif,omitempty"`
 }
+
+// Overlays are the preferences of the panels the messenger draws over its
+// content. An overlay that blurs what is behind it lets some of it show
+// through, as much as Transparency says; one that does not is opaque. The
+// composer's own switch is ComposerBlur. Blur costs power, so it is off
+// while animations are.
+type Overlays struct {
+	// Transparency is how much of the blurred content shows through the
+	// overlays that blur it, in percent, from 0 to TransparencyMax.
+	Transparency int `json:"transparency"`
+	// MenusBlur blurs behind the context menus, and ToastsBlur behind the
+	// toasts.
+	MenusBlur  bool `json:"menus_blur"`
+	ToastsBlur bool `json:"toasts_blur"`
+}
+
+// TransparencyMax is the most transparent an overlay can be made: past it
+// the text on the overlay could not be read.
+const TransparencyMax = 70
+
+// Opacity is how opaque the overlays that blur are, from 0.3 to 1.
+func (o Overlays) Opacity() float32 { return 1 - float32(o.Transparency)/100 }
 
 // Look is how messages and avatars are drawn.
 type Look struct {
@@ -205,6 +230,7 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
+		Overlays:       Overlays{Transparency: 30, MenusBlur: true, ToastsBlur: true},
 		Ghost:          Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true},
 		Keep:           Keep{Deleted: true, Edits: true},
 		Look:           Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound},
@@ -285,6 +311,9 @@ func validate(g Global) error {
 	}
 	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
 		return errors.New("invalid external player")
+	}
+	if g.Overlays.Transparency < 0 || g.Overlays.Transparency > TransparencyMax {
+		return errors.New("invalid overlay transparency")
 	}
 	if g.AutoLockMinutes < 0 || g.AutoLockMinutes > 120 {
 		return errors.New("invalid automatic lock delay")
@@ -395,6 +424,14 @@ func (s *Store) SetComposer(value ComposerStyle) error {
 // SetComposerBlur switches the blur behind the floating composer.
 func (s *Store) SetComposerBlur(on bool) error {
 	return s.change(func(g *Global) { g.ComposerBlur = on })
+}
+
+// SetOverlays changes how the overlays look for all windows.
+func (s *Store) SetOverlays(o Overlays) error {
+	if o.Transparency < 0 || o.Transparency > TransparencyMax {
+		return errors.New("invalid overlay transparency")
+	}
+	return s.change(func(g *Global) { g.Overlays = o })
 }
 
 // SetPlayer chooses the external player for videos.

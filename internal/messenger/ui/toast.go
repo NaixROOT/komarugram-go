@@ -36,6 +36,9 @@ type toast struct {
 	text string
 	// start is when it was first drawn; zero until then.
 	start time.Time
+	// bd is what the toast blurs behind it, nil for an opaque plate; its
+	// owner sets it before each layout.
+	bd *blurBackdrop
 }
 
 // Show shows text, replacing what the toast showed.
@@ -103,6 +106,6 @@ func (t *toast) layout(gtx layout.Context, area, below image.Rectangle) {
 	if s := scheme(gtx).Surface.Color; int(s.R)+int(s.G)+int(s.B) < 3*128 {
 		plate = toastDarkColor
 	}
-	fillRounded(gtx, plate, dims.Size, gtx.Dp(12))
+	overlayPlate(gtx, t.bd, dims.Size, at, plate, gtx.Dp(12))
 	call.Add(gtx.Ops)
 }

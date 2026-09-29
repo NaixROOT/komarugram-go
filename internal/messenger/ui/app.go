@@ -272,6 +272,13 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.overlays = func() preferences.Overlays { return a.preferences.Global().Overlays }
+	a.settings.setOverlays = func(o preferences.Overlays) {
+		if err := services.Preferences.SetOverlays(o); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.chats.overlays = a.overlayPrefs
 	a.settings.decoders.stickers.chosen = func() string { return a.preferences.Global().StickerPlayer }
 	a.settings.decoders.stickers.choose = func(value string) {
 		if err := services.Preferences.SetStickerPlayer(value); err != nil {
@@ -368,6 +375,7 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.images = &a.images
 	p.classic = func() bool { return a.composerStyle() == preferences.ComposerClassic }
 	p.blur = func() bool { return a.preferences.Global().ComposerBlur && w.Motion.AnimationsEnabled() }
+	p.overlays = a.overlayPrefs
 	p.player = a.settings.players.chosen
 	p.setPlayer = a.settings.players.choose
 	p.playerPaths = a.settings.players.paths
@@ -1017,4 +1025,13 @@ func (a *App) restoreAccountTitle() {
 		title += " — " + name
 	}
 	a.window.SetTitle(title)
+}
+
+// overlayPrefs is how the overlays are drawn now: the menus and toasts blur
+// if the preferences say so and animations are on, and blurring overlays let
+// as much show through as the preferences give.
+func (a *App) overlayPrefs() overlayPrefs {
+	o := a.preferences.Global().Overlays
+	animations := a.window.Motion.AnimationsEnabled()
+	return overlayPrefs{menus: o.MenusBlur && animations, toasts: o.ToastsBlur && animations, opacity: o.Opacity()}
 }

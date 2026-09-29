@@ -65,6 +65,9 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	p.images = &images
 	p.composerStyle = func() preferences.ComposerStyle { return preferences.ComposerFloating }
 	p.composerBlur = func() bool { return true }
+	overlays := preferences.Overlays{Transparency: 30, MenusBlur: true}
+	p.overlays = func() preferences.Overlays { return overlays }
+	p.setOverlays = func(o preferences.Overlays) { overlays = o }
 	size := image.Pt(900, 700)
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance

@@ -287,7 +287,7 @@ func (m *chatRowMenu) rowOp(gtx layout.Context, chat int64, size image.Point) {
 }
 
 // layout draws the menu over the list of size, while it is open or closing.
-func (m *chatRowMenu) layout(gtx layout.Context, l localization.Catalog) {
+func (m *chatRowMenu) layout(gtx layout.Context, bd *blurBackdrop, l localization.Catalog) {
 	if m.store == nil {
 		return
 	}
@@ -326,7 +326,7 @@ func (m *chatRowMenu) layout(gtx layout.Context, l localization.Catalog) {
 		sc := scheme(gtx)
 		menuSize := gtx.Constraints.Max
 		defer clip.UniformRRect(image.Rectangle{Max: menuSize}, radius).Push(gtx.Ops).Pop()
-		fillRounded(gtx, sc.SurfaceContainerHigh, menuSize, radius)
+		overlayFill(gtx, bd, menuSize, m.rect.Min, sc.SurfaceContainerHigh, radius)
 		// The menu takes its own clicks from the dismissing area under it.
 		event.Op(gtx.Ops, &m.menu)
 		y := gtx.Dp(menuPadding)

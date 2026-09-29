@@ -167,6 +167,11 @@ type chatPage struct {
 	// classic reports whether the composer is a bar below the history
 	// rather than a capsule floating over it; nil means floating.
 	classic func() bool
+	// overlays says how the menus and toasts are drawn; nil draws them
+	// opaque. bd is the recording of the history behind the overlays in the
+	// frame drawn last, nil when nothing blurs it.
+	overlays func() overlayPrefs
+	bd       *blurBackdrop
 	// blur reports whether to blur the history behind the floating
 	// composer; nil means not to.
 	blur func() bool
@@ -200,6 +205,30 @@ type chatPage struct {
 // classicComposer reports whether the composer is a bar below the history.
 func (p *chatPage) classicComposer() bool {
 	return p.composer != nil && p.classic != nil && p.classic()
+}
+
+// overlayPrefs is how the page's overlays are drawn.
+func (p *chatPage) overlayPrefs() overlayPrefs {
+	if p.overlays == nil {
+		return overlayPrefs{opacity: float32(composerBlurOpacity)}
+	}
+	return p.overlays()
+}
+
+// menuBackdrop is what the page's menus blur, nil for opaque ones.
+func (p *chatPage) menuBackdrop() *blurBackdrop {
+	if p.overlayPrefs().menus {
+		return p.bd
+	}
+	return nil
+}
+
+// toastBackdrop is what the page's toast blurs, nil for an opaque one.
+func (p *chatPage) toastBackdrop() *blurBackdrop {
+	if p.overlayPrefs().toasts {
+		return p.bd
+	}
+	return nil
 }
 
 // blurComposer reports whether the history behind the composer is blurred.
@@ -419,10 +448,13 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	sc := scheme(gtx)
 	size := gtx.Constraints.Max
-	// The history is recorded to be drawn again, blurred, behind the composer.
-	var backdrop *op.CallOp
+	// The history is recorded to be drawn again, blurred, behind whatever
+	// overlay blurs it: the composer, a menu, the toast.
+	overlays := p.overlayPrefs()
+	recording := p.blurComposer() || overlays.menus || overlays.toasts
+	p.bd = nil
 	var record op.MacroOp
-	if p.blurComposer() {
+	if recording {
 		record = op.Record(gtx.Ops)
 	}
 	fillRect(gtx, sc.SurfaceContainerLow, size)
@@ -564,14 +596,18 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.menuArea(gtx, top)
 		return dims
 	})
-	if p.blurComposer() {
+	var composerBackdrop *blurBackdrop
+	if recording {
 		call := record.Stop()
 		call.Add(gtx.Ops)
-		backdrop = &call
+		p.bd = newBackdrop(call, overlays.opacity)
+		if p.blurComposer() {
+			composerBackdrop = p.bd
+		}
 	}
 	end := size.Y
 	if p.composer != nil {
-		p.composer.Layout(gtx, c.ID, l, p, animate, backdrop)
+		p.composer.Layout(gtx, c.ID, l, p, animate, composerBackdrop)
 		end = p.composer.top
 	}
 	p.errorMu.Lock()
@@ -581,6 +617,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	p.errorMu.Unlock()
 	p.botUpdate(l)
+	p.toast.bd = p.toastBackdrop()
 	p.toast.Layout(gtx, image.Rect(0, top, size.X, end))
 	// Audio of a format no decoder here takes goes to the external player.
 	if m := p.audio.takeExternal(); m != nil {

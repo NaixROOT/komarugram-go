@@ -495,7 +495,7 @@ func (p *chatPage) menuLayout(gtx layout.Context, l localization.Catalog) {
 		sc := scheme(gtx)
 		menuSize := gtx.Constraints.Max
 		defer clip.UniformRRect(image.Rectangle{Max: menuSize}, radius).Push(gtx.Ops).Pop()
-		fillRounded(gtx, sc.SurfaceContainerHigh, menuSize, radius)
+		overlayFill(gtx, p.menuBackdrop(), menuSize, m.rect.Min, sc.SurfaceContainerHigh, radius)
 		event.Op(gtx.Ops, &m.panel)
 		y := gtx.Dp(menuPadding)
 		if strip := m.reactions.height(gtx); strip > 0 {

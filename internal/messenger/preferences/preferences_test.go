@@ -65,7 +65,7 @@ func TestPersistsAndNotifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Global{Theme: ThemeLight, Language: "en", LastAccountID: "account-b", MotionMode: powersave.ModeOff, LowBattery: 25, MiniAppStorage: miniapp.PerApp, Composer: ComposerClassic, Player: player.VLC, VLCPath: "/opt/vlc/vlc", BrowserPath: "/opt/chromium/chrome", Ghost: Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true}, Keep: Keep{Deleted: true, Edits: true}, Look: Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound}}
+	want := Global{Theme: ThemeLight, Language: "en", LastAccountID: "account-b", MotionMode: powersave.ModeOff, LowBattery: 25, MiniAppStorage: miniapp.PerApp, Composer: ComposerClassic, Player: player.VLC, VLCPath: "/opt/vlc/vlc", BrowserPath: "/opt/chromium/chrome", Ghost: Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true}, Overlays: Overlays{Transparency: 30, MenusBlur: true, ToastsBlur: true}, Keep: Keep{Deleted: true, Edits: true}, Look: Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound}}
 	if got := loaded.Global(); !got.Equal(want) {
 		t.Fatalf("loaded %+v, want %+v", got, want)
 	}
@@ -183,5 +183,52 @@ func TestGhostDefaultsToTelling(t *testing.T) {
 	}
 	if g := loaded.Global().Ghost; g.SendRead || g.SendOnline || g.SendTyping || !g.ReadOnInteract {
 		t.Fatalf("Ghost Mode came back as %+v", g)
+	}
+}
+
+// The overlays are transparent by 30% and blur by default, as the composer
+// always did; a choice, unchecked boxes included, survives a restart, and
+// one out of bounds is refused and never loaded.
+func TestOverlays(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := s.Global().Overlays
+	if o.Transparency != 30 || !o.MenusBlur || !o.ToastsBlur || o.Opacity() != 0.7 {
+		t.Fatalf("by default %+v", o)
+	}
+	if err := s.SetOverlays(Overlays{Transparency: TransparencyMax + 1}); err == nil {
+		t.Fatal("a transparency past the bound was accepted")
+	}
+	if err := s.SetOverlays(Overlays{Transparency: 55}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Global().Overlays; got != (Overlays{Transparency: 55}) {
+		t.Fatalf("came back as %+v", got)
+	}
+	// A file from before the overlays has the defaults.
+	old := `{"version":1,"global":{"theme":0,"language":"ru","motion_mode":0,"low_battery":20,"mini_app_storage":2},"accounts":{}}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Global().Overlays; got != (Overlays{Transparency: 30, MenusBlur: true, ToastsBlur: true}) {
+		t.Fatalf("an old file has %+v", got)
+	}
+	bad := `{"version":1,"global":{"theme":0,"language":"ru","motion_mode":0,"low_battery":20,"mini_app_storage":2,"overlays":{"transparency":99}},"accounts":{}}`
+	if err := os.WriteFile(path, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenPath(path); err == nil {
+		t.Fatal("a file with a transparency past the bound was loaded")
 	}
 }

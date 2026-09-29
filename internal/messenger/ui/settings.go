@@ -18,6 +18,7 @@ import (
 	"gio-mw/widget/button"
 	"gio-mw/widget/checkbox"
 	"gio-mw/widget/radio"
+	"gio-mw/widget/slider"
 	"gio-mw/widget/toggle"
 
 	"gioui.org/layout"
@@ -156,7 +157,14 @@ type settingsPage struct {
 	// floating composer; without them the checkbox is hidden.
 	composerBlur    func() bool
 	setComposerBlur func(bool)
-	blur            *checkbox.Checkboxes[string]
+	// overlays and setOverlays read and change how the menus and toasts are
+	// drawn, and the transparency of all the overlays; blur is the switches
+	// of the composer, the menus and the toasts, and transparency the
+	// slider.
+	overlays     func() preferences.Overlays
+	setOverlays  func(preferences.Overlays)
+	blur         *checkbox.Checkboxes[string]
+	transparency *slider.Slider
 	// confirmations and setConfirmations read and change whether stickers
 	// and GIFs are sent only once confirmed.
 	confirmations    func() (sticker, gif bool)
@@ -251,9 +259,25 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 			p.setConfirmations(slices.Contains(values, "sticker"), slices.Contains(values, "gif"))
 		}
 	})
-	p.blur = checkbox.NewCheckboxes([]string{"blur"}, nil, func(values []string) {
+	p.blur = checkbox.NewCheckboxes([]string{"composer", "menus", "toasts"}, nil, func(values []string) {
 		if p.setComposerBlur != nil {
-			p.setComposerBlur(len(values) == 1)
+			p.setComposerBlur(slices.Contains(values, "composer"))
+		}
+		if p.overlays != nil && p.setOverlays != nil {
+			o := p.overlays()
+			o.MenusBlur, o.ToastsBlur = slices.Contains(values, "menus"), slices.Contains(values, "toasts")
+			p.setOverlays(o)
+		}
+	})
+	var steps []int
+	for v := 0; v <= preferences.TransparencyMax; v += 5 {
+		steps = append(steps, v)
+	}
+	p.transparency = slider.StandardSlider(steps, 30, func(v int) {
+		if p.overlays != nil && p.setOverlays != nil {
+			o := p.overlays()
+			o.Transparency = v
+			p.setOverlays(o)
 		}
 	})
 	return p
@@ -331,13 +355,25 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 		p.composer.Update(gtx)
 	}
 	if p.composerBlur != nil {
-		// The blur may have changed in another window since the last frame.
-		if on := p.composerBlur(); on != (len(p.blur.GetValues()) == 1) {
-			if on {
-				p.blur.SetValues([]string{"blur"})
-			} else {
-				p.blur.SetValues(nil)
+		// What blurs may have changed in another window since the last frame.
+		var want []string
+		if p.composerBlur() {
+			want = append(want, "composer")
+		}
+		if p.overlays != nil {
+			o := p.overlays()
+			if o.MenusBlur {
+				want = append(want, "menus")
 			}
+			if o.ToastsBlur {
+				want = append(want, "toasts")
+			}
+			if p.transparency.GetValue() != o.Transparency {
+				p.transparency.SetValue(o.Transparency)
+			}
+		}
+		if got := p.blur.GetValues(); !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
+			p.blur.SetValues(want)
 		}
 		if p.blurAvailable() {
 			p.blur.Enable()
@@ -719,24 +755,14 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 		}),
 	}
 	if p.composerStyle != nil {
-		hint := ""
-		if p.composerBlur != nil && !p.motion.AnimationsEnabled() {
-			hint = l.T("settings.composer_blur_off")
-		}
 		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return settingsChoiceCard(gtx, l.T("settings.composer"), hint, func(gtx layout.Context) layout.Dimensions {
+			return settingsChoiceCard(gtx, l.T("settings.composer"), "", func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return p.composer.Layout(gtx, radio.LeadingKind, map[preferences.ComposerStyle]string{
 							preferences.ComposerClassic:  l.T("settings.composer_classic"),
 							preferences.ComposerFloating: l.T("settings.composer_floating"),
 						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if p.composerBlur == nil {
-							return layout.Dimensions{}
-						}
-						return p.blur.Layout(gtx, map[string]string{"blur": l.T("settings.composer_blur")})
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if p.confirmations == nil {
@@ -757,6 +783,9 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 			})
 		}))
 	}
+	if p.composerBlur != nil {
+		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutOverlays(gtx, l) }))
+	}
 	if p.lookView.look != nil {
 		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.lookView.Layout(gtx, l) }, defaultCardPadding)
@@ -765,10 +794,61 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, cards...)
 }
 
-// blurAvailable reports whether the blur checkbox has an effect: the
-// composer floats and animations are on.
+// blurAvailable reports whether the blur checkboxes have an effect: it costs
+// power, so it is off while animations are.
 func (p *settingsPage) blurAvailable() bool {
-	return p.composerStyle != nil && p.composerStyle() == preferences.ComposerFloating && p.motion.AnimationsEnabled()
+	return p.motion.AnimationsEnabled()
+}
+
+// layoutOverlays draws the card of the overlays: the transparency of them
+// all, and which of them blur what is behind them.
+func (p *settingsPage) layoutOverlays(gtx layout.Context, l localization.Catalog) layout.Dimensions {
+	sc := scheme(gtx)
+	transparency := 0
+	if p.overlays != nil {
+		transparency = p.overlays().Transparency
+	}
+	var hint string
+	switch {
+	case !p.motion.AnimationsEnabled():
+		hint = l.T("settings.composer_blur_off")
+	case p.composerStyle != nil && p.composerStyle() != preferences.ComposerFloating:
+		hint = l.T("settings.overlays_classic")
+	}
+	return card(gtx, func(gtx layout.Context) layout.Dimensions {
+		children := []layout.FlexChild{
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return label(gtx, l.T("settings.overlays"), token.TypestyleTitleMedium, sc.Surface.OnColor, 1)
+			}),
+			vspace(8),
+		}
+		if p.overlays != nil {
+			children = append(children,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return label(gtx, l.T("settings.overlays_transparency")+": "+strconv.Itoa(transparency)+"%", token.TypestyleBodyLarge, sc.Surface.OnColor, 1)
+				}),
+				layout.Rigid(p.transparency.Layout),
+				vspace(4),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return label(gtx, l.T("settings.overlays_transparency_hint"), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 0)
+				}),
+				vspace(8),
+			)
+		}
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return p.blur.Layout(gtx, map[string]string{
+				"composer": l.T("settings.composer_blur"),
+				"menus":    l.T("settings.menus_blur"),
+				"toasts":   l.T("settings.toasts_blur"),
+			})
+		}))
+		if hint != "" {
+			children = append(children, vspace(4), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return label(gtx, hint, token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+			}))
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	}, defaultCardPadding)
 }
 
 // settingsChoiceCard draws a card with a title, the choices and, if set, a
