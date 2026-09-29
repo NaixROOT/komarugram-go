@@ -86,6 +86,9 @@ type App struct {
 	// shows over its channel while it is set.
 	comments *chatPage
 	thread   *commentsView
+	// mini runs the Mini Apps of bots; nil when the store cannot ask for
+	// them.
+	mini *webApps
 	// forum is the list of topics that shows in place of the history of a
 	// forum; a topic opens as thread, like comments.
 	forum  *forumPage
@@ -194,6 +197,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		id := services.AccountID
 		currentAccount = func() string { return id }
 	}
+	a.initMiniApps(store, services.MiniApps.Storage, currentAccount)
 	var leave func()
 	if services.Accounts != nil {
 		leave = func() {
@@ -377,6 +381,7 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
+	p.openWebApp = a.launchWebApp
 	if p.composer != nil {
 		p.composer.confirmations = func() (bool, bool) {
 			g := a.preferences.Global()
@@ -407,6 +412,7 @@ func (a *App) messageFilter() *messageFilter {
 
 // Close releases process-wide subscriptions when this window closes.
 func (a *App) Close() {
+	a.closeMiniApps()
 	a.photoWindows.closeAll()
 	if a.avatars != nil {
 		a.avatars.media.Close()
@@ -734,6 +740,11 @@ func (a *App) Layout(gtx layout.Context) {
 		return
 	}
 	a.tellGhost()
+	if a.thread != nil {
+		a.updateMiniApps(a.comments, a.catalog())
+	} else {
+		a.updateMiniApps(a.history, a.catalog())
+	}
 	a.window.SetCaptureExcluded(a.preferences.Global().StreamerMode)
 	a.history.filter = a.messageFilter()
 	if a.comments != nil {

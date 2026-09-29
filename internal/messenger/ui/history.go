@@ -156,8 +156,10 @@ type chatPage struct {
 	openComments func(model.Message)
 	thread       bool
 	// bot is what the page shows of bots: reply keyboards and the Start
-	// button.
-	bot botPage
+	// button. openWebApp opens the Mini App of a bot's button; nil leaves
+	// those buttons off.
+	bot        botPage
+	openWebApp func(gtx layout.Context, p *chatPage, req model.WebViewRequest, button string)
 	// topic is set when the thread shown is a topic of a forum, whose
 	// messages are read like a chat's.
 	topic bool

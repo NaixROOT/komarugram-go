@@ -12,6 +12,7 @@ import (
 	"gioui.org/f32"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
+	"gioui.org/layout"
 
 	"komarugram/internal/messenger/mockstore"
 	"komarugram/internal/messenger/model"
@@ -49,6 +50,12 @@ func (h *menuHarness) pressButtonOf(id model.MessageID, x float32, store *botSto
 		for x := x; x < 300 && store.count() == 0; x += 60 {
 			h.press(pointer.ButtonPrimary, f32.Pt(x, y))
 		}
+	}
+	// The bot is asked from a goroutine, which a busy machine may not have run
+	// yet.
+	deadline := time.Now().Add(2 * time.Second)
+	for store.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -195,5 +202,108 @@ func TestBotCommandsMenu(t *testing.T) {
 	h.frame()
 	if text := h.p.composer.draft(6).editor.Text(); text != "" {
 		t.Fatalf("the field still says %q", text)
+	}
+}
+
+// openedApp records the Mini Apps the page asks to open.
+type openedApp struct {
+	req    model.WebViewRequest
+	button string
+}
+
+// The WebView buttons under a message open the Mini App of the bot that sent
+// it: a WebView one as an inline launch, a SimpleWebView one as a simple one.
+func TestWebViewButtons(t *testing.T) {
+	for _, tc := range []struct {
+		kind string
+		want model.WebViewKind
+	}{{"webview", model.WebViewInline}, {"simple_webview", model.WebViewSimple}} {
+		var opened []openedApp
+		var store *botStore
+		h := newMenuHarnessOn(t, func(_ *menuStore, messages []model.Message) {
+			messages[2].SenderID = 55
+			messages[2].Buttons = [][]model.MessageButton{{{Text: "Shop", Kind: tc.kind, URL: "https://shop.example/app"}}}
+		}, func(s *menuStore) model.ConversationStore {
+			store = &botStore{menuStore: s}
+			return store
+		})
+		h.page.openWebApp = func(_ layout.Context, _ *chatPage, req model.WebViewRequest, button string) {
+			opened = append(opened, openedApp{req, button})
+		}
+		h.frames(3)
+		at := h.messageAt(3)
+		for y := at.Y - 80; y < at.Y+120 && len(opened) == 0; y += 4 {
+			for x := float32(60); x < 300 && len(opened) == 0; x += 60 {
+				h.press(pointer.ButtonPrimary, f32.Pt(x, y))
+			}
+		}
+		if len(opened) != 1 {
+			t.Fatalf("%s: opened %v", tc.kind, opened)
+		}
+		got := opened[0]
+		if got.req.Kind != tc.want || got.req.Bot != 55 || got.req.URL != "https://shop.example/app" || got.req.Chat != 1 || got.button != "Shop" {
+			t.Fatalf("%s: opened %+v", tc.kind, got)
+		}
+	}
+}
+
+// A bot with a menu button has it beside the composer's field; it opens the
+// app the bot names, from the menu.
+func TestBotMenuButton(t *testing.T) {
+	h := newComposerHarness(t)
+	h.chat, h.kind = mockstore.DemoWeatherBot, model.KindBot
+	var opened []openedApp
+	h.p.openWebApp = func(_ layout.Context, _ *chatPage, req model.WebViewRequest, button string) {
+		opened = append(opened, openedApp{req, button})
+	}
+	h.frame()
+	h.frame()
+	// The button is right of the paperclip.
+	h.click(120, 680)
+	if len(opened) != 1 {
+		t.Fatalf("opened %v", opened)
+	}
+	got := opened[0]
+	if got.req.Kind != model.WebViewMenu || got.req.Bot != mockstore.DemoWeatherBot || got.req.URL != mockstore.DemoMiniAppURL || got.button != "Открыть" {
+		t.Fatalf("opened %+v", got)
+	}
+	// A chat with a bot that has no menu button has none.
+	h.chat = mockstore.DemoNotesBot
+	opened = nil
+	h.frame()
+	h.click(120, 680)
+	if len(opened) != 0 {
+		t.Fatalf("a bot without a menu opened %v", opened)
+	}
+}
+
+// A keyboard's WebView key opens the Mini App of the bot that set it.
+func TestKeyboardWebViewKey(t *testing.T) {
+	h := newComposerHarness(t)
+	h.chat, h.kind = mockstore.DemoNotesBot, model.KindBot
+	var opened []openedApp
+	h.p.openWebApp = func(_ layout.Context, _ *chatPage, req model.WebViewRequest, button string) {
+		opened = append(opened, openedApp{req, button})
+	}
+	h.frame()
+	waitBotPage(t, h, "the empty chat", func() bool { return h.p.bot.empty })
+	h.click(340, 680)
+	waitBotPage(t, h, "the keyboard", func() bool { return h.p.bot.keyboard != nil })
+	if h.p.bot.keyboardBot != mockstore.DemoNotesBot {
+		t.Fatalf("the keyboard is of bot %d", h.p.bot.keyboardBot)
+	}
+	// The app's key is the second of the second row; the keys before it
+	// change nothing here.
+	for y := float32(440); y < 640 && len(opened) == 0; y += 8 {
+		for range 5 {
+			h.frame()
+		}
+		h.click(340, y)
+	}
+	if len(opened) != 1 {
+		t.Fatalf("opened %v", opened)
+	}
+	if got := opened[0]; got.req.Kind != model.WebViewSimple || got.req.Bot != mockstore.DemoNotesBot || got.req.URL != mockstore.DemoMiniAppURL || got.button != "Приложение" {
+		t.Fatalf("opened %+v", got)
 	}
 }

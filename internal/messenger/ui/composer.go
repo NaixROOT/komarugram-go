@@ -735,6 +735,9 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			return layout.Dimensions{Size: s}
 		}
 		button(0, &c.attach, iconAttach, l.T("composer.attach"))
+		// A bot's menu button, which opens its Mini App, is beside the
+		// clip.
+		menuWidth := p.layoutBotMenu(gtx, chat, image.Rect(iconWidth, 0, s.X-2*iconWidth, s.Y), l)
 		sendWidth := 0
 		if c.canRecord(d) {
 			// With nothing written, the microphone takes the far right, as
@@ -763,7 +766,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		} else {
 			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		}
-		inRect(gtx, image.Rect(iconWidth, 0, max(iconWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
+		inRect(gtx, image.Rect(iconWidth+menuWidth, 0, max(iconWidth+menuWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
 			if d.sending || c.source == nil {
 				gtx = gtx.Disabled()
 			}

@@ -72,15 +72,6 @@ type BotCommand struct {
 	Command, Description string
 }
 
-// BotCommandsSource is a Store that knows the commands of the bots the
-// account has a chat with.
-type BotCommandsSource interface {
-	// BotCommands returns the commands of the bot chat is with: none until
-	// they are read, which starts on the first call and redraws the window
-	// when it is done.
-	BotCommands(chat int64) []BotCommand
-}
-
 // MatchCommands returns the commands that a text typed in a bot's chat
 // starts, in order: "/" all of them, "/st" the ones beginning "st". A text
 // that is not a command being typed, one with a space in it, matches none.

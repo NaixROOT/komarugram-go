@@ -384,6 +384,10 @@ func convertKeyboard(rows []tg.KeyboardButtonRow, reply bool) [][]model.MessageB
 				}
 			case *tg.KeyboardButtonCopy:
 				btn.Kind, btn.Copy = "copy", b.CopyText
+			case *tg.KeyboardButtonWebView:
+				btn.Kind, btn.URL = "webview", b.URL
+			case *tg.KeyboardButtonSimpleWebView:
+				btn.Kind, btn.URL = "simple_webview", b.URL
 			case *tg.KeyboardButton:
 				if reply {
 					btn.Kind = "text"
