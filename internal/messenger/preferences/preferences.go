@@ -156,12 +156,14 @@ type Keep struct {
 	Edits   bool `json:"edits"`
 }
 
-// Ghost is what the accounts tell others: see model.Ghost. Nothing is told
-// by default; a chat is read on sending to it or reacting in it.
+// Ghost is what the accounts tell others: see model.Ghost. Everything is
+// told by default, as Telegram does, and Ghost Mode is choosing not to:
+// the fields are saved even when false, or a choice would come back as the
+// default. A chat is also read on sending to it or reacting in it.
 type Ghost struct {
-	SendRead       bool `json:"send_read,omitempty"`
-	SendOnline     bool `json:"send_online,omitempty"`
-	SendTyping     bool `json:"send_typing,omitempty"`
+	SendRead       bool `json:"send_read"`
+	SendOnline     bool `json:"send_online"`
+	SendTyping     bool `json:"send_typing"`
 	ReadOnInteract bool `json:"read_on_interact"`
 }
 
@@ -203,7 +205,7 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
-		Ghost:          Ghost{ReadOnInteract: true},
+		Ghost:          Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true},
 		Keep:           Keep{Deleted: true, Edits: true},
 		Look:           Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound},
 	}

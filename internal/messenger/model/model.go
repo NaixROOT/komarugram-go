@@ -32,7 +32,10 @@ type Chat struct {
 	LastTime   time.Time
 	Unread     int
 	Muted      bool
-	Pinned     bool
+	// Pinned chats stay at the top of the list, in the order PinRank gives:
+	// 1 for the first, 0 for a chat that is not pinned.
+	Pinned  bool
+	PinRank int
 	// Members is the member or subscriber count of groups and channels.
 	Members int
 	// Forum is set for a group divided in topics, which open as a list of

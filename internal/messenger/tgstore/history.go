@@ -804,6 +804,10 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			s.applyReactions(peerID(u.Peer), u.MsgID, u.Reactions)
 		case *tg.UpdatePeerBlocked:
 			s.applyBlocked(u)
+		case *tg.UpdateDialogPinned:
+			s.applyPin(u)
+		case *tg.UpdatePinnedDialogs:
+			s.applyPinOrder(ctx, u)
 		case *tg.UpdatePinnedMessages:
 			s.applyPinned(ctx, peerID(u.Peer), u.Messages, u.Pinned)
 		case *tg.UpdatePinnedChannelMessages:
@@ -897,12 +901,7 @@ func (s *Store) mergeUpdate(m model.Message) {
 		setPreview(&chat, m)
 		chats = append(chats, chat)
 	}
-	sort.SliceStable(chats, func(i, j int) bool {
-		if chats[i].Pinned != chats[j].Pinned {
-			return chats[i].Pinned
-		}
-		return chats[i].LastTime.After(chats[j].LastTime)
-	})
+	model.SortChats(chats)
 	s.chats = chats
 	s.mu.Unlock()
 }

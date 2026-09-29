@@ -7,7 +7,6 @@ package mockstore
 import (
 	"context"
 	"math/rand/v2"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -61,12 +60,7 @@ func New(now time.Time, extra int) *Store {
 		{ID: DemoForum, Kind: model.KindGroup, Forum: true, Title: "Клуб Go: обсуждения", LastSender: "Игорь", LastMessage: "Релиз в пятницу, кто берёт заметки?", LastTime: ago(35 * time.Minute), Unread: 9, Members: 240},
 	}
 	chats = append(chats, generate(now, extra, int64(len(chats)+1))...)
-	sort.SliceStable(chats, func(i, j int) bool {
-		if chats[i].Pinned != chats[j].Pinned {
-			return chats[i].Pinned
-		}
-		return chats[i].LastTime.After(chats[j].LastTime)
-	})
+	model.Renumbered(chats)
 	return &Store{chats: chats, created: now, me: model.Profile{
 		ID:        5000000001,
 		DC:        2,
@@ -121,7 +115,46 @@ func (s *Store) Folders() []model.Folder {
 }
 
 func (s *Store) Chats() []model.Chat {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.chats
+}
+
+// PinChat implements model.ChatListActions with the limit of the demo
+// account's Premium.
+func (s *Store) PinChat(ctx context.Context, chat int64, pin bool) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(200 * time.Millisecond): // As long as a round trip.
+	}
+	limit := s.Premium().Limit("dialogs_pinned_limit")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pinned := false
+	for _, c := range s.chats {
+		if c.ID == chat {
+			pinned = c.Pinned
+		}
+	}
+	if pin && !pinned && model.PinnedCount(s.chats) >= limit {
+		return model.ErrPinnedTooMuch
+	}
+	s.chats = model.WithPinned(s.chats, chat, pin)
+	return nil
+}
+
+// MarkChatRead implements model.ChatListActions.
+func (s *Store) MarkChatRead(chat int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chats := append([]model.Chat(nil), s.chats...)
+	for i := range chats {
+		if chats[i].ID == chat {
+			chats[i].Unread = 0
+		}
+	}
+	s.chats = chats
 }
 
 var (

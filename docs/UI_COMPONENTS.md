@@ -115,6 +115,14 @@ The history is drawn as materialgram draws it:
   FFmpeg, when there is one); a file that cannot be sent is told in the
   dialog's toast. What it sends is `model.OutgoingFiles` in an
   `OutgoingMessage`, so retries reuse the composer's identity handling.
+- **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
+  opens it at the pointer, as a `contextMenu` in the header menu's style. The
+  rows and the list take the presses as `search_recent.go`'s do (`PassOp` areas
+  over what is clicked). Items are `chatRowPin`/`chatRowUnpin` (only in the list
+  of all chats) and `chatRowRead`; a pin over the limit is answered by the
+  list's `toast` without asking the store, and a store's failure comes back to
+  the toast on the next frame. A pinned chat with nothing unread draws
+  `drawPin` where its counter would be.
 - **Forum page** (`forum.go`): the topics of a forum chat in place of its
   history, under the chat's header (which opens its info). A row is drawn as the
   chat list's: `surface`, icon plate (`fillRounded`, the topic's colour, a house

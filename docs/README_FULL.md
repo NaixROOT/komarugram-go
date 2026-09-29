@@ -417,6 +417,12 @@ dimensions and duration. Creating native Telegram checklists requires Premium;
 received checklists display their items and completion state. The demo simulates
 sending locally without network traffic.
 
+A right click on a chat of the list opens its menu: pin it to the top or unpin it
+(the pinned chats keep the order they were pinned in, and their number is
+limited by the server, more with Premium) and mark it read. Chats and the
+messages shown are marked read, and the account shows online and typing, as
+Telegram does, unless Ghost Mode in "Privacy and security" says otherwise.
+
 A forum (a group divided in topics) opens as the list of its topics instead of a
 history, as in Telegram Desktop: the icon of the topic's colour, its title, the last
 message, the unread and mention counters, a pin for a pinned topic and a lock for

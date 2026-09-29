@@ -233,6 +233,8 @@ type list struct {
 	chats   []model.Chat
 	entries map[int64]entry
 	seen    map[int64]bool
+	// pins counts the pinned dialogs seen; they come first, in pin order.
+	pins int
 }
 
 func newList(self int64) *list {
@@ -311,6 +313,10 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 	}
 	if until, ok := d.NotifySettings.GetMuteUntil(); ok && time.Unix(int64(until), 0).After(time.Now()) {
 		chat.Muted = true
+	}
+	if d.Pinned {
+		l.pins++
+		chat.PinRank = l.pins
 	}
 	e := entry{unreadMark: d.UnreadMark}
 

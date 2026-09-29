@@ -53,6 +53,8 @@ type chatList struct {
 	panel *searchPanel
 	// items are the search results laid out in the last frame.
 	items []searchItem
+	// menu is the menu of a chat right-clicked.
+	menu chatRowMenu
 }
 
 // chatPick is a chat picked in the list: a chat of the list or found by a
@@ -212,6 +214,7 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 	l.items = l.items[:0]
 
 	visible := l.visible(sec, folders, chats)
+	l.menu.update(gtx, sec, chats, l.shown, &l.toast, catalog)
 	listGtx := gtx
 	listGtx.Constraints = layout.Exact(image.Pt(size.X, max(size.Y-headerHeight, 0)))
 	offset(listGtx, image.Pt(0, headerHeight), func(gtx layout.Context) layout.Dimensions {
@@ -227,8 +230,17 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 		return l.list.Layout(gtx, len(visible), func(gtx layout.Context, i int) layout.Dimensions {
 			c := visible[i]
 			l.shown = append(l.shown, c.ID)
-			return l.layoutRow(gtx, c, c.ID == selected, narrow, now, catalog)
+			dims := l.layoutRow(gtx, c, c.ID == selected, narrow, now, catalog)
+			l.menu.rowOp(gtx, c.ID, dims.Size)
+			return dims
 		})
+	})
+	// Over the rows, which would keep the press from anything under them.
+	menuGtx := listGtx
+	offset(menuGtx, image.Pt(0, headerHeight), func(gtx layout.Context) layout.Dimensions {
+		l.menu.areaOp(gtx)
+		l.menu.layout(gtx, catalog)
+		return layout.Dimensions{}
 	})
 	l.toast.Layout(gtx, image.Rect(0, headerHeight, size.X, size.Y))
 	return layout.Dimensions{Size: size}
@@ -388,9 +400,18 @@ func (l *chatList) layoutRowText(gtx layout.Context, c model.Chat, area image.Re
 	// Bottom line: sender, message and the unread counter.
 	lineY := area.Min.Y + gtx.Dp(22)
 	messageWidth := width
-	if c.Unread > 0 {
+	switch {
+	case c.Unread > 0:
 		badgeWidth := drawBadgeRight(gtx, image.Pt(area.Max.X, lineY+gtx.Dp(1)), c.Unread, badgeBackground, badgeText)
 		messageWidth -= badgeWidth + gtx.Dp(8)
+	case c.Pinned:
+		// A pinned chat with nothing unread shows the pin where the counter
+		// would be, as Telegram Desktop's list does.
+		px := gtx.Dp(16)
+		offset(gtx, image.Pt(area.Max.X-px, lineY+gtx.Dp(1)), func(gtx layout.Context) layout.Dimensions {
+			return drawPin(gtx, px, textColor)
+		})
+		messageWidth -= px + gtx.Dp(8)
 	}
 	x := area.Min.X
 	if c.LastSender != "" {

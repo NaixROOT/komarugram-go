@@ -152,6 +152,9 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.profile.premium, _ = store.(model.PremiumSource)
 	a.profile.badges = a.badges
 	a.chats.badges = a.badges
+	a.chats.menu.store, _ = store.(model.ChatListActions)
+	a.chats.menu.premium, _ = store.(model.PremiumSource)
+	a.chats.menu.invalidate = w.Invalidate
 	if searcher, ok := store.(model.Searcher); ok {
 		a.chats.panel = newSearchPanel(searcher)
 	}
