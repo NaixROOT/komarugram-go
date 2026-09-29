@@ -51,6 +51,12 @@ func (h *menuHarness) pressButtonOf(id model.MessageID, x float32, store *botSto
 			h.press(pointer.ButtonPrimary, f32.Pt(x, y))
 		}
 	}
+	// The bot is asked from a goroutine, which a busy machine may not have run
+	// yet.
+	deadline := time.Now().Add(2 * time.Second)
+	for store.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func botHarness(t *testing.T, answer model.BotAnswer, err error, buttons [][]model.MessageButton) (*menuHarness, *botStore) {
