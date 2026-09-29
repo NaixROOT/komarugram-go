@@ -169,3 +169,23 @@ func TestAppOverlayPrefs(t *testing.T) {
 		w.Motion.Close()
 	}
 }
+
+// However transparent the overlays are, a toast keeps enough of its dark
+// plate for its light text; up to that it follows them.
+func TestToastKeepsItsPlate(t *testing.T) {
+	var tst toast
+	if tst.backdrop() != nil {
+		t.Fatal("a toast without a backdrop blurs")
+	}
+	tst.bd = newBackdrop(op.CallOp{}, 0.3)
+	if got := tst.backdrop().opacity; got != toastMinOpacity {
+		t.Fatalf("at 70%% transparency the toast is %v opaque, want %v", got, toastMinOpacity)
+	}
+	if tst.bd.opacity != 0.3 {
+		t.Fatal("the page's backdrop was changed")
+	}
+	tst.bd = newBackdrop(op.CallOp{}, 0.9)
+	if got := tst.backdrop().opacity; got != 0.9 {
+		t.Fatalf("at 10%% transparency the toast is %v opaque, want 0.9", got)
+	}
+}

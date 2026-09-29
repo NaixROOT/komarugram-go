@@ -28,6 +28,11 @@ var (
 	toastTextColor = token.NewMatColorFromHexRGB(0xf2f2f4)
 )
 
+// toastMinOpacity is the least opaque a blurring toast is, whatever the
+// overlays' transparency: its light text reads only as long as most of its
+// dark plate is there.
+const toastMinOpacity = token.OpacityLevel(0.8)
+
 // toast is a short notice, an error or the outcome of an action, on a grey
 // plate at the bottom of the list or dialog it is about. It goes by itself
 // after toastDuration; a new one replaces it. Every list that can have
@@ -106,6 +111,16 @@ func (t *toast) layout(gtx layout.Context, area, below image.Rectangle) {
 	if s := scheme(gtx).Surface.Color; int(s.R)+int(s.G)+int(s.B) < 3*128 {
 		plate = toastDarkColor
 	}
-	overlayPlate(gtx, t.bd, dims.Size, at, plate, gtx.Dp(12))
+	overlayPlate(gtx, t.backdrop(), dims.Size, at, plate, gtx.Dp(12))
 	call.Add(gtx.Ops)
+}
+
+// backdrop is what the toast blurs, no more transparent than toastMinOpacity.
+func (t *toast) backdrop() *blurBackdrop {
+	if t.bd == nil || t.bd.opacity >= toastMinOpacity {
+		return t.bd
+	}
+	b := *t.bd
+	b.opacity = toastMinOpacity
+	return &b
 }

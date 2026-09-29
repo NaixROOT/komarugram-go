@@ -134,7 +134,8 @@ The history is drawn as materialgram draws it:
   the recording was made in (`shifted` for overlays drawn in others, as the
   page header's menu), which draws the recording again under a blur and the
   fill over it at the chosen opacity. An overlay whose owner gives none is
-  opaque. A new overlay: take `p.menuBackdrop()` / `p.toastBackdrop()` (or the
+  opaque. A toast is never less than 80% opaque (`toastMinOpacity`): its
+  light text is only readable on its dark plate. A new overlay: take `p.menuBackdrop()` / `p.toastBackdrop()` (or the
   list's), fill with `overlayFill`. Not covered: the emoji picker, forms,
   dialogs' toasts, the photo viewer, and the toast of the search results.
 - **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
