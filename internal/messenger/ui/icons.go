@@ -35,6 +35,8 @@ var (
 	iconExpandMore   = wdk.RequireIconWidget(icons.NavigationExpandMore)
 	iconExpandLess   = wdk.RequireIconWidget(icons.NavigationExpandLess)
 	iconToTop        = wdk.RequireIconWidget(icons.EditorVerticalAlignTop)
+	iconToBottom     = wdk.RequireIconWidget(icons.EditorVerticalAlignBottom)
+	iconRefresh      = wdk.RequireIconWidget(icons.NavigationRefresh)
 	iconRead         = wdk.RequireIconWidget(icons.ActionDoneAll)
 	iconHistory      = wdk.RequireIconWidget(icons.ActionHistory)
 	iconFilter       = wdk.RequireIconWidget(icons.ContentFilterList)

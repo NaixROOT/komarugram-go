@@ -129,16 +129,18 @@ type chatPage struct {
 	rows      map[model.MessageID]*messageRow
 	// textRunes are the rune counts of the messages' texts, which the
 	// estimates of unmeasured heights need on every change of width.
-	textRunes                  map[model.MessageID]textRunes
-	env                        model.RenderEnvironment
-	heights                    *model.HeightIndex
-	measures                   map[model.MessageID]model.MessageLayout
-	dirty                      map[model.MessageID]model.MessageLayout
-	restored                   bool
-	view                       model.Viewport
-	saved                      time.Time
-	newer, retry, open, cancel surface
-	link                       string
+	textRunes                                  map[model.MessageID]textRunes
+	env                                        model.RenderEnvironment
+	heights                                    *model.HeightIndex
+	measures                                   map[model.MessageID]model.MessageLayout
+	dirty                                      map[model.MessageID]model.MessageLayout
+	restored                                   bool
+	view                                       model.Viewport
+	saved                                      time.Time
+	newer, retry, toStart, toEnd, open, cancel surface
+	link                                       string
+	// jump is a jump to an end of a thread, waiting for its load.
+	jump jump
 	// mediaError is a failure of a background task on the chat's media,
 	// reported from its goroutine and told in the toast.
 	errorMu    sync.Mutex
@@ -380,6 +382,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.measures = nil
 		p.dirty = map[model.MessageID]model.MessageLayout{}
 		p.restored = false
+		p.jump = jumpNone
 		p.link = ""
 		p.linkModal.Hide()
 	}
@@ -470,6 +473,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		}
 		p.restored = true
 	}
+	p.finishJump(history)
 	classic := p.classicComposer()
 	// The floating composer covers the end of the history, which scrolls
 	// out from under it; the classic one takes its height from the history.
@@ -534,7 +538,6 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.menuArea(gtx, top)
 		return dims
 	})
-	p.olderStatus(gtx, size, history, l)
 	if p.blurComposer() {
 		call := record.Stop()
 		call.Add(gtx.Ops)
@@ -545,6 +548,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.composer.Layout(gtx, c.ID, l, p, animate, backdrop)
 		end = p.composer.top
 	}
+	p.jumpButtons(gtx, size, end, history, l)
 	p.errorMu.Lock()
 	if err := p.mediaError; err != nil {
 		p.mediaError = nil
@@ -892,45 +896,4 @@ func historyInvalidationReason(old, next model.RenderEnvironment, previous, curr
 		reasons = append(reasons, "message-key/content-revision")
 	}
 	return strings.Join(reasons, ",")
-}
-
-// olderStatus draws over the top of the history what its loading of older
-// messages has to say: a ring while they come, the failure and its retry.
-func (p *chatPage) olderStatus(gtx layout.Context, size image.Point, history model.History, l localization.Catalog) {
-	if history.LoadingOlder && len(p.messages) == 0 {
-		return // the empty history shows its own ring
-	}
-	var content layout.Widget
-	switch {
-	case history.LoadingOlder:
-		content = func(gtx layout.Context) layout.Dimensions { return p.loader.sized(gtx, l, 20) }
-	case history.Err != nil:
-		if p.retry.Clicked(gtx) {
-			if s, ok := p.source.(interface{ Reload(int64) }); ok {
-				s.Reload(p.chat)
-			} else {
-				p.source.LoadOlder(p.chat)
-			}
-		}
-		content = func(gtx layout.Context) layout.Dimensions {
-			return textButton(gtx, &p.retry, l.T("history.failed")+"  "+l.T("history.retry"))
-		}
-	default:
-		return
-	}
-	// Below the sticky date, which keeps the very top.
-	defer op.Offset(image.Pt(0, gtx.Dp(44))).Push(gtx.Ops).Pop()
-	gtx.Constraints = layout.Constraints{Max: image.Pt(size.X, gtx.Dp(48))}
-	layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Min = image.Point{}
-		return layout.Stack{}.Layout(gtx,
-			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				fillRounded(gtx, scheme(gtx).SurfaceContainerHigh, gtx.Constraints.Min, gtx.Constraints.Min.Y/2)
-				return layout.Dimensions{Size: gtx.Constraints.Min}
-			}),
-			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(6).Layout(gtx, content)
-			}),
-		)
-	})
 }

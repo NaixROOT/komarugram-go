@@ -34,12 +34,19 @@ type chatInputHarness struct {
 
 func newChatInputHarness(t *testing.T) *chatInputHarness {
 	t.Helper()
+	return newChatInputHarnessOf(t, 40, func(h model.History) model.ConversationStore { return benchmarkHistory{h: h} })
+}
+
+// newChatInputHarnessOf is a harness over n messages, in the history that
+// source makes of them.
+func newChatInputHarnessOf(t *testing.T, n int, source func(model.History) model.ConversationStore) *chatInputHarness {
+	t.Helper()
 	h := &chatInputHarness{now: time.Unix(1000, 0)}
 	var messages []model.Message
-	for i := 1; i <= 40; i++ {
+	for i := 1; i <= n; i++ {
 		messages = append(messages, model.Message{Key: model.MessageKey{ChatID: 1, MessageID: model.MessageID(i)}, Date: h.now, Text: fmt.Sprintf("Message %d: select and scroll", i), ContentRevision: 1})
 	}
-	h.page = newChatPage(benchmarkHistory{h: model.History{Messages: messages, Revision: 1}}, func() {})
+	h.page = newChatPage(source(model.History{Messages: messages, Revision: 1}), func() {})
 	t.Cleanup(h.page.Close)
 	h.frame()
 	h.page.list.Position.First, h.page.list.Position.Offset, h.page.list.Position.BeforeEnd = 0, 0, true

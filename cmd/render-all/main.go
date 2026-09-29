@@ -56,6 +56,7 @@ func renders() []render {
 		render{"forum", "TestRenderForum", []string{"FORUM_PNG={out}/forum.png"}},
 		render{"unwrapped", "TestRenderUnwrapped", []string{"UNWRAPPED_PNG={out}/unwrapped.png"}},
 		render{"service", "TestRenderService", []string{"SERVICE_PNG={out}/service.png"}},
+		render{"jump-buttons", "TestRenderJumpButtons", []string{"JUMP_PNG_DIR={out}"}},
 		render{"pinned", "TestRenderPinned", []string{"PINNED_PNG={out}/pinned.png"}},
 		render{"chat-search", "TestRenderChatSearch", []string{"CHAT_SEARCH_PNG={out}/chat-search.png"}},
 		render{"snapshot", "TestRenderSnapshotDialog", []string{"SHOT_PNG={out}/snapshot.png"}},

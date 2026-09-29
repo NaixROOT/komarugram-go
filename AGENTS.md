@@ -72,7 +72,7 @@ otherwise, so `go test` never runs them: `COMPOSER_PNG` (with
 `SETTINGS_SECTION`), `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `SESSIONS_PNG`, `FORUM_PNG`,
 `STICKER_SET_PNG_DIR`, `MENU_PNG`, `REACTED_PNG`, `VIEWER_PNG` (with
 `VIEWER_ZOOM`), `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`,
-`SERVICE_PNG`, `PINNED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`,
+`SERVICE_PNG`, `JUMP_PNG_DIR`, `PINNED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`,
 `SAVED_EMPTY_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR` (see
 `docs/UI_COMPONENTS.md`). Run the one of the screen you changed, and look
 at the PNG. `go run ./cmd/render-all [dir]` renders all of them, every
