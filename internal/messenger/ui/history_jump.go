@@ -18,26 +18,48 @@ const (
 	jumpIconSize   = 24
 	jumpMargin     = 16
 	jumpGap        = 12
+	// jumpReserve is how far from an end of the history, in dp, the buttons
+	// still take it to be at that end, as Telegram Desktop's is
+	// (historyToDownShownAfter).
+	jumpReserve = 480
 	// historyPage is how many messages the store asks Telegram for at once.
 	historyPage = 80
 )
 
-// atStart reports whether the history shows the very first message of the
-// chat at its top: none is left to scroll to, loaded or not.
-func (p *chatPage) atStart(history model.History) bool {
+// atStart reports whether the history is at the very first message of the
+// chat, or within reserve px of it: none is left to scroll to, loaded or not.
+func (p *chatPage) atStart(history model.History, reserve int) bool {
+	if history.HasOlder {
+		return false
+	}
 	pos := p.list.Position
-	return pos.First == 0 && pos.Offset <= 0 && !history.HasOlder
+	if pos.First == 0 && pos.Offset <= 0 {
+		return true
+	}
+	return p.heights != nil && p.heights.Prefix(pos.First)+int64(pos.Offset) <= int64(reserve)
+}
+
+// atEnd reports whether the history shows the newest message at its bottom,
+// or within reserve px of it, for a viewport of the height.
+func (p *chatPage) atEnd(history model.History, viewport, reserve int) bool {
+	if history.HasNewer {
+		return false
+	}
+	if !p.list.Position.BeforeEnd {
+		return true
+	}
+	if p.heights == nil {
+		return false
+	}
+	pos := p.list.Position
+	below := p.heights.Total() - (p.heights.Prefix(pos.First) + int64(pos.Offset) + int64(viewport))
+	return below <= int64(reserve)
 }
 
 // oneRequest reports whether the whole chat came in one request, which
 // makes a button to its start no better than the scrollbar.
 func (p *chatPage) oneRequest(history model.History) bool {
 	return !history.HasOlder && !history.HasNewer && len(p.messages) < historyPage
-}
-
-// atEnd reports whether the history shows the newest message at its bottom.
-func (p *chatPage) atEnd(history model.History) bool {
-	return !p.list.Position.BeforeEnd && !history.HasNewer
 }
 
 // jump is where the history is to be put once a load that the store started
@@ -115,7 +137,7 @@ func (p *chatPage) scrollToEnd(history model.History) {
 // end, the round buttons that scroll to its end and its start and retry a
 // failed load, each there only when it has something to do, and above them
 // the ring of a load on its way, of the size of a button.
-func (p *chatPage) jumpButtons(gtx layout.Context, size image.Point, end int, history model.History, l localization.Catalog) {
+func (p *chatPage) jumpButtons(gtx layout.Context, size image.Point, end, viewport int, history model.History, l localization.Catalog) {
 	if !p.restored || len(p.messages) == 0 && history.Err == nil {
 		return
 	}
@@ -129,9 +151,14 @@ func (p *chatPage) jumpButtons(gtx layout.Context, size image.Point, end int, hi
 		show  bool
 		do    func()
 	}
+	// At the bottom, or near it, the ones that scroll are not there: they
+	// would be over the message that has just come. A failure still has its
+	// retry.
+	reserve := gtx.Dp(jumpReserve)
+	nearEnd := p.atEnd(history, viewport, reserve)
 	buttons := []button{
-		{&p.toEnd, iconToBottom, l.T("history.to_end"), len(p.messages) > 0 && !p.atEnd(history), func() { p.scrollToEnd(history) }},
-		{&p.toStart, iconToTop, l.T("history.to_top"), len(p.messages) > 0 && !p.atStart(history) && !p.oneRequest(history) && !history.LoadingOlder, func() { p.scrollToStart(history) }},
+		{&p.toEnd, iconToBottom, l.T("history.to_end"), len(p.messages) > 0 && !nearEnd, func() { p.scrollToEnd(history) }},
+		{&p.toStart, iconToTop, l.T("history.to_top"), len(p.messages) > 0 && !nearEnd && !p.atStart(history, reserve) && !p.oneRequest(history) && !history.LoadingOlder, func() { p.scrollToStart(history) }},
 		{&p.retry, iconRefresh, l.T("history.retry"), history.Err != nil, func() {
 			if s, ok := p.source.(interface{ Reload(int64) }); ok {
 				s.Reload(p.chat)

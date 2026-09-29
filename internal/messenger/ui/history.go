@@ -566,7 +566,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.composer.Layout(gtx, c.ID, l, p, animate, backdrop)
 		end = p.composer.top
 	}
-	p.jumpButtons(gtx, size, end, history, l)
+	p.jumpButtons(gtx, size, end, max(0, size.Y-top-bottom), history, l)
 	p.errorMu.Lock()
 	if err := p.mediaError; err != nil {
 		p.mediaError = nil

@@ -67,24 +67,121 @@ func (h *chatInputHarness) click(at f32.Point) {
 	h.frame()
 }
 
+// seek puts the history of the harness at row first, offset px into it, before
+// its end, and lays it out.
+func (h *chatInputHarness) seek(first, offset int) {
+	h.page.list.Position.First, h.page.list.Position.Offset, h.page.list.Position.BeforeEnd = first, offset, true
+	h.frame()
+}
+
 func TestJumpButtonsScroll(t *testing.T) {
 	// At the start of 100 messages, none older: more than one request's.
 	h := newChatInputHarnessOf(t, 100, func(m model.History) model.ConversationStore { return benchmarkHistory{h: m} })
 	p := h.page
-	if !p.atStart(model.History{}) || p.atEnd(model.History{}) {
-		t.Fatalf("at the start: atStart %v, atEnd %v", p.atStart(model.History{}), p.atEnd(model.History{}))
+	if !p.atStart(model.History{}, 0) || p.atEnd(model.History{}, 600, 480) {
+		t.Fatalf("at the start: atStart %v, atEnd %v", p.atStart(model.History{}, 0), p.atEnd(model.History{}, 600, 480))
 	}
 	h.click(h.jumpButton(0))
 	if p.list.Position.BeforeEnd {
 		t.Fatal("the button to the end left the history before it")
 	}
-	if !p.atEnd(model.History{}) || p.atStart(model.History{}) {
-		t.Fatalf("at the end: atStart %v, atEnd %v", p.atStart(model.History{}), p.atEnd(model.History{}))
-	}
-	// Only one button is left, the one to the start, and it is the lowest.
+	// At the bottom no button is there, the one to the start neither.
+	first, offset := p.list.Position.First, p.list.Position.Offset
 	h.click(h.jumpButton(0))
+	if p.list.Position.First != first || p.list.Position.Offset != offset {
+		t.Fatal("a button to the start is there at the bottom")
+	}
+	// A little above it, far enough, the one to the start is.
+	h.seek(len(p.messages)-30, 0)
+	h.click(h.jumpButton(0))
+	if p.list.Position.BeforeEnd {
+		t.Fatal("the button to the end did not take the history there")
+	}
+	h.seek(len(p.messages)-30, 0)
+	h.click(h.jumpButton(1))
 	if p.list.Position.First != 0 || p.list.Position.Offset != 0 {
 		t.Fatalf("the button to the start stopped at %d+%d", p.list.Position.First, p.list.Position.Offset)
+	}
+}
+
+// The history is at its end, for the buttons, up to a reserve above it, as in
+// Telegram Desktop; and at its start, up to the same below it.
+func TestJumpReserve(t *testing.T) {
+	h := newChatInputHarnessOf(t, 100, func(m model.History) model.ConversationStore { return benchmarkHistory{h: m} })
+	p := h.page
+	const viewport, reserve = 600, 480
+	total := p.heights.Total()
+	nearEnd, nearStart, far := 0, 0, 0
+	for first := range p.messages {
+		h.seek(first, 0)
+		below := total - (p.heights.Prefix(first) + int64(viewport))
+		if got := p.atEnd(model.History{}, viewport, reserve); got != (below <= reserve) {
+			t.Fatalf("row %d, %d px above the end: atEnd %v", first, below, got)
+		}
+		above := p.heights.Prefix(first)
+		if got := p.atStart(model.History{}, reserve); got != (above <= reserve) {
+			t.Fatalf("row %d, %d px below the start: atStart %v", first, above, got)
+		}
+		switch {
+		case below <= reserve:
+			nearEnd++
+		case above <= reserve:
+			nearStart++
+		default:
+			far++
+		}
+	}
+	if nearEnd < 3 || nearStart < 3 || far < 10 {
+		t.Fatalf("the rows of the test are too few near the ends or far: %d, %d, %d", nearEnd, nearStart, far)
+	}
+	// A few pixels above the end is still the end.
+	h.seek(len(p.messages)-1, 0)
+	h.page.list.Position.Offset = 3
+	if !p.atEnd(model.History{}, viewport, reserve) {
+		t.Fatal("a few pixels above the end is not the end")
+	}
+	// Not at the end, when there are newer messages that are not loaded.
+	if p.atEnd(model.History{HasNewer: true}, viewport, reserve) {
+		t.Fatal("the end of the loaded is the end of the chat")
+	}
+}
+
+// Near the bottom no button scrolls, so that none is over the message that
+// has just come; a failure still has its retry.
+func TestNoScrollButtonsNearTheBottom(t *testing.T) {
+	h := newChatInputHarnessOf(t, 100, func(m model.History) model.ConversationStore { return benchmarkHistory{h: m} })
+	p := h.page
+	// A row from which some px are left to the end, fewer than the reserve.
+	first := -1
+	for i := range p.messages {
+		if below := p.heights.Total() - (p.heights.Prefix(i) + 600); below > 100 && below < 400 {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		t.Fatal("no row is a little above the end")
+	}
+	h.seek(first, 0)
+	if !p.list.Position.BeforeEnd || p.list.Position.First != first {
+		t.Fatalf("the history is not above its end: row %d, before the end %v", p.list.Position.First, p.list.Position.BeforeEnd)
+	}
+	h.click(h.jumpButton(0))
+	h.click(h.jumpButton(1))
+	if p.list.Position.First != first || !p.list.Position.BeforeEnd {
+		t.Fatal("a button is there near the bottom")
+	}
+
+	var calls []string
+	failed := newChatInputHarnessOf(t, 100, func(m model.History) model.ConversationStore {
+		m.Err = errFailed
+		return jumpSource{benchmarkHistory{h: m}, &calls, nil}
+	})
+	failed.page.list.Position.BeforeEnd = false
+	failed.frame()
+	failed.click(failed.jumpButton(0))
+	if len(calls) != 1 || calls[0] != "reload" {
+		t.Fatalf("at the bottom, with a failure, the store was asked for %v", calls)
 	}
 }
 
@@ -92,8 +189,8 @@ func TestJumpButtonsHideWhenThereIsNowhereToGo(t *testing.T) {
 	h := newChatInputHarnessOf(t, 2, func(m model.History) model.ConversationStore { return benchmarkHistory{h: m} })
 	h.page.list.Position.BeforeEnd = false
 	h.frame()
-	if !h.page.atStart(model.History{}) || !h.page.atEnd(model.History{}) {
-		t.Fatalf("two messages that fit: atStart %v, atEnd %v", h.page.atStart(model.History{}), h.page.atEnd(model.History{}))
+	if !h.page.atStart(model.History{}, 0) || !h.page.atEnd(model.History{}, 600, 0) {
+		t.Fatalf("two messages that fit: atStart %v, atEnd %v", h.page.atStart(model.History{}, 0), h.page.atEnd(model.History{}, 600, 0))
 	}
 }
 
@@ -133,17 +230,17 @@ func (s jumpSource) LoadNewer(int64) {}
 func TestNoButtonToTheStartOfAChatOfOneRequest(t *testing.T) {
 	h := newChatInputHarness(t) // 40 messages, all there is
 	p := h.page
-	h.click(h.jumpButton(0)) // the one to the end
+	h.seek(20, 0) // far from both ends: only the one to the end is there
+	if !p.oneRequest(model.History{}) {
+		t.Fatal("40 messages are not one request's")
+	}
+	h.click(h.jumpButton(1)) // where the one to the start would be
+	if p.list.Position.First != 20 {
+		t.Fatal("a button to the start is drawn in a chat of one request")
+	}
+	h.click(h.jumpButton(0))
 	if p.list.Position.BeforeEnd {
 		t.Fatal("the button to the end did nothing")
-	}
-	if p.atStart(model.History{}) || !p.oneRequest(model.History{}) {
-		t.Fatalf("not at the start of a chat of one request: atStart %v, oneRequest %v", p.atStart(model.History{}), p.oneRequest(model.History{}))
-	}
-	first, offset := p.list.Position.First, p.list.Position.Offset
-	h.click(h.jumpButton(0)) // nothing is there now
-	if p.list.Position.First != first || p.list.Position.Offset != offset {
-		t.Fatal("a button to the start is drawn in a chat of one request")
 	}
 }
 
