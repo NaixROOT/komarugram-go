@@ -115,6 +115,13 @@ The history is drawn as materialgram draws it:
   FFmpeg, when there is one); a file that cannot be sent is told in the
   dialog's toast. What it sends is `model.OutgoingFiles` in an
   `OutgoingMessage`, so retries reuse the composer's identity handling.
+- **Forum page** (`forum.go`): the topics of a forum chat in place of its
+  history, under the chat's header (which opens its info). A row is drawn as the
+  chat list's: `surface`, icon plate (`fillRounded`, the topic's colour, a house
+  for General, `drawPin`/lock for the marks), badges through `drawBadgeRight`.
+  A topic opens as `commentsView{topic: true}` shown by `layoutComments` on
+  the thread's `chatPage`, whose `topic` flag makes it read what it shows.
+  `FORUM_PNG` saves the list.
 - **Composer picker** (`composer_picker.go`): installed sticker/emoji packs and
   a Trending section for server-featured packs. A featured sticker is sent
   like an installed one; the pack's title row opens the sticker set dialog.
@@ -245,7 +252,7 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `COMPOSER_MOTION_PNG`, `SETTINGS_PNG`,
-  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
+  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `FORUM_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
   a voice message being recorded; `files`, `files-one`, `files-documents`,

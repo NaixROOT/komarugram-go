@@ -339,6 +339,7 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 		if c := l.channels[p.ChannelID]; c != nil {
 			chat.Title = c.Title
 			chat.Badges = channelBadges(c, time.Now())
+			chat.Forum = c.Forum
 			if c.Broadcast {
 				chat.Kind = model.KindChannel
 			}

@@ -120,6 +120,10 @@ type commentsView struct {
 	from  int64
 	title string
 	count int
+	// topic is set when the page is a topic of the forum from, which name
+	// titles.
+	topic bool
+	name  string
 	back  *button.Button
 }
 
@@ -137,12 +141,31 @@ func (a *App) openComments(m model.Message) {
 	a.thread = &commentsView{chat: store.OpenComments(m), from: a.selected, title: title, count: m.Comments, back: button.Text()}
 }
 
+// openTopic shows the topic of the forum, which is open.
+func (a *App) openTopic(forum model.Chat, topic model.Topic) {
+	store, ok := a.store.(model.ForumSource)
+	if !ok || a.comments == nil {
+		return
+	}
+	a.closeComments()
+	a.thread = &commentsView{chat: store.OpenTopic(forum.ID, topic), from: a.selected, title: forum.Title, topic: true, name: topic.Title, back: button.Text()}
+}
+
 // closeComments goes back from the comments to their channel.
 func (a *App) closeComments() {
 	if a.thread == nil {
 		return
 	}
+	topic := a.thread.topic
 	a.thread = nil
+	if topic {
+		// The topics may have changed while it was open.
+		if source, ok := a.store.(model.ForumSource); ok {
+			if c, ok := a.selectedChat(); ok {
+				source.OpenForum(c.ID)
+			}
+		}
+	}
 	// The comments are no longer on screen: their group need not be
 	// polled.
 	if w, ok := a.store.(model.ChatWatcher); ok {
@@ -160,6 +183,7 @@ func (a *App) layoutComments(gtx layout.Context, l localization.Catalog) layout.
 		return layout.Dimensions{Size: gtx.Constraints.Max}
 	}
 	h := a.comments
+	h.topic = t.topic
 	history := a.store.(model.ConversationStore).History(t.chat.ID)
 	// The first message is the post; the rest are the comments, of which
 	// a new one may have come since the post counted them.
@@ -173,11 +197,18 @@ func (a *App) layoutComments(gtx layout.Context, l localization.Catalog) layout.
 	}
 	empty := !history.LoadingOlder && history.Err == nil && len(history.Messages) <= 1
 	head := chatHead{back: t.back, title: title, subtitle: t.title}
+	if t.topic {
+		empty = !history.LoadingOlder && history.Err == nil && len(history.Messages) == 0
+		head.title = t.name
+	}
 	return layoutChatPageHead(gtx, t.chat, l, a.layoutAvatar, nil, &head, func(gtx layout.Context) layout.Dimensions {
 		dims := h.Layout(gtx, t.chat, l, a.window.Motion.AnimationsEnabled())
 		if empty {
 			layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min = image.Point{}
+				if t.topic {
+					return pill(gtx, l.T("forum.no_messages"))
+				}
 				return pill(gtx, l.T("comments.empty"))
 			})
 		}

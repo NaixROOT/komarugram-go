@@ -86,7 +86,10 @@ type App struct {
 	// shows over its channel while it is set.
 	comments *chatPage
 	thread   *commentsView
-	viewer   *photoViewer
+	// forum is the list of topics that shows in place of the history of a
+	// forum; a topic opens as thread, like comments.
+	forum  *forumPage
+	viewer *photoViewer
 	// openWindow and photoWindows are the viewer windows' host and list.
 	openWindow   func(appwindow.Spec)
 	photoWindows photoWindows
@@ -334,6 +337,15 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			a.history.openComments = a.openComments
 			a.comments = a.newChatPage(source, store, w)
 			a.comments.thread = true
+		}
+		if _, ok := store.(model.ForumSource); ok {
+			a.forum = newForumPage()
+			a.forum.open = a.openTopic
+			a.forum.emoji = a.layoutCustomEmoji
+			if a.comments == nil {
+				a.comments = a.newChatPage(source, store, w)
+				a.comments.thread = true
+			}
 		}
 		a.info.renderer.openPhoto = func(m model.Message) { a.viewer.Open(m.Key.ChatID, m, a.info.messages) }
 		if services.OpenWindow != nil {
@@ -724,7 +736,7 @@ func (a *App) Layout(gtx layout.Context) {
 	if a.comments != nil {
 		a.comments.filter = a.history.filter
 	}
-	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked()) {
+	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked() || a.forum != nil && a.forum.header.Clicked(gtx)) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)
 		}
@@ -811,6 +823,9 @@ func (a *App) Layout(gtx layout.Context) {
 		}
 		if a.thread != nil {
 			return a.layoutComments(gtx, a.catalog())
+		}
+		if c, ok := a.selectedChat(); ok && c.Forum && a.forum != nil {
+			return a.layoutForum(gtx, c, a.catalog())
 		}
 		if c, ok := a.selectedChat(); ok {
 			return layoutChatPage(gtx, c, a.catalog(), a.layoutAvatar, a.badges, func(gtx layout.Context) layout.Dimensions {

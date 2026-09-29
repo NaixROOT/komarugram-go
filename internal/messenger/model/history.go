@@ -139,6 +139,28 @@ type Message struct {
 	// ReplyToTopID is the root of the thread a reply is in, when it
 	// replies to another reply there.
 	ReplyToTopID MessageID `json:",omitempty"`
+	// ForumTopic is set when the message's reply header marks it as part of
+	// a forum topic: it replies to the topic's root, or to a message in it.
+	ForumTopic bool `json:",omitempty"`
+}
+
+// GeneralTopic is the id of the topic every forum has, whose messages have
+// no reply header.
+const GeneralTopic = 1
+
+// TopicID is the forum topic the message is in: the topic it names, the one
+// its creation opened, or else the General one. It means something only for
+// a message of a forum.
+func (m Message) TopicID() int {
+	switch {
+	case m.Service != nil && m.Service.Kind == ServiceTopicCreate:
+		return int(m.Key.MessageID)
+	case m.ForumTopic && m.ReplyToTopID != 0:
+		return int(m.ReplyToTopID)
+	case m.ForumTopic:
+		return int(m.ReplyToMessageID)
+	}
+	return GeneralTopic
 }
 
 // CommentsStore opens the comments of channel posts.

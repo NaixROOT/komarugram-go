@@ -155,6 +155,9 @@ type chatPage struct {
 	// comments bar. thread is set for the page that shows comments.
 	openComments func(model.Message)
 	thread       bool
+	// topic is set when the thread shown is a topic of a forum, whose
+	// messages are read like a chat's.
+	topic bool
 	// threadRoot is the root of the thread shown, which replies to it do
 	// not quote.
 	threadRoot model.MessageID
@@ -586,7 +589,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.source.LoadNewer(p.chat)
 	}
 	p.save(false)
-	if g, ok := p.source.(model.GhostStore); ok && p.threadRoot == 0 {
+	if g, ok := p.source.(model.GhostStore); ok && (p.threadRoot == 0 || p.topic) {
 		// What the history shows is read, if Ghost allows telling that.
 		if id := p.bottomMessage(); id > 0 {
 			g.MarkRead(c.ID, id, false)

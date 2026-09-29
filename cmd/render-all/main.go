@@ -53,6 +53,7 @@ func renders() []render {
 		render{"viewer-zoom", "TestRenderPhotoViewer", []string{"VIEWER_ZOOM=2", "VIEWER_PNG={out}/viewer-zoom.png"}},
 		render{"player", "TestRenderPlayerChoice", []string{"PLAYER_PNG={out}/player.png"}},
 		render{"comments", "TestRenderCommentsHead", []string{"COMMENTS_PNG={out}/comments.png"}},
+		render{"forum", "TestRenderForum", []string{"FORUM_PNG={out}/forum.png"}},
 		render{"unwrapped", "TestRenderUnwrapped", []string{"UNWRAPPED_PNG={out}/unwrapped.png"}},
 		render{"service", "TestRenderService", []string{"SERVICE_PNG={out}/service.png"}},
 		render{"pinned", "TestRenderPinned", []string{"PINNED_PNG={out}/pinned.png"}},

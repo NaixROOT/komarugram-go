@@ -115,6 +115,8 @@ type conversation struct {
 	lookups map[model.MessageKey]*lookup
 	// pinned are the chats' pinned messages.
 	pinned map[int64]*pinned
+	// forums are the topics of the forums opened.
+	forums map[int64]*forum
 }
 type viewSave struct {
 	view    model.Viewport
@@ -860,8 +862,12 @@ func (s *Store) mergeUpdate(m model.Message) {
 		}
 	}
 	c.mergeThreads(m)
+	refreshTopics := c.noteTopic(m, isNew)
 	p := c.peers[m.Key.ChatID]
 	c.mu.Unlock()
+	if refreshTopics {
+		s.readTopics(m.Key.ChatID, false)
+	}
 	s.mu.Lock()
 	chats := append([]model.Chat(nil), s.chats...)
 	found := false

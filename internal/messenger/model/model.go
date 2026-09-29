@@ -35,6 +35,9 @@ type Chat struct {
 	Pinned     bool
 	// Members is the member or subscriber count of groups and channels.
 	Members int
+	// Forum is set for a group divided in topics, which open as a list of
+	// them: see ForumSource.
+	Forum bool
 	// Badges are the marks beside the chat's name.
 	Badges
 }

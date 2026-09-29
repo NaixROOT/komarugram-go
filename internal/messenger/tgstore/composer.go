@@ -290,7 +290,13 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 	}
 	s.history.mu.Lock()
 	// A comment goes to the discussion group, as a reply in the thread.
+	general := s.history.isTopic(chat) && s.history.threads[chat].top == model.GeneralTopic
 	chat, top := s.history.threadChat(chat)
+	if general {
+		// A message of the General topic is one to the forum, with no
+		// topic to reply into.
+		top = 0
+	}
 	api := s.history.api
 	peer, ok := s.history.peers[chat]
 	s.history.mu.Unlock()

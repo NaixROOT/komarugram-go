@@ -62,6 +62,7 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 		}
 		if r, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
 			out.ReplyToMessageID = model.MessageID(r.ReplyToMsgID)
+			out.ForumTopic = r.ForumTopic
 			if top, ok := r.GetReplyToTopID(); ok {
 				out.ReplyToTopID = model.MessageID(top)
 			}
