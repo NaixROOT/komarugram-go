@@ -47,24 +47,24 @@ func (s *Store) PressButton(ctx context.Context, key model.MessageKey, data []by
 // are asked for again.
 const botCommandsRetry = 30 * time.Second
 
-// botState is the commands of the bots read so far.
+// botState is the info of the bots read so far.
 type botState struct {
-	mu       sync.Mutex
-	commands map[int64][]model.BotCommand
-	asked    map[int64]time.Time
+	mu    sync.Mutex
+	info  map[int64]model.BotInfo
+	asked map[int64]time.Time
 }
 
-// BotCommands implements model.BotCommandsSource with users.getFullUser,
-// which carries the bot's info.
-func (s *Store) BotCommands(chat int64) []model.BotCommand {
+// BotInfo implements model.BotInfoSource with users.getFullUser, which
+// carries the bot's info.
+func (s *Store) BotInfo(chat int64) model.BotInfo {
 	b := &s.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if commands, ok := b.commands[chat]; ok {
-		return commands
+	if info, ok := b.info[chat]; ok {
+		return info
 	}
 	if at, ok := b.asked[chat]; ok && time.Since(at) < botCommandsRetry {
-		return nil
+		return model.BotInfo{}
 	}
 	c := s.history
 	c.mu.Lock()
@@ -72,7 +72,7 @@ func (s *Store) BotCommands(chat int64) []model.BotCommand {
 	closing := c.closing
 	c.mu.Unlock()
 	if api == nil || peer.ID == 0 || peer.Kind != "user" || closing {
-		return nil
+		return model.BotInfo{}
 	}
 	if b.asked == nil {
 		b.asked = map[int64]time.Time{}
@@ -86,20 +86,25 @@ func (s *Store) BotCommands(chat int64) []model.BotCommand {
 		if err != nil {
 			return
 		}
-		var commands []model.BotCommand
+		var got model.BotInfo
 		if info, ok := full.FullUser.GetBotInfo(); ok {
 			list, _ := info.GetCommands()
 			for _, cmd := range list {
-				commands = append(commands, model.BotCommand{Command: cmd.Command, Description: cmd.Description})
+				got.Commands = append(got.Commands, model.BotCommand{Command: cmd.Command, Description: cmd.Description})
+			}
+			if menu, ok := info.GetMenuButton(); ok {
+				if m, ok := menu.(*tg.BotMenuButton); ok && m.URL != "" {
+					got.Menu = &model.BotMenu{Text: m.Text, URL: m.URL}
+				}
 			}
 		}
 		b.mu.Lock()
-		if b.commands == nil {
-			b.commands = map[int64][]model.BotCommand{}
+		if b.info == nil {
+			b.info = map[int64]model.BotInfo{}
 		}
-		b.commands[chat] = commands
+		b.info[chat] = got
 		b.mu.Unlock()
 		s.changed()
 	})
-	return nil
+	return model.BotInfo{}
 }

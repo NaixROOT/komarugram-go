@@ -420,7 +420,10 @@ sending locally without network traffic.
 Bots work as in Telegram Desktop: the buttons under their messages ask the bot,
 open a link or copy a text; a keyboard a bot sets shows under the composer; an
 empty chat with a bot has a Start button; typing "/" lists the bot's commands.
-Inline mode and buttons that open web apps are not done.
+Buttons that open Mini Apps (under a message, in a keyboard, or the bot's menu
+button beside the field) open them in the browser of the Kitchen section below,
+with the storage the settings choose; the app's main and back buttons are drawn
+inside its page. Inline mode is not done.
 
 A right click on a chat of the list opens its menu: pin it to the top or unpin it
 (the pinned chats keep the order they were pinned in, and their number is

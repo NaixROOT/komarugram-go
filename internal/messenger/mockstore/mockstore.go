@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/miniapp"
 )
 
 type Store struct {
@@ -34,6 +35,8 @@ type Store struct {
 	// created is when the store was made, which the times of its forum's
 	// topics count back from.
 	created time.Time
+	// miniApp is the bundled Mini App the demo's bots open, served once asked.
+	miniApp *miniapp.Demo
 }
 
 // New returns a store with demo chats whose times are relative to now, and

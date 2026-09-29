@@ -123,6 +123,13 @@ The history is drawn as materialgram draws it:
   history reserves room for the composer, and `composer.Layout` draws it.
   An empty chat with a bot draws `layoutStart` in the bar's place. Typing
   `/` lists commands over the composer (`layoutCommands`).
+- **Mini Apps** (`webapp.go`, `internal/messenger/miniapps`): the window's
+  `webApps` owns a `miniapps.Runner`, which asks the store for the link, opens
+  it with `pkg/miniapp` and answers the app's events on its own goroutines;
+  what it needs the window for (a link to confirm, a failure) is queued and
+  taken by `updateMiniApps` on the next frame, shown in the page's `toast` and
+  `askLink`. Buttons call `chatPage.openWebApp`; the bot's menu button is
+  `layoutBotMenu`, a pill beside the paperclip.
 - **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
   opens it at the pointer, as a `contextMenu` in the header menu's style. The
   rows and the list take the presses as `search_recent.go`'s do (`PassOp` areas

@@ -44,10 +44,14 @@ type botPage struct {
 	// that set it; hidden, by chat, is the one the account hid.
 	keyboard    *model.ReplyKeyboard
 	keyboardKey model.MessageKey
+	// keyboardBot is the bot that set it, whose Mini Apps its buttons open.
+	keyboardBot int64
 	hidden      map[int64]model.MessageKey
 	keys        [][]surface
 	hide        surface
 	start       surface
+	// menu is the bot's menu button beside the composer's field.
+	menu surface
 	// commands are the rows of the commands menu.
 	commands []surface
 	// empty is set while the chat is a bot's with no messages in it.
@@ -70,9 +74,14 @@ type botOutcome struct {
 // does.
 func (p *chatPage) updateBot(c model.Chat, history model.History) {
 	b := &p.bot
-	b.keyboard, b.keyboardKey = nil, model.MessageKey{}
+	b.keyboard, b.keyboardKey, b.keyboardBot = nil, model.MessageKey{}, 0
 	if !history.HasNewer {
 		b.keyboard, b.keyboardKey = model.ActiveKeyboard(p.messages)
+		for i := len(p.messages) - 1; b.keyboard != nil && i >= 0; i-- {
+			if p.messages[i].Key == b.keyboardKey {
+				b.keyboardBot = p.botOf(c.ID, p.messages[i])
+			}
+		}
 		if b.keyboard != nil && b.hidden[c.ID] == b.keyboardKey && !b.keyboard.Persistent {
 			b.keyboard = nil
 		}
@@ -188,9 +197,18 @@ func (p *chatPage) layoutKeyboard(gtx layout.Context, chat int64, rect image.Rec
 func (p *chatPage) layoutKey(gtx layout.Context, chat int64, s *surface, btn model.MessageButton, l localization.Catalog) layout.Dimensions {
 	sc := scheme(gtx)
 	size := gtx.Constraints.Max
-	usable := btn.Kind == "text" && p.composer != nil
+	webView := (btn.Kind == "webview" || btn.Kind == "simple_webview") && p.openWebApp != nil && p.bot.keyboardBot != 0
+	usable := btn.Kind == "text" && p.composer != nil || webView
 	if usable && s.Clicked(gtx) {
-		p.composer.submit(chat, model.OutgoingMessage{Text: btn.Text})
+		if webView {
+			kind := model.WebViewInline
+			if btn.Kind == "simple_webview" {
+				kind = model.WebViewSimple
+			}
+			p.openWebApp(gtx, p, model.WebViewRequest{Kind: kind, Chat: chat, Bot: p.bot.keyboardBot, URL: btn.URL}, btn.Text)
+		} else {
+			p.composer.submit(chat, model.OutgoingMessage{Text: btn.Text})
+		}
 	}
 	content, fill := sc.Primary.Color, sc.Primary.Color.SetOpacity(0.12)
 	if !usable {
@@ -329,7 +347,7 @@ const commandRows = 6
 // composer, and pad its margin.
 func (p *chatPage) layoutCommands(gtx layout.Context, chat int64, size image.Point, pad, above int, l localization.Catalog) {
 	c := p.composer
-	source, ok := p.source.(model.BotCommandsSource)
+	source, ok := p.source.(model.BotInfoSource)
 	if !ok || c == nil || p.kind != model.KindBot || p.bot.empty {
 		return
 	}
@@ -338,7 +356,7 @@ func (p *chatPage) layoutCommands(gtx layout.Context, chat int64, size image.Poi
 	if !strings.HasPrefix(text, "/") {
 		return
 	}
-	matches := model.MatchCommands(source.BotCommands(chat), text)
+	matches := model.MatchCommands(source.BotInfo(chat).Commands, text)
 	if len(matches) == 0 {
 		return
 	}
@@ -388,4 +406,42 @@ func (p *chatPage) layoutCommands(gtx layout.Context, chat int64, size image.Poi
 		}
 		return layout.Dimensions{Size: menu}
 	})
+}
+
+// layoutBotMenu draws the menu button of the bot the chat is with in area,
+// at its start, and opens the Mini App when it is pressed. It returns the
+// width the button took, 0 for a chat that has none.
+func (p *chatPage) layoutBotMenu(gtx layout.Context, chat int64, area image.Rectangle, l localization.Catalog) int {
+	source, ok := p.source.(model.BotInfoSource)
+	if !ok || p.kind != model.KindBot || p.openWebApp == nil || p.bot.empty {
+		return 0
+	}
+	menu := source.BotInfo(chat).Menu
+	if menu == nil {
+		return 0
+	}
+	if p.bot.menu.Clicked(gtx) {
+		p.openWebApp(gtx, p, model.WebViewRequest{Kind: model.WebViewMenu, Chat: chat, Bot: chat, URL: menu.URL}, menu.Text)
+	}
+	text := menu.Text
+	if text == "" {
+		text = l.T("bot.menu")
+	}
+	width := min(gtx.Dp(112), area.Dx()/3)
+	height := min(gtx.Dp(32), area.Dy())
+	rect := image.Rect(area.Min.X, area.Min.Y+(area.Dy()-height)/2, area.Min.X+width, area.Min.Y+(area.Dy()+height)/2)
+	inRect(gtx, rect, func(gtx layout.Context) layout.Dimensions {
+		sc := scheme(gtx)
+		size := gtx.Constraints.Max
+		style := surfaceStyle{radius: size.Y / 2, background: sc.Primary.Color.SetOpacity(0.12), content: sc.Primary.Color, button: text}
+		return p.bot.menu.Layout(gtx, size, style, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints = layout.Exact(size)
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min = image.Point{}
+				gtx.Constraints.Max.X = max(size.X-gtx.Dp(16), 0)
+				return label(gtx, text, token.TypestyleLabelLargeEmphasized, sc.Primary.Color, 1)
+			})
+		})
+	})
+	return width + gtx.Dp(4)
 }

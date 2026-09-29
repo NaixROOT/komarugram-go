@@ -164,11 +164,12 @@ func TestBotCommands(t *testing.T) {
 		mu.Unlock()
 		info := tg.BotInfo{}
 		info.SetCommands([]tg.BotCommand{{Command: "start", Description: "Begin"}, {Command: "help", Description: "What it does"}})
+		info.SetMenuButton(&tg.BotMenuButton{Text: "Open", URL: "https://app.example/menu"})
 		full := &tg.UsersUserFull{}
 		full.FullUser.SetBotInfo(info)
 		return full, nil
 	})
-	if got := s.BotCommands(5); got != nil {
+	if got := s.BotInfo(5); got.Commands != nil {
 		t.Fatalf("commands %v before they were read", got)
 	}
 	select {
@@ -176,11 +177,13 @@ func TestBotCommands(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the window was not told of the commands")
 	}
-	got := s.BotCommands(5)
+	got := s.BotInfo(5).Commands
 	if len(got) != 2 || got[0] != (model.BotCommand{Command: "start", Description: "Begin"}) {
 		t.Fatalf("commands %v", got)
 	}
-	s.BotCommands(5)
+	if menu := s.BotInfo(5).Menu; menu == nil || menu.Text != "Open" || menu.URL != "https://app.example/menu" {
+		t.Fatalf("menu button %+v", menu)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if asks != 1 {
@@ -208,5 +211,82 @@ func TestMatchCommands(t *testing.T) {
 		if got := strings.Join(names(model.MatchCommands(cmds, text)), " "); got != want {
 			t.Errorf("%q matched %q, want %q", text, got, want)
 		}
+	}
+}
+
+// The WebView buttons of a keyboard keep their link.
+func TestWebViewKeyboardConverted(t *testing.T) {
+	m := convertOne(t, &tg.Message{ID: 30, PeerID: &tg.PeerUser{UserID: 5}, Message: "shop", Date: 10, ReplyMarkup: &tg.ReplyInlineMarkup{Rows: []tg.KeyboardButtonRow{
+		{Buttons: []tg.KeyboardButtonClass{&tg.KeyboardButtonWebView{Text: "Shop", URL: "https://shop.example/a"}, &tg.KeyboardButtonSimpleWebView{Text: "Simple", URL: "https://shop.example/b"}}},
+	}}})
+	row := m.Buttons[0]
+	if row[0].Kind != "webview" || row[0].URL != "https://shop.example/a" || row[1].Kind != "simple_webview" || row[1].URL != "https://shop.example/b" {
+		t.Fatalf("row %+v", row)
+	}
+}
+
+// A Mini App is asked for from the chat, the menu or as a simple one, with
+// the bot, the link and the colors, and the answer's link and query come back;
+// what an app sends is sent to its bot.
+func TestRequestWebView(t *testing.T) {
+	s := testStore(t)
+	s.history.peers[5] = peerRecord{Kind: "user", ID: 5, Hash: 55}
+	s.history.peers[9] = peerRecord{Kind: "chat", ID: 9}
+	var inline []*tg.MessagesRequestWebViewRequest
+	var simple []*tg.MessagesRequestSimpleWebViewRequest
+	var sent []*tg.MessagesSendWebViewDataRequest
+	s.history.api = composerAPI(func(in bin.Encoder) (bin.Encoder, error) {
+		switch r := in.(type) {
+		case *tg.MessagesRequestWebViewRequest:
+			inline = append(inline, r)
+			return &tg.WebViewResultURL{QueryID: 99, URL: "https://app.example/i#tgWebAppData=x"}, nil
+		case *tg.MessagesRequestSimpleWebViewRequest:
+			simple = append(simple, r)
+			return &tg.WebViewResultURL{URL: "https://app.example/s#tgWebAppData=y"}, nil
+		case *tg.MessagesSendWebViewDataRequest:
+			sent = append(sent, r)
+			return &tg.UpdatesTooLong{}, nil
+		}
+		return nil, errors.New("unexpected request")
+	})
+	ctx := context.Background()
+	got, err := s.RequestWebView(ctx, model.WebViewRequest{Kind: model.WebViewInline, Chat: 9, Bot: 5, URL: "https://app.example/i", Theme: `{"bg_color":"#fff"}`})
+	if err != nil || got.QueryID != 99 || got.URL != "https://app.example/i#tgWebAppData=x" {
+		t.Fatalf("inline %+v, %v", got, err)
+	}
+	r := inline[0]
+	if user, ok := r.Bot.(*tg.InputUser); !ok || user.UserID != 5 || user.AccessHash != 55 {
+		t.Fatalf("bot %+v", r.Bot)
+	}
+	if chat, ok := r.Peer.(*tg.InputPeerChat); !ok || chat.ChatID != 9 {
+		t.Fatalf("peer %+v", r.Peer)
+	}
+	if url, _ := r.GetURL(); url != "https://app.example/i" || r.FromBotMenu || r.ThemeParams.Data != `{"bg_color":"#fff"}` || r.Platform != "tdesktop" {
+		t.Fatalf("request %+v", r)
+	}
+
+	if _, err := s.RequestWebView(ctx, model.WebViewRequest{Kind: model.WebViewMenu, Chat: 5, Bot: 5, URL: "https://app.example/m"}); err != nil {
+		t.Fatal(err)
+	}
+	if !inline[1].FromBotMenu {
+		t.Fatal("the menu button did not ask from the bot menu")
+	}
+
+	got, err = s.RequestWebView(ctx, model.WebViewRequest{Kind: model.WebViewSimple, Chat: 5, Bot: 5, URL: "https://app.example/s"})
+	if err != nil || got.QueryID != 0 || len(simple) != 1 {
+		t.Fatalf("simple %+v, %v, %d asked", got, err, len(simple))
+	}
+	if url, _ := simple[0].GetURL(); url != "https://app.example/s" {
+		t.Fatalf("simple url %q", url)
+	}
+
+	if err := s.SendWebViewData(ctx, 5, "Open", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0].ButtonText != "Open" || sent[0].Data != "hello" || sent[0].RandomID == 0 {
+		t.Fatalf("sent %+v", sent)
+	}
+	if _, err := s.RequestWebView(ctx, model.WebViewRequest{Kind: model.WebViewInline, Chat: 9, Bot: 404}); err == nil {
+		t.Fatal("an unknown bot was asked")
 	}
 }
