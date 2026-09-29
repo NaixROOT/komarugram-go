@@ -155,6 +155,9 @@ type chatPage struct {
 	// comments bar. thread is set for the page that shows comments.
 	openComments func(model.Message)
 	thread       bool
+	// bot is what the page shows of bots: reply keyboards and the Start
+	// button.
+	bot botPage
 	// topic is set when the thread shown is a topic of a forum, whose
 	// messages are read like a chat's.
 	topic bool
@@ -448,6 +451,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		}
 		p.rebuild(history.Messages, env)
 	}
+	p.updateBot(c, history)
 	v, anchored := p.source.Viewport(c.ID)
 	anchored = anchored && !v.AtEnd
 	// An anchor on its way, as when a search opens the chat at a message,
@@ -480,7 +484,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	if p.composer != nil && !p.frozen.Frozen() {
 		// The strip of the message replied to takes room over the composer.
-		reply := p.composer.replyHeight(gtx, c.ID, classic)
+		reply := p.composer.replyHeight(gtx, c.ID, classic) + p.keyboardHeight(gtx, classic, size)
 		if classic {
 			bottom += reply
 		} else {
@@ -576,6 +580,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.toast.Show(mediaErrorText(err))
 	}
 	p.errorMu.Unlock()
+	p.botUpdate(l)
 	p.toast.Layout(gtx, image.Rect(0, top, size.X, end))
 	// Audio of a format no decoder here takes goes to the external player.
 	if m := p.audio.takeExternal(); m != nil {

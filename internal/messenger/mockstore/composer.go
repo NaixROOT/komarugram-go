@@ -104,6 +104,12 @@ func (s *Store) Send(ctx context.Context, chat int64, out model.OutgoingMessage)
 		m.Text += "\n☐ " + task
 	}
 	h.Messages = append(append([]model.Message(nil), h.Messages...), m)
+	if s.isBot(chat) {
+		if reply, ok := botReply(chat, id+1, m.Text, time.Now()); ok {
+			h.Messages = append(h.Messages, reply)
+			m = reply
+		}
+	}
 	h.Revision++
 	s.histories[chat] = h
 	for i := range s.chats {

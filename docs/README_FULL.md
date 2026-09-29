@@ -417,6 +417,11 @@ dimensions and duration. Creating native Telegram checklists requires Premium;
 received checklists display their items and completion state. The demo simulates
 sending locally without network traffic.
 
+Bots work as in Telegram Desktop: the buttons under their messages ask the bot,
+open a link or copy a text; a keyboard a bot sets shows under the composer; an
+empty chat with a bot has a Start button; typing "/" lists the bot's commands.
+Inline mode and buttons that open web apps are not done.
+
 A right click on a chat of the list opens its menu: pin it to the top or unpin it
 (the pinned chats keep the order they were pinned in, and their number is
 limited by the server, more with Premium) and mark it read. Chats and the

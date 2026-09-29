@@ -662,14 +662,26 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 		return layout.Dimensions{Size: size}
 	}
+	if p.bot.empty {
+		// An empty chat with a bot starts it, as Telegram Desktop's does.
+		p.layoutStart(gtx, chat, rect, classic, backdrop, l)
+		return layout.Dimensions{Size: size}
+	}
 	d := c.draft(chat)
 	if c.pickerOpen || c.attachOpen || c.form != 0 {
 		c.dismiss.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: size} })
 	}
 	// above is the top of the composer, the reply strip included: what
 	// opens from the composer opens over it.
-	c.replyLayout(gtx, chat, rect, classic, backdrop, l, p)
-	above := rect.Min.Y - c.replyHeight(gtx, chat, classic)
+	kb := p.keyboardHeight(gtx, classic, size)
+	if !classic {
+		p.layoutKeyboard(gtx, chat, image.Rect(rect.Min.X, rect.Min.Y-kb, rect.Max.X, rect.Min.Y-gtx.Dp(replyGap)), classic, backdrop, l)
+	} else {
+		p.layoutKeyboard(gtx, chat, image.Rect(rect.Min.X, rect.Min.Y-kb, rect.Max.X, rect.Min.Y), classic, backdrop, l)
+	}
+	// The reply strip is over the keyboard, which is over the bar.
+	c.replyLayout(gtx, chat, rect.Sub(image.Pt(0, kb)), classic, backdrop, l, p)
+	above := rect.Min.Y - kb - c.replyHeight(gtx, chat, classic)
 	c.top = above
 	if d.err != nil && d.err != d.told {
 		p.toast.Show(mediaErrorText(d.err))
@@ -835,6 +847,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			return layout.Dimensions{Size: menuSize}
 		})
 	}
+	p.layoutCommands(gtx, chat, size, pad, above, l)
 	bar := rect
 	bar.Min.Y = above
 	if classic {

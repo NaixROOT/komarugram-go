@@ -54,6 +54,7 @@ type Store struct {
 	recent        recentChats
 	ghost         ghostState
 	blocked       blockedState
+	bots          botState
 }
 
 // New returns an empty store that calls changed whenever Load has read more.

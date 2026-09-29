@@ -97,15 +97,19 @@ type Message struct {
 	Poll    *Poll       `json:",omitempty"`
 	// Service is what a service message tells. Messages cached before
 	// it existed have none, and show as a service message only.
-	Service          *ServiceAction `json:",omitempty"`
-	Attachments      []Message      `json:"-"`
-	Key              MessageKey
-	SenderID         int64
-	Kind             MessageKind
-	Text             string
-	SenderName       string
-	Entities         []Entity
-	Buttons          [][]MessageButton
+	Service     *ServiceAction `json:",omitempty"`
+	Attachments []Message      `json:"-"`
+	Key         MessageKey
+	SenderID    int64
+	Kind        MessageKind
+	Text        string
+	SenderName  string
+	Entities    []Entity
+	Buttons     [][]MessageButton
+	// Keyboard is the reply keyboard the message sets for the chat, and
+	// KeyboardHide takes the last one away.
+	Keyboard         *ReplyKeyboard `json:",omitempty"`
+	KeyboardHide     bool           `json:",omitempty"`
 	Date             time.Time
 	EditedAt         time.Time
 	Outgoing         bool
@@ -305,8 +309,16 @@ type Entity struct {
 	URL            string
 	DocumentID     int64
 }
+
+// MessageButton is a button of a bot's keyboard, under a message or in a
+// reply keyboard. Kind is "url" (opens URL), "callback" (asks the bot,
+// with Data, and shows its answer), "copy" (copies Copy), "text" (a reply
+// keyboard's button, which sends its own Text) or "action" for what this
+// client does not do: it shows the button disabled.
 type MessageButton struct {
 	Text, URL, Kind string
+	Data            []byte `json:",omitempty"`
+	Copy            string `json:",omitempty"`
 }
 
 // PhotoGallery pages a chat's photos independently of its visible history.

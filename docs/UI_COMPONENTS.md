@@ -115,6 +115,14 @@ The history is drawn as materialgram draws it:
   FFmpeg, when there is one); a file that cannot be sent is told in the
   dialog's toast. What it sends is `model.OutgoingFiles` in an
   `OutgoingMessage`, so retries reuse the composer's identity handling.
+- **Bots** (`bot.go`): `botPage` on the chat page. The buttons under a message
+  are `textButton`s in the bubble (`history_bubble.go`); a callback asks the store
+  (`model.BotStore`) in a goroutine and comes back through `botUpdate` to the
+  toast. The reply keyboard is a strip under the composer's bar, over which the
+  reply strip stacks: `keyboardHeight` is added to `replyHeight` wherever the
+  history reserves room for the composer, and `composer.Layout` draws it.
+  An empty chat with a bot draws `layoutStart` in the bar's place. Typing
+  `/` lists commands over the composer (`layoutCommands`).
 - **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
   opens it at the pointer, as a `contextMenu` in the header menu's style. The
   rows and the list take the presses as `search_recent.go`'s do (`PassOp` areas

@@ -163,19 +163,16 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 				out.Kind, out.Media, loc = documentMedia(d)
 			}
 		}
-		if markup, ok := m.ReplyMarkup.(*tg.ReplyInlineMarkup); ok {
-			for _, r := range markup.Rows {
-				var row []model.MessageButton
-				for _, b := range r.Buttons {
-					btn := model.MessageButton{Text: b.GetText(), Kind: "action"}
-					if u, ok := b.(*tg.KeyboardButtonURL); ok {
-						btn.Kind = "url"
-						btn.URL = u.URL
-					}
-					row = append(row, btn)
-				}
-				out.Buttons = append(out.Buttons, row)
+		switch markup := m.ReplyMarkup.(type) {
+		case *tg.ReplyInlineMarkup:
+			out.Buttons = convertKeyboard(markup.Rows, false)
+		case *tg.ReplyKeyboardMarkup:
+			out.Keyboard = &model.ReplyKeyboard{
+				Rows:      convertKeyboard(markup.Rows, true),
+				SingleUse: markup.SingleUse, Persistent: markup.Persistent, Placeholder: markup.Placeholder,
 			}
+		case *tg.ReplyKeyboardHide:
+			out.KeyboardHide = true
 		}
 	case *tg.MessageService:
 		out.Key.ChatID = peerID(m.PeerID)
@@ -366,4 +363,35 @@ func convertPoll(media *tg.MessageMediaPoll) *model.Poll {
 		p.Answers = append(p.Answers, answer)
 	}
 	return p
+}
+
+// convertKeyboard turns the rows of a bot's keyboard into the model's. In a
+// reply keyboard a plain button sends its own text; what this client does
+// not do stays a disabled "action".
+func convertKeyboard(rows []tg.KeyboardButtonRow, reply bool) [][]model.MessageButton {
+	var out [][]model.MessageButton
+	for _, r := range rows {
+		var row []model.MessageButton
+		for _, b := range r.Buttons {
+			btn := model.MessageButton{Text: b.GetText(), Kind: "action"}
+			switch b := b.(type) {
+			case *tg.KeyboardButtonURL:
+				btn.Kind, btn.URL = "url", b.URL
+			case *tg.KeyboardButtonCallback:
+				// One that wants the password is left disabled.
+				if !b.RequiresPassword {
+					btn.Kind, btn.Data = "callback", b.Data
+				}
+			case *tg.KeyboardButtonCopy:
+				btn.Kind, btn.Copy = "copy", b.CopyText
+			case *tg.KeyboardButton:
+				if reply {
+					btn.Kind = "text"
+				}
+			}
+			row = append(row, btn)
+		}
+		out = append(out, row)
+	}
+	return out
 }
