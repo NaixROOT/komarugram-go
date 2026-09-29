@@ -88,7 +88,7 @@ func TestChatGutterDoesNotBlockWheel(t *testing.T) {
 
 func TestTextDragReleasesPointerForOtherControls(t *testing.T) {
 	h := newChatInputHarness(t)
-	y := float32(34 + h.page.rows[1].bodyTop + 12 + 8)
+	y := float32(h.page.rows[1].bodyTop + 12 + 8)
 	h.send(pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Position: f32.Pt(129, y), Buttons: pointer.ButtonPrimary})
 	h.send(pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Position: f32.Pt(250, y), Buttons: pointer.ButtonPrimary})
 	h.send(pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: f32.Pt(250, y)})
