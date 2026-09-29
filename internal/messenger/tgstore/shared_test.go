@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"komarugram/internal/messenger/model"
 	"testing"
+	"time"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram"
@@ -136,6 +137,16 @@ func TestPollConversionAndMusic(t *testing.T) {
 	}
 	k, meta, _ := documentMedia(&tg.Document{ID: 1, Attributes: []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Title: "Song", Performer: "Artist", Duration: 123}}})
 	if k != model.MessageMusic || meta.Performer != "Artist" {
+		t.Fatal(k, meta)
+	}
+}
+
+// A voice message keeps the waveform Telegram sends with it, for the
+// history to draw.
+func TestVoiceKeepsWaveform(t *testing.T) {
+	waveform := []byte{1, 2, 3, 4, 5}
+	k, meta, _ := documentMedia(&tg.Document{ID: 1, Attributes: []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Voice: true, Duration: 7, Waveform: waveform}}})
+	if k != model.MessageVoice || string(meta.Waveform) != string(waveform) || meta.Duration != 7*time.Second {
 		t.Fatal(k, meta)
 	}
 }

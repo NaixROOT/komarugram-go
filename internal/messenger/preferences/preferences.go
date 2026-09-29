@@ -81,6 +81,9 @@ type Global struct {
 	// AnimationPlayer plays GIFs and animated avatars, which are MP4: empty
 	// for automatic selection, or ffmpeg/wasm.
 	AnimationPlayer string `json:"animation_player,omitempty"`
+	// AudioPlayer plays voice messages and music: empty or wasm for the
+	// client's own, external for mpv or VLC.
+	AudioPlayer string `json:"audio_player,omitempty"`
 	// Ghost is what the accounts tell others of themselves, as AyuGram's
 	// Ghost Mode, the same for all of them.
 	Ghost Ghost `json:"ghost"`
@@ -270,6 +273,9 @@ func validate(g Global) error {
 	if g.AnimationPlayer != "" && g.AnimationPlayer != "ffmpeg" && g.AnimationPlayer != "wasm" {
 		return errors.New("invalid animation player")
 	}
+	if g.AudioPlayer != "" && g.AudioPlayer != "wasm" && g.AudioPlayer != "external" {
+		return errors.New("invalid audio player")
+	}
 	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
 		return errors.New("invalid external player")
 	}
@@ -296,6 +302,10 @@ func (s *Store) SetStickerPlayer(value string) error {
 
 func (s *Store) SetAnimationPlayer(value string) error {
 	return s.change(func(g *Global) { g.AnimationPlayer = value })
+}
+
+func (s *Store) SetAudioPlayer(value string) error {
+	return s.change(func(g *Global) { g.AudioPlayer = value })
 }
 
 func (s *Store) SetTheme(value Theme) error {

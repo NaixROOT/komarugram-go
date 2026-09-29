@@ -307,6 +307,8 @@ func (p *settingsPage) layoutIntegrations(gtx layout.Context, l localization.Cat
 		return p.decoders.stickers.Layout(gtx, l)
 	}), vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return p.decoders.animations.Layout(gtx, l)
+	}), vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return p.decoders.audio.Layout(gtx, l)
 	})}
 	for _, kind := range []player.Kind{player.VLC, player.MPV} {
 		children = append(children, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {

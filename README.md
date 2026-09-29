@@ -27,6 +27,8 @@ FFmpeg, mpv, VLC and Chromium are available as external integrations that you mu
 
 Without FFmpeg, or when chosen in the settings, GIFs and animated avatars play with FFmpeg's H.264 decoder compiled to WebAssembly. It is not built into the application: it is downloaded the first time it is needed from [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), which holds its sources and build script. To use your own build, point the `KOMARUGRAM_AVCDEC` environment variable at an `avcdec.wasm` file or its URL.
 
+Voice messages and music play in the application itself, with no FFmpeg or external player, as they download: Opus with libopus, MP3, FLAC and WAV with dr_libs, all compiled to WebAssembly and built in. AAC (M4A) plays with the Fraunhofer FDK AAC decoder, which is downloaded the first time it is needed from [fdk-aac-wasm](https://github.com/komarugif/fdk-aac-wasm), where its sources are; `KOMARUGRAM_AACDEC` points at your own build.
+
 ## How to get started
 
 Make a copy of this repository. Ensure that **Go 1.27.1** is installed on your machine — it is the minimum required version. On Linux, Wayland and X11 development libraries may be required.
@@ -67,7 +69,10 @@ We thank the creator of gotd/td for the excellent library and Gio for an archite
 
 When working with this project, you have no licensing obligations regarding the modification or distribution of the code. Some dependencies require that you respect copyright, but they do not impose any restrictions on the code itself (permissive MIT-compatible licenses).
 
-The one exception is the H.264 decoder, which is FFmpeg's and licensed under the LGPL 2.1 or later. It is kept out of this repository and out of the binary, in [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), and loaded at run time, where `KOMARUGRAM_AVCDEC` can replace it.
+There are two exceptions, both kept out of this repository and out of the binary, loaded at run time, and easy to replace or leave out:
+
+- The H.264 decoder is FFmpeg's, licensed under the LGPL 2.1 or later. It is in [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm); `KOMARUGRAM_AVCDEC` replaces it.
+- The AAC decoder is the Fraunhofer FDK AAC Codec Library, under Fraunhofer's own license: free to copy and distribute, with its source, but granting no patent rights. AAC is covered by patents licensed through [Via LA](https://www.via-la.com): using the decoder may need such a license, in particular for commercial use. Debian counts it as non-free for this reason. It is in [fdk-aac-wasm](https://github.com/komarugif/fdk-aac-wasm); `KOMARUGRAM_AACDEC` replaces it, and without it only M4A sound does not play.
 
 ## Third-party licenses
 
@@ -85,6 +90,8 @@ The Go modules linked into `messenger` and `kitchen`, as `go version -m` lists t
 | [go-faster/errors](https://github.com/go-faster/errors), [go-faster/xor](https://github.com/go-faster/xor) | BSD-3-Clause |
 | [go-faster/jx](https://github.com/go-faster/jx) | MIT |
 | [wazero](https://github.com/tetratelabs/wazero) | Apache-2.0 |
+| [ebitengine/oto](https://github.com/ebitengine/oto), [ebitengine/purego](https://github.com/ebitengine/purego) | Apache-2.0 |
+| [jfreymuth/pulse](https://github.com/jfreymuth/pulse) | MIT |
 | [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3), [ncruces/julianday](https://github.com/ncruces/julianday) | MIT |
 | [ncruces/go-sqlite3-wasm](https://github.com/ncruces/go-sqlite3-wasm) | MIT-0; SQLite inside it is public domain |
 | [lukechampine.com/adiantum](https://github.com/lukechampine/adiantum) | MIT |
@@ -110,9 +117,12 @@ Embedded and downloaded files:
 | Component | License |
 |---|---|
 | `pkg/vp9/vpxdec.wasm`: [libvpx](https://github.com/webmproject/libvpx) with [SIMDe](https://github.com/simd-everywhere/simde) | BSD-3-Clause (libvpx), MIT (SIMDe) |
+| `pkg/opus/opusdec.wasm`: [libopus](https://github.com/xiph/opus) (notice in `pkg/opus/COPYING.libopus`) | BSD-3-Clause |
+| `pkg/drdec/drdec.wasm`: [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3, dr_flac, dr_wav; `pkg/drdec/LICENSE.dr_libs`) | Unlicense OR MIT-0 |
 | `pkg/lottie/tlottie.wasm`: [tlottie](https://github.com/dkaraush/tlottie) and the Rust standard library | MIT; MIT OR Apache-2.0 |
 | WASI libc and compiler-rt inside the modules above ([wasi-sdk](https://github.com/WebAssembly/wasi-sdk)) | MIT, Apache-2.0 WITH LLVM-exception |
 | `pkg/miniapp/assets/telegram-web-app.js`: Telegram's Mini App SDK | © Telegram, no license stated |
 | `avcdec.wasm`, downloaded at run time: FFmpeg's H.264 decoder ([libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm)) | LGPL-2.1-or-later |
+| `aacdec.wasm`, downloaded at run time: the Fraunhofer FDK AAC decoder ([fdk-aac-wasm](https://github.com/komarugif/fdk-aac-wasm)) | Fraunhofer FDK AAC license, no patent grant |
 
 The full texts are in each module's `LICENSE` file (`go env GOMODCACHE`) and in the repositories linked above.

@@ -3,6 +3,7 @@ package mockstore
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"image"
@@ -81,6 +82,16 @@ func (s *Store) History(chat int64) model.History {
 	add("", model.MessageSticker, &model.MessageMedia{ID: "demo/tgs", MIMEType: "application/x-tgsticker", Width: 512, Height: 512}, nil, nil)
 	add("", model.MessageSticker, &model.MessageMedia{ID: "demo/webm", MIMEType: "video/webm", Width: 512, Height: 512}, nil, nil)
 	add("Видео открывается в отдельном окне", model.MessageVideo, &model.MessageMedia{ID: "demo/video", MIMEType: "video/mp4", Width: 640, Height: 360, Size: 7789765, Thumbnail: &model.MessageMedia{ID: "demo/photo", MIMEType: "image/png", Width: 640, Height: 360}}, nil, nil)
+	// Voice messages: one with the waveform Telegram sends, one without,
+	// whose waveform the player works out.
+	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice", MIMEType: "audio/ogg", Size: int64(len(demoVoice)), Duration: 7 * time.Second, Waveform: demoVoiceWaveform}, nil, nil)
+	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice-bare", MIMEType: "audio/ogg", Size: int64(len(demoVoice)), Duration: 7 * time.Second}, nil, nil)
+	// An MP3 voice message, as some bots send, without a waveform.
+	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice-mp3", MIMEType: "audio/mpeg", Size: int64(len(demoVoiceMP3)), Duration: 5 * time.Second}, nil, nil)
+	// Music, which plays in the client as voice messages do.
+	add("", model.MessageMusic, &model.MessageMedia{ID: "demo/music", MIMEType: "audio/mpeg", Size: int64(len(demoVoiceMP3)), Duration: 5 * time.Second, Title: "Ночной трамвай", Performer: "Демо-оркестр"}, nil, nil)
+	// An M4A voice message, as one sent from a file; its decoder is fetched.
+	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice-m4a", MIMEType: "audio/mp4", Size: int64(len(demoVoiceM4A)), Duration: 5 * time.Second}, nil, nil)
 	add("Кнопки бота: ссылки доступны, действия оставлены для будущей итерации.", model.MessageText, nil, nil, [][]model.MessageButton{{{Text: "Telegram", Kind: "url", URL: "https://telegram.org"}, {Text: "Обновить", Kind: "callback"}}})
 	for i := 0; i < 3; i++ {
 		add("Альбом: несколько вложений в одном сообщении", model.MessagePhoto, demoPhoto(len(demoPhotoSizes)-3+i), nil, nil)
@@ -137,7 +148,19 @@ func (s *Store) Media(ctx context.Context, m model.Message) ([]byte, error) {
 	if n, size, ok := parseDemoPhoto(m.Media.ID); ok {
 		return demoPhotoJPEG(n, size.X, size.Y)
 	}
+	s.mu.Lock()
+	sent, ok := s.files[m.Media.ID]
+	s.mu.Unlock()
+	if ok {
+		return sent, nil
+	}
 	switch m.Media.ID {
+	case "demo/voice", "demo/voice-bare":
+		return demoVoice, nil
+	case "demo/voice-mp3", "demo/music":
+		return demoVoiceMP3, nil
+	case "demo/voice-m4a":
+		return demoVoiceM4A, nil
 	case "demo/tgs":
 		return os.ReadFile("stickers/sample.tgs")
 	case "demo/webm":
@@ -189,3 +212,30 @@ func (s *Store) HistorySince(chat int64, revision uint64) (model.History, bool) 
 	}
 	return h, true
 }
+
+// demoVoice is 7.3 s of a tone that rises and falls as speech does, Opus
+// in OGG as Telegram's voice messages; demoVoiceWaveform is its waveform:
+//
+//	ffmpeg -f lavfi -i "aevalsrc=0.6*sin(2*PI*(180+40*sin(2*PI*0.5*t))*t)*abs(sin(2*PI*0.9*t))*(0.35+0.65*abs(sin(2*PI*2.7*t))):s=48000:d=7.3" \
+//	  -ac 1 -c:a libopus -b:a 24k -application voip voice.ogg
+//
+//go:embed voice.ogg
+var demoVoice []byte
+
+// demoVoiceMP3 is 4.6 s of another such tone, MP3 at 44.1 kHz:
+//
+//	ffmpeg -f lavfi -i "aevalsrc=0.6*sin(2*PI*(160+30*sin(2*PI*0.4*t))*t)*abs(sin(2*PI*1.1*t))*(0.3+0.7*abs(sin(2*PI*2.1*t))):s=44100:d=4.6" \
+//	  -ac 1 -c:a libmp3lame -b:a 32k voice.mp3
+//
+//go:embed voice.mp3
+var demoVoiceMP3 []byte
+
+// demoVoiceM4A is 5.2 s of a third such tone, AAC-LC in M4A at 44.1 kHz:
+//
+//	ffmpeg -f lavfi -i "aevalsrc=0.6*sin(2*PI*(200+50*sin(2*PI*0.3*t))*t)*abs(sin(2*PI*0.8*t))*(0.3+0.7*abs(sin(2*PI*1.9*t))):s=44100:d=5.2" \
+//	  -ac 1 -c:a aac -b:a 48k voice.m4a
+//
+//go:embed voice.m4a
+var demoVoiceM4A []byte
+
+var demoVoiceWaveform = []byte{0x2b, 0x4e, 0xdf, 0x63, 0x2c, 0x4f, 0xea, 0x7e, 0xd9, 0x9, 0xe6, 0x6c, 0x1e, 0x65, 0x72, 0xf2, 0x7a, 0x1e, 0x61, 0x89, 0xb2, 0xff, 0xfa, 0x82, 0x92, 0xd2, 0x7b, 0x19, 0x4d, 0x89, 0xda, 0x67, 0xf9, 0x8e, 0x94, 0xde, 0x47, 0x99, 0x18, 0x94, 0xbe, 0xcb, 0x48, 0xa2, 0xe4, 0xde, 0x2e, 0xa6, 0x64, 0xf4, 0x5e, 0xca, 0xf3, 0x64, 0xf6, 0x3a, 0x1a, 0x13, 0xa5, 0xf7, 0x52, 0xaa, 0x6}

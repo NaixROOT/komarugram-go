@@ -61,6 +61,7 @@ func renders() []render {
 		render{"saved-empty", "TestRenderEmptySavedMessages", []string{"SAVED_EMPTY_PNG={out}/saved-empty.png"}},
 		render{"shared", "TestRenderSharedMediaAndThemes", []string{"SHARED_PNG={out}/shared"}},
 		render{"toasts", "TestRenderToasts", []string{"TOAST_PNG_DIR={out}"}},
+		render{"audio", "TestRenderAudio", []string{"AUDIO_PNG_DIR={out}"}},
 	)
 }
 

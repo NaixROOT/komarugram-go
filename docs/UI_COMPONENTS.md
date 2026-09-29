@@ -149,7 +149,7 @@ The history is drawn as materialgram draws it:
   `sticker_player.go`) is the same choice for GIFs and animated avatars:
   FFmpeg when found, otherwise, or when chosen, FFmpeg's H.264 decoder in a
   WASM sandbox, one GIF at a time on hover. That decoder is not in the
-  binary: `chatmedia/avcdec.go` downloads it the first time it is needed
+  binary: `wasmmodule.AVCDec` downloads it the first time it is needed
   from [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), at a
   pinned commit, checks its SHA-256 and keeps it in the cache directory;
   `KOMARUGRAM_AVCDEC` names a build of the user's instead (a path or a URL).
@@ -161,7 +161,15 @@ The history is drawn as materialgram draws it:
   duration read from its headers (`voice.FileDuration`), without a waveform;
   the file is the user's and is not removed. `program.LookPath` and
   `FindFlatpak` are the only searches for external programs:
-  `-no-integrations` turns them off. A GIF shown still starts no process either: it shows Telegram's
+  `-no-integrations` turns them off. Voice messages and music play in the
+  client (`audio_player.go`): `audioPlayer`, one per chat page;
+  `voiceLayout`, the row with its button, waveform (`drawWaveform`) and
+  time, and `musicLayout`, with the title, the performer and a bar
+  (`drawBar`); `audioRow.update` takes their clicks and drags. `showWaveform`
+  works one out, as soon as it is shown, for a voice message sent without
+  one; `audioFormat` picks libopus, dr_libs or fdk-aac, and a format none
+  takes goes to the external player (`takeExternal`); tests give
+  `audioPlayer.play` a silent playback, so that nothing is heard. A GIF shown still starts no process either: it shows Telegram's
   thumbnail, fetched before the file (a real GIF file's first frame is
   decoded in Go); large GIFs have none and stay blank until played, as in the
   official clients. `ffprobe` and `ffmpeg` start when it plays, and `ffmpeg`
@@ -226,7 +234,7 @@ new piece sits next to its neighbours.
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
   variable (`COMPOSER_PNG`, `COMPOSER_MOTION_PNG`, `SETTINGS_PNG`,
-  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
+  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
   a voice message being recorded.

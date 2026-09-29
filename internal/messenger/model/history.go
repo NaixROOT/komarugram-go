@@ -55,6 +55,9 @@ type MessageMedia struct {
 	Duration   time.Duration
 	Performer  string
 	Title      string
+	// Waveform is a voice message's loudness in 5-bit bars, as Telegram
+	// packs it (see voice.Bars); nil when the sender gave none.
+	Waveform []byte `json:",omitempty"`
 	// Variants are smaller renditions of the same picture that can be
 	// downloaded on their own, smallest first. The media itself is the
 	// largest. Messages cached before variants existed have none.

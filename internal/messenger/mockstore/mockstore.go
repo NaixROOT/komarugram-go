@@ -16,7 +16,9 @@ import (
 )
 
 type Store struct {
-	sent   map[int64]bool
+	sent map[int64]bool
+	// files are what the voice messages sent in the demo hold, by media ID.
+	files  map[string][]byte
 	themes map[int64]model.ChatTheme
 	// mu guards histories and views: a photo viewer in its own window reads
 	// the store from that window's goroutine.

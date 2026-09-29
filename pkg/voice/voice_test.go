@@ -16,17 +16,47 @@ import (
 
 // unpack reads 5-bit bars as Telegram does: bar i is the 16-bit little
 // endian word at byte 5i/8, shifted by 5i%8.
-func unpack(data []byte) []int {
-	var bars []int
-	for i := 0; (i*5+5+7)/8 <= len(data) && i < WaveformBars; i++ {
-		bit := i * 5
-		word := int(data[bit/8])
-		if bit/8+1 < len(data) {
-			word |= int(data[bit/8+1]) << 8
+// referenceBars are the bars as Waveform made them before Loudness: each
+// holds the samples from i*len/100 up to (i+1)*len/100.
+func referenceBars(pcm []int16) []int {
+	bars := make([]int, WaveformBars)
+	loudest := 0
+	for i := range bars {
+		for _, s := range pcm[i*len(pcm)/WaveformBars : (i+1)*len(pcm)/WaveformBars] {
+			bars[i] = max(bars[i], abs(int(s)))
 		}
-		bars = append(bars, (word>>(bit%8))&31)
+		loudest = max(loudest, bars[i])
+	}
+	for i := range bars {
+		if loudest > 0 {
+			bars[i] = bars[i] * 31 / loudest
+		}
 	}
 	return bars
+}
+
+// Loudness fed a piece at a time makes the bars of the whole sound, for
+// lengths that do not divide into 100.
+func TestLoudnessInPieces(t *testing.T) {
+	for _, n := range []int{1, 7, 99, 100, 101, 1234, 48000*3 + 17} {
+		pcm := make([]int16, n)
+		for i := range pcm {
+			pcm[i] = int16((i*7919)%20001 - 10000)
+		}
+		l := NewLoudness(int64(n))
+		for from := 0; from < n; from += 333 {
+			l.Add(pcm[from:min(n, from+333)])
+		}
+		got, want := Bars(l.Waveform()), referenceBars(pcm)
+		if len(got) != WaveformBars {
+			t.Fatalf("%d: %d bars", n, len(got))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%d samples: bar %d is %d, want %d", n, i, got[i], want[i])
+			}
+		}
+	}
 }
 
 func TestWaveform(t *testing.T) {
@@ -43,7 +73,7 @@ func TestWaveform(t *testing.T) {
 	if len(data) != 63 {
 		t.Fatalf("%d bytes", len(data))
 	}
-	bars := unpack(data)
+	bars := Bars(data)
 	if len(bars) != WaveformBars || bars[0] != 0 || bars[99] != 31 || bars[50] != 50*31/99 {
 		t.Fatalf("bars %v", bars)
 	}

@@ -259,6 +259,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.decoders.audio.chosen = func() string { return a.preferences.Global().AudioPlayer }
+	a.settings.decoders.audio.choose = func(value string) {
+		if err := services.Preferences.SetAudioPlayer(value); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.decoders.animations.chosen = func() string { return a.preferences.Global().AnimationPlayer }
 	a.settings.decoders.animations.choose = func(value string) {
 		if err := services.Preferences.SetAnimationPlayer(value); err != nil {
@@ -337,6 +343,7 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.player = a.settings.players.chosen
 	p.setPlayer = a.settings.players.choose
 	p.playerPaths = a.settings.players.paths
+	p.audioExternal = func() bool { return a.preferences.Global().AudioPlayer == "external" }
 	p.appearance = a.themes
 	p.avatar = a.layoutAvatar
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }

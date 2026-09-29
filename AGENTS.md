@@ -73,7 +73,7 @@ otherwise, so `go test` never runs them: `COMPOSER_PNG` (with
 `STICKER_SET_PNG_DIR`, `MENU_PNG`, `REACTED_PNG`, `VIEWER_PNG` (with
 `VIEWER_ZOOM`), `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`,
 `SERVICE_PNG`, `PINNED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`,
-`SAVED_EMPTY_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR` (see
+`SAVED_EMPTY_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR` (see
 `docs/UI_COMPONENTS.md`). Run the one of the screen you changed, and look
 at the PNG. `go run ./cmd/render-all [dir]` renders all of them, every
 variant, into one directory (about a minute; `komarugram-renders` in the
@@ -86,15 +86,25 @@ When a change reaches much of the UI at once (a shared component such as
 the history's layout), run `cmd/render-all`, look over the PNGs of the
 places it touches, and remind the maintainer to look them over too.
 
-`pkg/h264`'s test needs `KOMARUGRAM_AVCDEC`
-set to the absolute path of an `avcdec.wasm`, which is not in this repository
-([libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm)).
+`pkg/h264`'s test needs `KOMARUGRAM_AVCDEC` set to the absolute path of an
+`avcdec.wasm` ([libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm)),
+and `pkg/aac`'s and the M4A voice message's `KOMARUGRAM_AACDEC`, of an
+`aacdec.wasm` ([fdk-aac-wasm](https://github.com/komarugif/fdk-aac-wasm)): these
+modules are not in this repository, and the client fetches them
+(`internal/messenger/wasmmodule`).
 
 ## Rules
 
 - **The README files in the root (`README.md`, `README_RU.md`) change only
   with the maintainer's consent.** Propose the text instead; when a change
   is agreed, make it in both languages.
+- **Dependencies are the maintainer's choice.** Do not add a Go module, a
+  library or a tool the build or the app needs on your own. Propose the
+  options with their trade-offs — for a decoder of media from strangers,
+  a C library compiled to wasm and run in `pkg/sandbox` beside a pure-Go
+  one, saying which runs outside the sandbox — and wait for the choice. A
+  direction agreed ("a small audio library") still leaves the library to
+  choose.
 - **Root causes, not workarounds.** Measure before and after; say what was
   verified and what was not.
 - **Live-test on the operating system you work on.** The project is

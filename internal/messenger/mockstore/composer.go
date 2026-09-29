@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/voice"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -75,7 +77,18 @@ func (s *Store) Send(ctx context.Context, chat int64, out model.OutgoingMessage)
 	if out.Voice != nil {
 		// A voice message, as Telegram returns one: no name, its duration.
 		m.Kind = model.MessageVoice
-		m.Media = &model.MessageMedia{MIMEType: "audio/ogg", Duration: out.Voice.Duration}
+		m.Media = &model.MessageMedia{ID: fmt.Sprintf("demo/sent/%d/%d", chat, id), MIMEType: "audio/ogg", Duration: out.Voice.Duration, Waveform: out.Voice.Waveform}
+		if mime := voice.FileMIME(out.Path); mime != "" {
+			m.Media.MIMEType = mime
+		}
+		// The file is gone once sent: the demo keeps what it held, to play.
+		if data, err := os.ReadFile(out.Path); err == nil {
+			if s.files == nil {
+				s.files = map[string][]byte{}
+			}
+			s.files[m.Media.ID] = data
+			m.Media.Size = int64(len(data))
+		}
 	} else if out.Path != "" {
 		m.Text = filepath.Base(out.Path)
 	}

@@ -7,6 +7,7 @@ require (
 	gioui.org v0.10.2
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/coder/websocket v1.8.15
+	github.com/ebitengine/oto/v3 v3.5.1
 	github.com/go-faster/errors v0.7.1
 	github.com/go-text/typesetting v0.3.4
 	github.com/godbus/dbus/v5 v5.2.2
@@ -31,6 +32,7 @@ require (
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-faster/jx v1.2.0 // indirect
@@ -40,6 +42,7 @@ require (
 	github.com/gotd/ige v0.3.0 // indirect
 	github.com/gotd/log v0.1.0 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
+	github.com/jfreymuth/pulse v0.1.3 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect

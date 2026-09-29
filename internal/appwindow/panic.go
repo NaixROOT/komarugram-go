@@ -19,6 +19,16 @@ import (
 // triggers frames immediately, so a transient failure clears on the next one.
 const retryAfter = time.Second
 
+// recoverContent lets content discard a failed view before the next frame.
+// Implementations must only return true after leaving or rebuilding the
+// failed state. A failure in recovery itself still gets a report and fallback.
+func recoverContent(content Content) (recovered bool) {
+	if r, ok := content.(interface{ RecoverFrame() bool }); ok {
+		crash.Guard("window recovery", func() { recovered = r.RecoverFrame() })
+	}
+	return recovered
+}
+
 // panicScreen replaces a frame whose layout panicked. It depends on nothing
 // from the content, which may be what is broken.
 type panicScreen struct {

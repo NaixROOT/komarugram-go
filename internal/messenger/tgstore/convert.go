@@ -267,6 +267,7 @@ func documentMedia(d *tg.Document) (model.MessageKind, *model.MessageMedia, *fil
 		case *tg.DocumentAttributeAudio:
 			if a.Voice {
 				k = model.MessageVoice
+				m.Waveform = a.Waveform
 			} else {
 				k = model.MessageMusic
 			}

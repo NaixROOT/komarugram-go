@@ -100,8 +100,10 @@ func motionShort(l localization.Catalog) map[powersave.Mode]string {
 type settingsPage struct {
 	scrollPage
 	section settingsSection
-	items   map[settingsSection]*settingsItem
-	back    *button.Button
+	// layingOut stays set on panic, identifying the failed page to RecoverFrame.
+	layingOut bool
+	items     map[settingsSection]*settingsItem
+	back      *button.Button
 
 	motion      *motion.Settings
 	miniapps    *miniappprefs.Settings
@@ -368,9 +370,10 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 }
 
 func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appearance.Scheme, dark bool, l localization.Catalog) layout.Dimensions {
+	p.layingOut = true
 	sc := scheme(gtx)
 	titles := settingsTitles(l)
-	return p.layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dims := p.layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		header := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			title := func(gtx layout.Context) layout.Dimensions {
 				return label(gtx, titles[p.section], token.TypestyleHeadlineSmall, sc.Surface.OnColor, 1)
@@ -457,6 +460,8 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 			layout.Rigid(content),
 		)
 	})
+	p.layingOut = false
+	return dims
 }
 
 func (p *settingsPage) isPrivate() bool {

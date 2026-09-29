@@ -26,11 +26,12 @@ import (
 )
 
 var (
-	iconViews    = wdk.RequireIconWidget(icons.ActionVisibility)
-	iconComments = wdk.RequireIconWidget(icons.CommunicationChatBubbleOutline)
-	iconFileRow  = wdk.RequireIconWidget(icons.EditorInsertDriveFile)
-	iconPlayFile = wdk.RequireIconWidget(icons.AVPlayArrow)
-	iconInfo     = wdk.RequireIconWidget(icons.ActionInfoOutline)
+	iconViews     = wdk.RequireIconWidget(icons.ActionVisibility)
+	iconComments  = wdk.RequireIconWidget(icons.CommunicationChatBubbleOutline)
+	iconFileRow   = wdk.RequireIconWidget(icons.EditorInsertDriveFile)
+	iconPlayFile  = wdk.RequireIconWidget(icons.AVPlayArrow)
+	iconPauseFile = wdk.RequireIconWidget(icons.AVPause)
+	iconInfo      = wdk.RequireIconWidget(icons.ActionInfoOutline)
 	// The marks of a chat's kind before its title in the chat list.
 	iconKindGroup   = wdk.RequireIconWidget(icons.SocialPeople)
 	iconKindChannel = wdk.RequireIconWidget(icons.ActionAnnouncement)

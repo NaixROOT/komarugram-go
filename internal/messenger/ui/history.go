@@ -57,6 +57,7 @@ type messageRow struct {
 	quick    gesture.Click
 	media    widget.Clickable
 	sticker  surface
+	audio    audioRow
 	revealed bool
 	// tile shows the variant of the media chosen for tileSize pixels.
 	tile     model.Message
@@ -145,6 +146,8 @@ type chatPage struct {
 	invalidate func()
 	// online counts the open group's members online.
 	online groupOnline
+	// audio plays the chat's voice messages and music.
+	audio audioPlayer
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
 	openPhoto  func(model.Message)
 	openAuthor func(model.Chat)
@@ -178,10 +181,14 @@ type chatPage struct {
 	historyWidth int
 	// player and setPlayer read and save the external player the user
 	// chose; playerChoice asks for it.
-	player       func() player.Kind
-	setPlayer    func(player.Kind)
-	playerPaths  func() map[player.Kind]string
-	playerChoice playerChoice
+	player      func() player.Kind
+	setPlayer   func(player.Kind)
+	playerPaths func() map[player.Kind]string
+	// audioExternal reports whether voice messages and music open in the
+	// external player, as chosen in the settings, rather than in the
+	// client.
+	audioExternal func() bool
+	playerChoice  playerChoice
 }
 
 // classicComposer reports whether the composer is a bar below the history.
@@ -250,6 +257,7 @@ func (p *chatPage) Close() {
 		p.composer.cancel()
 	}
 	p.save(true)
+	p.audio.stop()
 	p.media.Close()
 	if p.files != nil {
 		p.files.Close()
@@ -342,6 +350,9 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		}()
 	}
 	if p.chat != c.ID {
+		if p.audio.chat() != c.ID {
+			p.audio.stop()
+		}
 		p.forgetDialogStickers()
 		p.stickers.stop()
 		p.emojiPacks.stop()
@@ -563,6 +574,10 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	p.errorMu.Unlock()
 	p.toast.Layout(gtx, image.Rect(0, top, size.X, end))
+	// Audio of a format no decoder here takes goes to the external player.
+	if m := p.audio.takeExternal(); m != nil {
+		p.play(gtx, *m, p.reportMedia, l)
+	}
 	p.menuLayout(gtx, l)
 	if p.restored && p.list.Position.First < 3 && history.HasOlder && !history.LoadingOlder && history.Err == nil {
 		p.source.LoadOlder(p.chat)

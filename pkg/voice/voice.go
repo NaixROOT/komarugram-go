@@ -299,20 +299,46 @@ const WaveformBars = 100
 // Telegram keeps a voice message's waveform: bar i takes bits 5i to 5i+4,
 // from the lowest bit of the first byte on. The loudest bar is 31.
 func Waveform(pcm []int16) []byte {
-	bars := make([]int, WaveformBars)
-	loudest := 0
-	for i := range bars {
-		from, to := i*len(pcm)/WaveformBars, (i+1)*len(pcm)/WaveformBars
-		for _, s := range pcm[from:to] {
-			bars[i] = max(bars[i], abs(int(s)))
+	l := NewLoudness(int64(len(pcm)))
+	l.Add(pcm)
+	return l.Waveform()
+}
+
+// Loudness makes the waveform of a sound of total samples fed to it in
+// order, a piece at a time, with the bars of Waveform: the whole sound
+// need not be in memory.
+type Loudness struct {
+	total, seen int64
+	bars        [WaveformBars]int
+}
+
+// NewLoudness starts the waveform of total samples.
+func NewLoudness(total int64) *Loudness { return &Loudness{total: max(total, 1)} }
+
+// Add takes the next samples; those past total are left out.
+func (l *Loudness) Add(pcm []int16) {
+	for _, s := range pcm {
+		if l.seen >= l.total {
+			return
 		}
-		loudest = max(loudest, bars[i])
+		// Bar i holds the samples from i*total/WaveformBars on.
+		bar := ((l.seen+1)*WaveformBars+l.total-1)/l.total - 1
+		l.bars[bar] = max(l.bars[bar], abs(int(s)))
+		l.seen++
+	}
+}
+
+// Waveform packs the bars as Telegram keeps them.
+func (l *Loudness) Waveform() []byte {
+	loudest := 0
+	for _, bar := range l.bars {
+		loudest = max(loudest, bar)
 	}
 	out := make([]byte, (WaveformBars*5+7)/8)
 	if loudest == 0 {
 		return out
 	}
-	for i, bar := range bars {
+	for i, bar := range l.bars {
 		value := bar * 31 / loudest
 		bit := i * 5
 		for b := range 5 {
@@ -322,4 +348,19 @@ func Waveform(pcm []int16) []byte {
 		}
 	}
 	return out
+}
+
+// Bars unpacks a waveform as Telegram keeps it into its bars, from 0 to 31:
+// as many as its bits make, 100 for one of Waveform's.
+func Bars(waveform []byte) []int {
+	bars := make([]int, len(waveform)*8/5)
+	for i := range bars {
+		bit := i * 5
+		for b := range 5 {
+			if waveform[(bit+b)/8]&(1<<((bit+b)%8)) != 0 {
+				bars[i] |= 1 << b
+			}
+		}
+	}
+	return bars
 }
