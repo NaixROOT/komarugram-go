@@ -29,6 +29,31 @@ var telegramBlue = color.NRGBA{R: 0x40, G: 0xa7, B: 0xe3, A: 0xff}
 // where there is nothing; see App.badges.
 type badgesLayout func(b model.Badges, size unit.Dp, both bool) (before, after layout.Widget)
 
+// localPremium reports whether user is one of the accounts signed in here
+// while Local Premium is on: they show the Premium star to themselves, as
+// in AyuGram, and only there; Telegram does not know of it.
+func (a *App) localPremium(user int64) bool {
+	if user == 0 || !a.preferences.Global().LocalPremium {
+		return false
+	}
+	if user == a.store.Me().ID {
+		return true
+	}
+	own := a.ownUsers.Load()
+	return own != nil && (*own)[user]
+}
+
+// refreshOwnUsers reads the users of the accounts signed in here.
+func (a *App) refreshOwnUsers(accounts model.Accounts) {
+	own := map[int64]bool{}
+	for _, info := range accounts.All() {
+		if info.UserID != 0 {
+			own[info.UserID] = true
+		}
+	}
+	a.ownUsers.Store(&own)
+}
+
 // badges follows Telegram Desktop. A third party's verification is its
 // custom emoji before the name. After the name, SCAM or FAKE replaces every
 // other mark; otherwise the check mark of a verified name, and, where both
@@ -36,6 +61,7 @@ type badgesLayout func(b model.Badges, size unit.Dp, both bool) (before, after l
 // Premium star while there is no status or it has not loaded. size is the
 // height of the name's line.
 func (a *App) badges(b model.Badges, size unit.Dp, both bool) (before, after layout.Widget) {
+	b.Premium = b.Premium || a.localPremium(b.User)
 	if b.BotVerification != 0 {
 		before = func(gtx layout.Context) layout.Dimensions {
 			return a.layoutCustomEmoji(gtx, b.BotVerification, size)

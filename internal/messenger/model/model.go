@@ -54,6 +54,10 @@ type Badges struct {
 	// BotVerification is the custom emoji a verifying bot (a third party,
 	// such as a Mini App) put before the name, 0 for none.
 	BotVerification int64
+	// User is the user the badges belong to, 0 for a chat that is not one.
+	// It lets the client tell an account of its own, which Local Premium
+	// marks, from any other.
+	User int64
 }
 
 // Folder is a chat folder. It holds the chats Match accepts or, without

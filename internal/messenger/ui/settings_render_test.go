@@ -89,6 +89,15 @@ func TestRenderSettingsAccounts(t *testing.T) {
 		p.filtersView.setFilters = func(f preferences.Filters) { filters = f }
 		p.filtersView.remove = make([]surface, 2)
 	}
+	if os.Getenv("SETTINGS_SECTION") == "premium" {
+		// An account without Premium that has Local Premium on.
+		p.section = settingsPremium
+		p.premium = plainPremium{}
+		on := os.Getenv("LOCAL_PREMIUM") != "off"
+		p.localPremium = func() bool { return on }
+		p.setLocalPremium = func(v bool) { on = v }
+		size.Y = 1500
+	}
 	if os.Getenv("SETTINGS_SECTION") == "integrations" {
 		p.section = settingsIntegrations
 		size.Y = 1300
@@ -139,4 +148,11 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// plainPremium is an account without Premium.
+type plainPremium struct{}
+
+func (plainPremium) Premium() model.Premium {
+	return model.PremiumFromConfig(false, map[string]any{"premium_purchase_blocked": false, "premium_bot_username": "PremiumBot"})
 }

@@ -238,6 +238,9 @@ new piece sits next to its neighbours.
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
   a voice message being recorded.
+  `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
+  an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
+  off).
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the

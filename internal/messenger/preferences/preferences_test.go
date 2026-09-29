@@ -129,3 +129,35 @@ func TestGlobalChangePreservesAccountNamespace(t *testing.T) {
 		t.Fatalf("account settings were changed: %s", saved.Accounts["a"])
 	}
 }
+
+// Local Premium is kept between runs, and switched off again.
+func TestLocalPremiumPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Global().LocalPremium {
+		t.Fatal("Local Premium is on by default")
+	}
+	if err := s.SetLocalPremium(true); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Global().LocalPremium {
+		t.Fatal("Local Premium was not kept")
+	}
+	if err := loaded.SetLocalPremium(false); err != nil {
+		t.Fatal(err)
+	}
+	again, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Global().LocalPremium {
+		t.Fatal("Local Premium stayed on")
+	}
+}

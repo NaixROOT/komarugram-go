@@ -57,6 +57,11 @@ type Global struct {
 	// StreamerMode hides the windows from screen capture, as AyuGram's
 	// Streamer Mode, where the platform allows it.
 	StreamerMode bool `json:"streamer_mode,omitempty"`
+	// LocalPremium makes the accounts signed in here look Premium to
+	// themselves, as AyuGram's Local Premium: the star beside their names,
+	// and the Premium section of the settings. Telegram does not know of it,
+	// so nothing else changes.
+	LocalPremium bool `json:"local_premium,omitempty"`
 	// Window locking only covers the UI; account connections stay running.
 	AutoLockMinutes int           `json:"auto_lock_minutes,omitempty"`
 	LockOnMinimize  bool          `json:"lock_on_minimize,omitempty"`
@@ -333,6 +338,11 @@ func (s *Store) SetMotion(mode powersave.Mode, lowBattery int) error {
 // SetVisualPrivacy switches visual privacy mode for every window.
 func (s *Store) SetVisualPrivacy(on bool) error {
 	return s.change(func(g *Global) { g.VisualPrivacy = on })
+}
+
+// SetLocalPremium makes the accounts look Premium to themselves, or not.
+func (s *Store) SetLocalPremium(on bool) error {
+	return s.change(func(g *Global) { g.LocalPremium = on })
 }
 
 // SetStreamerMode hides the windows from screen capture, or shows them.

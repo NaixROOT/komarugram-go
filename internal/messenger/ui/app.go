@@ -44,6 +44,9 @@ type App struct {
 	store  model.Store
 
 	preferences *preferences.Store
+	// ownUsers are the users of the accounts signed in here, which Local
+	// Premium marks.
+	ownUsers atomic.Pointer[map[int64]bool]
 	// focused is set while the window has the focus.
 	focused bool
 	// filter hides messages as the settings ask.
@@ -174,7 +177,11 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		w.Invalidate()
 	}))
 	if services.Accounts != nil {
-		a.unsubscribe = append(a.unsubscribe, services.Accounts.Subscribe(w.Invalidate))
+		a.refreshOwnUsers(services.Accounts)
+		a.unsubscribe = append(a.unsubscribe, services.Accounts.Subscribe(func() {
+			a.refreshOwnUsers(services.Accounts)
+			w.Invalidate()
+		}))
 	}
 	currentAccount := services.CurrentAccount
 	if currentAccount == nil {
@@ -229,6 +236,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.settings.streamer = func() bool { return a.preferences.Global().StreamerMode }
 	a.settings.setStreamer = func(on bool) {
 		if err := services.Preferences.SetStreamerMode(on); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.localPremium = func() bool { return a.preferences.Global().LocalPremium }
+	a.settings.setLocalPremium = func(on bool) {
+		if err := services.Preferences.SetLocalPremium(on); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
