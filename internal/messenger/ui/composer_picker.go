@@ -189,11 +189,11 @@ func (c *messageComposer) chooseIn(gtx layout.Context, tab model.PickerTab, item
 	return true
 }
 
-func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalog, p *chatPage, animate bool) layout.Dimensions {
+func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalog, p *chatPage, animate bool, origin image.Point) layout.Dimensions {
 	size := gtx.Constraints.Max
 	sc := scheme(gtx)
-	fillRounded(gtx, sc.SurfaceContainerHigh, size, gtx.Dp(16))
 	defer clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(16)).Push(gtx.Ops).Pop()
+	overlayFill(gtx, p.menuBackdrop(), size, origin, sc.SurfaceContainerHigh, gtx.Dp(16))
 	event.Op(gtx.Ops, &c.list)
 	c.hover.Update(gtx, &c.list.List, &c.strip)
 	c.hover.Op(gtx)

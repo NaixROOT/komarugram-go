@@ -411,11 +411,14 @@ func TestRenderComposerMotion(t *testing.T) {
 			h.frame()
 		}
 	}
-	for _, menu := range []string{"picker", "attach"} {
+	for _, menu := range []string{"picker", "attach", "picker-blur"} {
 		h := newComposerHarness(t)
 		h.chat = 2
+		if strings.HasSuffix(menu, "-blur") {
+			h.p.overlays = func() overlayPrefs { return overlayPrefs{menus: true, opacity: 0.5} }
+		}
 		frames(h, 2)
-		if menu == "picker" {
+		if strings.HasPrefix(menu, "picker") {
 			h.p.composer.pickerOpen = true
 		} else {
 			h.p.composer.attachOpen = true

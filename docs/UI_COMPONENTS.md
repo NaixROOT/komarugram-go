@@ -124,7 +124,8 @@ The history is drawn as materialgram draws it:
   An empty chat with a bot draws `layoutStart` in the bar's place. Typing
   `/` lists commands over the composer (`layoutCommands`).
 - **Overlays and blur** (`overlay.go`): the floating composer, the context menus
-  and the toasts may blur what is behind them and let it show through
+  (including the composer picker) and the toasts may blur what is behind them
+  and let it show through
   (`preferences.Overlays`: one transparency for all, a switch each for menus and
   toasts, and `ComposerBlur` for the composer; all off while animations are).
   How it is done, as the composer did it first: the owner of the content records
@@ -136,8 +137,8 @@ The history is drawn as materialgram draws it:
   fill over it at the chosen opacity. An overlay whose owner gives none is
   opaque. A toast is never less than 80% opaque (`toastMinOpacity`): its
   light text is only readable on its dark plate. A new overlay: take `p.menuBackdrop()` / `p.toastBackdrop()` (or the
-  list's), fill with `overlayFill`. Not covered: the emoji picker, forms,
-  dialogs' toasts, the photo viewer, and the toast of the search results.
+  list's), fill with `overlayFill`. Not covered: forms, dialogs' toasts, the photo viewer,
+  and the toast of the search results.
 - **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
   opens it at the pointer, as a `contextMenu` in the header menu's style. The
   rows and the list take the presses as `search_recent.go`'s do (`PassOp` areas

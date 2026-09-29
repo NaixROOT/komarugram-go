@@ -787,7 +787,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		drawn := false
 		c.pickerMenu.Layout(gtx, c.pickerOpen, area, menuFromBottomRight, gtx.Dp(16), func(gtx layout.Context) layout.Dimensions {
 			drawn = true
-			return c.pickerLayout(gtx, l, p, animate)
+			return c.pickerLayout(gtx, l, p, animate, area.Min)
 		})
 		// The picker closed: its stickers keep their first frames only.
 		if c.pickerDrawn && !drawn {
