@@ -115,7 +115,9 @@ type messageComposer struct {
 	// pageLoaded is whether the tab has had its page: what follows changes
 	// it, not replaces it. local is what the search of emoji found for
 	// localQuery, in localLanguage.
-	pageLoaded                bool
+	pageLoaded bool
+	// sentNotes are the messages sent that the history has not shown yet.
+	sentNotes                 []sentNote
 	localQuery, localLanguage string
 	local                     []model.PickerItem
 	itemClicks                map[string]*surface
@@ -282,6 +284,7 @@ func (c *messageComposer) submit(chat int64, msg model.OutgoingMessage) {
 	d.pending = &msg
 	d.sending = true
 	d.err = nil
+	c.noteSent(chat)
 	go func() {
 		ctx, cancel := context.WithTimeout(c.ctx, 10*time.Minute)
 		defer cancel()
@@ -319,6 +322,9 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 			d := c.draft(r.chat)
 			d.sending = false
 			d.err = r.err
+			if r.err != nil {
+				c.forgetSent(r.chat)
+			}
 			if r.err == nil {
 				if r.request.Item == nil && r.request.Path == "" && len(r.request.Tasks) == 0 && d.editor.Text() == r.request.Text {
 					d.editor.SetText("")

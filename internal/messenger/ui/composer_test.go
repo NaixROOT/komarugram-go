@@ -40,6 +40,8 @@ type composerHarness struct {
 	kind   model.ChatKind
 	// animate draws with automatic animations on.
 	animate bool
+	// still turns the animations of widgets off, as the setting does.
+	still bool
 }
 
 func newComposerHarness(t *testing.T) *composerHarness {
@@ -55,6 +57,7 @@ func (h *composerHarness) frame() *op.Ops {
 	ops := new(op.Ops)
 	gtx := layout.Context{Ops: ops, Source: h.router.Source(), Now: h.now, Constraints: layout.Exact(h.size), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Values: map[string]any{}}
 	wdk.InitMaterialThemeInContext(gtx, defaults.NewTheme(gtx, schemes.SchemeBaselineDark()))
+	wdk.SetAnimationsEnabled(gtx, !h.still)
 	h.p.images.BeginFrame()
 	h.p.media.BeginFrame()
 	h.p.Layout(gtx, model.Chat{ID: h.chat, Kind: h.kind}, localization.For("ru"), h.animate)
@@ -449,6 +452,21 @@ func TestRenderComposerMotion(t *testing.T) {
 	h.p.composer.tab = model.PickerGIF
 	frames(h, 5)
 	save(h, "tab-switching")
+
+	// A message sent, in the middle of its flight from the composer.
+	h = newComposerHarness(t)
+	h.chat, h.animate = 2, true
+	frames(h, 3)
+	before := len(h.p.messages)
+	h.p.composer.submit(h.chat, model.OutgoingMessage{Text: "Отправлено из композера"})
+	for deadline := time.Now().Add(3 * time.Second); len(h.p.messages) == before && time.Now().Before(deadline); {
+		time.Sleep(2 * time.Millisecond)
+		h.frame()
+	}
+	frames(h, 2)
+	save(h, "sending-start")
+	frames(h, 6)
+	save(h, "sending")
 }
 
 // emojiPage is an emoji tab that Telegram answers a little late, with nothing

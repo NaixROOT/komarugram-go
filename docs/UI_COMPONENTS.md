@@ -138,6 +138,14 @@ The history is drawn as materialgram draws it:
   A topic opens as `commentsView{topic: true}` shown by `layoutComments` on
   the thread's `chatPage`, whose `topic` flag makes it read what it shows.
   `FORUM_PNG` saves the list.
+- **Message sent** (`history_send.go`): a message the composer sent, when it
+  shows at the end of a history that is at its end, flies up from the
+  composer to its place while it fades in (300 ms); the rest of the history
+  moves at once. The composer notes each send (`noteSent`) and the page takes
+  a note for each message of the user that comes (an outgoing one, or any in
+  Saved Messages, where Telegram does not mark them outgoing), so one from
+  another device does not fly. With the animations off, by the setting or the window, or
+  when the history is not at its end, the message is in its place at once.
 - **Composer picker** (`composer_picker.go`): installed sticker/emoji packs and
   a Trending section for server-featured packs. A featured sticker is sent
   like an installed one; the pack's title row opens the sticker set dialog.

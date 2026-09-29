@@ -141,6 +141,8 @@ type chatPage struct {
 	link                                       string
 	// jump is a jump to an end of a thread, waiting for its load.
 	jump jump
+	// flights are the messages that fly from the composer to their places.
+	flights map[model.MessageID]*sendFlight
 	// mediaError is a failure of a background task on the chat's media,
 	// reported from its goroutine and told in the toast.
 	errorMu    sync.Mutex
@@ -383,6 +385,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.dirty = map[model.MessageID]model.MessageLayout{}
 		p.restored = false
 		p.jump = jumpNone
+		p.flights = nil
 		p.link = ""
 		p.linkModal.Hide()
 	}
@@ -452,7 +455,14 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		if p.trace != nil {
 			p.trace.History.Reason = historyInvalidationReason(p.env, env, len(p.messages), len(history.Messages))
 		}
+		// A message the composer sent, at the end of a history that shows its
+		// end, flies to its place.
+		var prevLast model.MessageID
+		if n := len(p.messages); n > 0 && p.restored && !p.list.Position.BeforeEnd {
+			prevLast = p.messages[n-1].Key.MessageID
+		}
 		p.rebuild(history.Messages, env)
+		p.startFlights(gtx, prevLast, animate)
 	}
 	p.updateBot(c, history)
 	v, anchored := p.source.Viewport(c.ID)
@@ -496,6 +506,12 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 			tail += reply
 		}
 	}
+	// The composer's middle is below the row's: a floating one is over the
+	// tail of the history, a classic one under it.
+	flightFrom := tail / 2
+	if classic {
+		flightFrom = tail + bottom/2
+	}
 	body := gtx
 	body.Constraints = layout.Exact(image.Pt(size.X, max(0, size.Y-top-bottom)))
 	offset(body, image.Pt(0, top), func(gtx layout.Context) layout.Dimensions {
@@ -516,7 +532,9 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 				p.trace.History.RowsLaidOut++
 			}
 			rowEnd := p.trace.Begin("history.rows")
-			dims := p.row(gtx, msg, date, p.joins[i], l, animate)
+			dims := p.flyingRow(gtx, msg.Key.MessageID, flightFrom, func(gtx layout.Context) layout.Dimensions {
+				return p.row(gtx, msg, date, p.joins[i], l, animate)
+			})
 			if i == len(p.messages)-1 {
 				dims.Size.Y += tail
 			}
