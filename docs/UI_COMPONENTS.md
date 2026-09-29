@@ -104,6 +104,17 @@ The history is drawn as materialgram draws it:
   panel with modes and filters. `recentSearch` (`search_recent.go`) is its
   history while nothing is typed, with a menu on a right click that takes
   the keyboard for its Escape (`key.FocusFilter`, then `key.FocusCmd`).
+- **Box for sending files** (`composer_send_files.go`): a `modal` of what was
+  chosen in the attachment menu, as Telegram Desktop's: media as a grid of
+  squares (one picture alone keeps its shape), other files and, with "Send as
+  documents", everything as rows with a thumbnail, a caption editor that takes
+  the composer's text and Enter to send, and the checkboxes that
+  `sendfiles` says apply (`HasGroupOption`, `HasDocumentsOption`,
+  `HasHighQualityOption`). Files are looked at in the background
+  (`sendfiles.Inspect`, `Thumbnail`; the first frame of a video from
+  FFmpeg, when there is one); a file that cannot be sent is told in the
+  dialog's toast. What it sends is `model.OutgoingFiles` in an
+  `OutgoingMessage`, so retries reuse the composer's identity handling.
 - **Composer picker** (`composer_picker.go`): installed sticker/emoji packs and
   a Trending section for server-featured packs. A featured sticker is sent
   like an installed one; the pack's title row opens the sticker set dialog.
@@ -237,7 +248,8 @@ new piece sits next to its neighbours.
   `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
-  a voice message being recorded.
+  a voice message being recorded; `files`, `files-one`, `files-documents`,
+  `files-many` and `files-caption`, the box for sending files.
   `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
   an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
   off).

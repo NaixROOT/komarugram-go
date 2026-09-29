@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -244,5 +245,24 @@ func TestComposerCancelsVoice(t *testing.T) {
 	defer h.store.mu.Unlock()
 	if len(h.store.sent) != 0 {
 		t.Fatalf("sent %+v", h.store.sent)
+	}
+}
+
+// A chooser prints the paths it took one to a line, with the line ends of
+// its system and a last one; the names keep their spaces.
+func TestSplitChosenPaths(t *testing.T) {
+	for _, c := range []struct {
+		out  string
+		want []string
+	}{
+		{"", nil},
+		{"\n", nil},
+		{"/home/a b/one.png\n/home/two.jpg\n", []string{"/home/a b/one.png", "/home/two.jpg"}},
+		{"C:\\Users\\я\\one.png\r\nC:\\Users\\я\\two.png\r\n", []string{"C:\\Users\\я\\one.png", "C:\\Users\\я\\two.png"}},
+		{"/single", []string{"/single"}},
+	} {
+		if got := splitPaths(c.out); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%q: %q, want %q", c.out, got, c.want)
+		}
 	}
 }

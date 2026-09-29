@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -127,6 +128,10 @@ type messageComposer struct {
 	browse, confirm, cancelForm surface
 	fileResults                 chan fileChoice
 	choosing                    bool
+	// files is the box for sending the files chosen.
+	files filesBox
+	// chooser asks for files in the system's chooser; tests replace it.
+	chooser func(ctx context.Context, filter *fileFilter, several bool) fileChoice
 	// voice records voice messages; recording is the one being recorded,
 	// voiceResults the recordings encoded for sending, voicePicks the audio
 	// files chosen instead for want of an FFmpeg, and recorded the
@@ -143,7 +148,7 @@ type messageComposer struct {
 
 func newMessageComposer(source model.ConversationStore, invalidate func()) *messageComposer {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), voicePicks: make(chan voicePick, 1), recorded: map[string]bool{}, packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
+	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), files: newFilesBox(), chooser: chooseFiles, voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), voicePicks: make(chan voicePick, 1), recorded: map[string]bool{}, packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
 	c.source, _ = source.(model.ComposerStore)
 	c.search.SingleLine = true
 	c.path.SingleLine = true
@@ -245,7 +250,7 @@ func (c *messageComposer) submit(chat int64, msg model.OutgoingMessage) {
 	if d.reply != nil && msg.ReplyTo == 0 {
 		msg.ReplyTo = d.reply.Key.MessageID
 	}
-	if msg.Path != "" {
+	if msg.Path != "" || msg.Files != nil {
 		msg.FFmpeg = c.ffmpegPath()
 	}
 	if msg.RandomID == 0 {
@@ -298,6 +303,7 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 		c.pickerOpen = false
 		c.attachOpen = false
 		c.form = 0
+		c.files.close()
 	}
 	for {
 		select {
@@ -377,12 +383,23 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 			}
 		case f := <-c.fileResults:
 			c.choosing = false
-			if f.chat != c.chat || f.form != c.form {
+			if f.chat != c.chat {
 				continue
 			}
-			if f.err != nil {
+			switch {
+			case f.menu && errors.Is(f.err, errNoChooser) && f.form != 0:
+				// Without a chooser, the path is typed.
+				c.form = f.form
+				c.formShown = f.form
+				gtx.Execute(key.FocusCmd{Tag: &c.path})
+			case f.err != nil:
 				c.draft(c.chat).err = f.err
-			} else if f.path != "" {
+			case f.menu:
+				// Chosen from the attachment menu or the box itself.
+				if len(f.paths) > 0 {
+					c.files.addPaths(c, f.paths, f.form == 2)
+				}
+			case f.form == c.form && f.path != "":
 				c.path.SetText(f.path)
 			}
 		default:
@@ -404,14 +421,16 @@ drained:
 	}
 	for i := range c.attachmentActions {
 		if c.attachmentActions[i].Clicked(gtx) {
-			c.form = i + 1
 			c.attachOpen = false
 			c.pickerOpen = false
-			editor := &c.path
-			if c.form == 3 {
-				editor = &c.title
+			if i < 2 {
+				// A photo, a video or a file: the system's chooser takes
+				// them, and the box for sending files shows what it took.
+				c.chooseAttachments(i + 1)
+				continue
 			}
-			gtx.Execute(key.FocusCmd{Tag: editor})
+			c.form = i + 1
+			gtx.Execute(key.FocusCmd{Tag: &c.title})
 		}
 	}
 
@@ -858,7 +877,14 @@ func (c *messageComposer) formLayout(gtx layout.Context, bar image.Rectangle, l 
 			}()
 		}
 		if c.confirm.Clicked(gtx) {
-			msg := model.OutgoingMessage{Path: strings.TrimSpace(c.path.Text()), AsMedia: form == 1}
+			msg := model.OutgoingMessage{}
+			if form != 3 {
+				// The path typed opens the box, as a file chosen does.
+				if path := strings.TrimSpace(c.path.Text()); path != "" {
+					c.form = 0
+					c.files.addPaths(c, []string{path}, form == 2)
+				}
+			}
 			if form == 3 {
 				msg.Path = ""
 				msg.Text = strings.TrimSpace(c.title.Text())
@@ -871,7 +897,7 @@ func (c *messageComposer) formLayout(gtx layout.Context, bar image.Rectangle, l 
 					c.draft(c.chat).err = fmt.Errorf("%s", l.T("composer.items"))
 				}
 			}
-			if form != 3 || len(msg.Tasks) > 0 {
+			if form == 3 && len(msg.Tasks) > 0 {
 				c.submit(c.chat, msg)
 			}
 		}

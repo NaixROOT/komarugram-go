@@ -65,6 +65,20 @@ type OutgoingMessage struct {
 	// FFmpeg is the FFmpeg the user set, beside which ffprobe inspects a
 	// video sent as media; empty for the one on PATH.
 	FFmpeg string
+	// Files, when set, are the files sent, with Text as their caption.
+	Files *OutgoingFiles
+}
+
+// OutgoingFiles are files sent together, as Telegram Desktop's box for
+// sending files sends them: photos compressed or as documents, in albums
+// or one by one.
+type OutgoingFiles struct {
+	// Paths are the files, in the order they are sent.
+	Paths []string
+	// Documents sends photos and videos as files. Group puts what can go in
+	// an album in one. HighQuality lets photos keep up to 2560 pixels a
+	// side instead of 1280.
+	Documents, Group, HighQuality bool
 }
 
 // VoiceNote is what Telegram shows of a voice message before it is played.
@@ -78,7 +92,10 @@ func (m OutgoingMessage) Validate() error {
 	if m.RandomID == 0 {
 		return errors.New("missing message identity")
 	}
-	if strings.TrimSpace(m.Text) == "" && m.Item == nil && m.Path == "" {
+	if m.Files != nil && len(m.Files.Paths) == 0 {
+		return errors.New("no files to send")
+	}
+	if strings.TrimSpace(m.Text) == "" && m.Item == nil && m.Path == "" && m.Files == nil {
 		return errors.New("empty message")
 	}
 	if len(utf16.Encode([]rune(m.Text))) > 4096 {

@@ -69,6 +69,14 @@ func (s *Store) Send(ctx context.Context, chat int64, out model.OutgoingMessage)
 	if len(h.Messages) > 0 {
 		id = h.Messages[len(h.Messages)-1].Key.MessageID + 1
 	}
+	if out.Files != nil {
+		err := s.appendFiles(chat, h, id, out)
+		if err != nil {
+			// A try that failed may be made again.
+			delete(s.sent, out.RandomID)
+		}
+		return err
+	}
 	m := model.Message{Key: model.MessageKey{AccountID: "demo", ChatID: chat, MessageID: id}, Text: out.Text, Entities: out.Entities, Outgoing: true, Date: time.Now(), SenderID: s.me.ID, ContentRevision: 1, ReplyToMessageID: out.ReplyTo}
 	if out.Item != nil {
 		m.Kind = out.Item.Media.Kind

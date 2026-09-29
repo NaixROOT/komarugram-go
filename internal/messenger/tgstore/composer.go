@@ -313,6 +313,9 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 		}
 		replyTo = r
 	}
+	if msg.Files != nil {
+		return s.sendFiles(ctx, api, chat, peer, replyTo, msg)
+	}
 	if msg.Item != nil {
 		if msg.Item.ResultID != "" {
 			res, err := api.MessagesSendInlineBotResult(ctx, &tg.MessagesSendInlineBotResultRequest{Peer: peer.input(), RandomID: msg.RandomID, QueryID: msg.Item.QueryID, ID: msg.Item.ResultID, ReplyTo: replyTo})

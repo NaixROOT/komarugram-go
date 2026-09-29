@@ -403,11 +403,19 @@ Shift+Enter adds a line. Draft text and custom-emoji entities stay with each cha
 while switching chats. Failed sends preserve the draft and retry with the same
 Telegram random ID, including attachment/checklist retries.
 
-The paperclip opens photo/video, file and checklist actions. Attachments use
-a native file chooser (`kdialog` or `zenity` on Linux), with a path field as a
-fallback. Video upload uses `ffprobe` for dimensions and duration. Creating native
-Telegram checklists requires Premium; received checklists display their items and
-completion state. The demo simulates sending locally without network traffic.
+The paperclip opens photo/video, file and checklist actions. Photos, videos and
+files are chosen, several at once, in the system's file chooser (`kdialog` or
+`zenity` on Linux), with a path field as a fallback, and appear in a box for
+sending files, as in Telegram Desktop: pictures in a grid, other files as rows, a
+caption (the composer's text to start with) and the choices "Group items", "Send
+as documents" and, for large photos, "High Quality". Photos are made ready as
+Telegram Desktop makes them (`internal/messenger/sendfiles`): turned as their
+Exif asks, scaled to fit 1280 pixels (2560 in high quality), alpha laid on white,
+saved as JPEG; what can go in an album goes in one (`messages.sendMultiMedia`,
+ten at most), the caption on the last message. Video upload uses `ffprobe` for
+dimensions and duration. Creating native Telegram checklists requires Premium;
+received checklists display their items and completion state. The demo simulates
+sending locally without network traffic.
 
 With nothing written, a microphone takes Send's place: it records a voice
 message (`pkg/voice`) through `ffmpeg` — PulseAudio/PipeWire or ALSA on Linux,
