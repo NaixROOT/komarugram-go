@@ -60,18 +60,26 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 	pad := gtx.Dp(16)
 	imagePx := gtx.Dp(chatHeaderImage)
 	title, status := c.Title, chatStatus(c, l)
+	if selection != nil {
+		status = selection.chatStatusOnline(c, gtx.Now, l)
+	}
 	infoPx := 0
 	if head == nil {
 		offset(gtx, image.Pt(pad, (header.Y-imagePx)/2), func(gtx layout.Context) layout.Dimensions {
 			return drawAvatar(gtx, c.ID, c.Kind, c.Title, chatHeaderImage)
 		})
-		// The info mark at the end tells that the header opens the chat's info.
-		infoPx = gtx.Dp(24)
-		offset(gtx, image.Pt(size.X-pad-infoPx, (header.Y-infoPx)/2), func(gtx layout.Context) layout.Dimensions {
-			return exact(gtx, image.Pt(infoPx, infoPx), func(gtx layout.Context) layout.Dimensions {
-				return iconInfo(gtx, sc.SurfaceVariant.OnColor)
+		if selection != nil {
+			// The buttons at the end: search and the chat's menu.
+			infoPx = selection.headActionsWidth(gtx) - pad + gtx.Dp(8)
+		} else {
+			// The info mark at the end tells that the header opens the chat's info.
+			infoPx = gtx.Dp(24)
+			offset(gtx, image.Pt(size.X-pad-infoPx, (header.Y-infoPx)/2), func(gtx layout.Context) layout.Dimensions {
+				return exact(gtx, image.Pt(infoPx, infoPx), func(gtx layout.Context) layout.Dimensions {
+					return iconInfo(gtx, sc.SurfaceVariant.OnColor)
+				})
 			})
-		})
+		}
 	} else {
 		title, status = head.title, head.subtitle
 		// The back button takes the avatar's place; it is laid out last,
@@ -102,6 +110,7 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 		hgtx := gtx
 		hgtx.Constraints = layout.Exact(header)
 		selection.header.Layout(hgtx, func(layout.Context) layout.Dimensions { return layout.Dimensions{Size: header} })
+		selection.layoutHeadActions(gtx, header, size.X-gtx.Dp(8), l)
 	}
 	if head != nil {
 		// The button's target is 48 dp, around where the avatar would be.
@@ -119,11 +128,22 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 	offset(bodyGtx, image.Pt(0, header.Y), func(gtx layout.Context) layout.Dimensions {
 		return body(gtx)
 	})
+	if selection != nil && head == nil && selection.chat == c.ID && selection.chatSearch.open {
+		headerGtx := gtx
+		headerGtx.Constraints = layout.Exact(header)
+		selection.chatSearchUpdate(headerGtx)
+		if selection.chatSearch.open {
+			selection.layoutChatSearch(headerGtx, header, l)
+		}
+	}
 	if selection != nil && selection.chat == c.ID && selection.selectionCount() > 0 {
 		headerGtx := gtx
 		headerGtx.Constraints = layout.Exact(header)
 		fillRect(headerGtx, sc.Surface.Color, header)
 		selection.selectionHeader(headerGtx, l)
+	}
+	if selection != nil && head == nil && selection.chat == c.ID {
+		selection.layoutChatMenu(gtx, l)
 	}
 	if selection != nil && selection.chat == c.ID {
 		selection.layoutDialogs(gtx, l)
@@ -131,9 +151,11 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 	return layout.Dimensions{Size: size}
 }
 
-// scrollPage lays out content in a centered, scrollable column.
+// scrollPage lays out content in a centered, scrollable column, with a
+// toast at its bottom for what the page has to tell.
 type scrollPage struct {
-	list scroll.List
+	list  scroll.List
+	toast toast
 }
 
 func (p *scrollPage) layout(gtx layout.Context, content layout.Widget) layout.Dimensions {
@@ -149,5 +171,6 @@ func (p *scrollPage) layout(gtx layout.Context, content layout.Widget) layout.Di
 			return layout.UniformInset(unit.Dp(24)).Layout(gtx, content)
 		})
 	})
+	p.toast.Layout(gtx, image.Rectangle{Max: size})
 	return layout.Dimensions{Size: size}
 }

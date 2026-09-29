@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -37,7 +38,10 @@ type messageDraft struct {
 	text     string
 	pending  *model.OutgoingMessage
 	sending  bool
-	err      error
+	// err is why the last message was not sent: Send then retries it. It
+	// is told in the history's toast once, when it happens.
+	err  error
+	told error
 	// reply is the message what is sent next replies to, nil for none.
 	reply *model.Message
 }
@@ -60,9 +64,14 @@ type featuredPackResult struct {
 	err        error
 }
 type messageComposer struct {
-	editorHit              struct{}
-	notice, lastNotice     string
-	noticeUntil            time.Time
+	// confirmations tells whether a sticker and a GIF are sent only once
+	// confirmed; sendConfirm is the dialog that asks.
+	confirmations func() (sticker, gif bool)
+	sendConfirm   sendConfirm
+	editorHit     struct{}
+	// top is where the composer began on the last frame, its reply strip
+	// included: the history's toast shows above it.
+	top                    int
 	source                 model.ComposerStore
 	invalidate             func()
 	ctx                    context.Context
@@ -82,16 +91,20 @@ type messageComposer struct {
 	loadCancel             context.CancelFunc
 	page                   model.PickerPage
 	pickerErr              error
-	results                chan pickerResult
-	featuredResults        chan featuredPackResult
-	featuredGeneration     uint64
-	featuredCancel         context.CancelFunc
-	featuredLoading        bool
-	sends                  chan composerResult
-	list                   scroll.List
-	loader                 loadingIndicator
-	strip                  layout.List
-	hover                  hoverPlay
+	// pickerToast tells, at the picker's bottom, why it could not load;
+	// pickerTold is the failure told last.
+	pickerToast        toast
+	pickerTold         error
+	results            chan pickerResult
+	featuredResults    chan featuredPackResult
+	featuredGeneration uint64
+	featuredCancel     context.CancelFunc
+	featuredLoading    bool
+	sends              chan composerResult
+	list               scroll.List
+	loader             loadingIndicator
+	strip              layout.List
+	hover              hoverPlay
 	// pickerDrawn is whether the picker was drawn in the last frame.
 	pickerDrawn       bool
 	stripDrag         stripDrag
@@ -114,11 +127,23 @@ type messageComposer struct {
 	browse, confirm, cancelForm surface
 	fileResults                 chan fileChoice
 	choosing                    bool
+	// voice records voice messages; recording is the one being recorded,
+	// voiceResults the recordings encoded for sending, voicePicks the audio
+	// files chosen instead for want of an FFmpeg, and recorded the
+	// temporary files of recordings, removed once sent.
+	voice                 voiceTools
+	recording             *voiceRecording
+	voiceResults          chan voiceResult
+	voicePicks            chan voicePick
+	recorded              map[string]bool
+	micClick, voiceCancel surface
+	// ffmpeg is the FFmpeg the user set, "" for the one on PATH.
+	ffmpeg func() string
 }
 
 func newMessageComposer(source model.ConversationStore, invalidate func()) *messageComposer {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
+	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), voicePicks: make(chan voicePick, 1), recorded: map[string]bool{}, packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
 	c.source, _ = source.(model.ComposerStore)
 	c.search.SingleLine = true
 	c.path.SingleLine = true
@@ -220,6 +245,9 @@ func (c *messageComposer) submit(chat int64, msg model.OutgoingMessage) {
 	if d.reply != nil && msg.ReplyTo == 0 {
 		msg.ReplyTo = d.reply.Key.MessageID
 	}
+	if msg.Path != "" {
+		msg.FFmpeg = c.ffmpegPath()
+	}
 	if msg.RandomID == 0 {
 		if d.pending != nil {
 			prior := *d.pending
@@ -287,6 +315,10 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 				if d.reply != nil && r.request.ReplyTo == d.reply.Key.MessageID {
 					d.reply = nil
 				}
+				if c.recorded[r.request.Path] {
+					delete(c.recorded, r.request.Path)
+					os.Remove(r.request.Path)
+				}
 				if r.chat == c.chat {
 					c.form = 0
 				}
@@ -327,6 +359,22 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 					c.list.Position = layout.Position{}
 				}
 			}
+		case r := <-c.voiceResults:
+			if r.err != nil {
+				c.draft(r.chat).err = r.err
+			} else if r.path != "" {
+				note := r.note
+				c.recorded[r.path] = true
+				c.submit(r.chat, model.OutgoingMessage{Path: r.path, Voice: &note})
+			}
+		case p := <-c.voicePicks:
+			c.choosing = false
+			if p.err != nil {
+				c.draft(p.chat).err = p.err
+			} else if p.path != "" {
+				note := p.note
+				c.submit(p.chat, model.OutgoingMessage{Path: p.path, Voice: &note})
+			}
 		case f := <-c.fileResults:
 			c.choosing = false
 			if f.chat != c.chat || f.form != c.form {
@@ -343,6 +391,7 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 	}
 drained:
 	d := c.draft(chat)
+	c.updateRecording(gtx, l)
 	for {
 		_, ok := gtx.Event(pointer.Filter{Target: &c.editorHit, Kinds: pointer.Press})
 		if !ok {
@@ -384,6 +433,9 @@ drained:
 				d.text = next
 				d.pending = nil
 				d.err = nil
+				if g, ok := c.source.(model.GhostStore); ok && strings.TrimSpace(next) != "" {
+					g.Typing(c.chat)
+				}
 			}
 		}
 	}
@@ -557,18 +609,6 @@ func floatingComposerCover(gtx layout.Context, size image.Point) int {
 // backdrop, the history behind it, blurred; nil draws it opaque.
 func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.Catalog, p *chatPage, animate bool, backdrop *op.CallOp) layout.Dimensions {
 	c.update(gtx, chat, l)
-	p.errorMu.Lock()
-	mediaErr := p.mediaError
-	p.errorMu.Unlock()
-	notice := p.selectionNotice
-	if mediaErr != nil {
-		notice = mediaErrorText(mediaErr)
-	}
-	if notice != c.lastNotice {
-		c.lastNotice = notice
-		c.notice = notice
-		c.noticeUntil = gtx.Now.Add(5 * time.Second)
-	}
 	size := gtx.Constraints.Max
 	pad := min(gtx.Dp(16), size.X/8)
 	classic := p.classicComposer()
@@ -578,6 +618,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 	if classic {
 		rect = image.Rect(0, max(0, size.Y-height), size.X, size.Y)
 	}
+	c.top = rect.Min.Y
 	if p.frozen.Frozen() {
 		// A frozen account cannot send: the bar tells why, as Telegram
 		// Desktop's does.
@@ -610,6 +651,11 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 	// opens from the composer opens over it.
 	c.replyLayout(gtx, chat, rect, classic, backdrop, l, p)
 	above := rect.Min.Y - c.replyHeight(gtx, chat, classic)
+	c.top = above
+	if d.err != nil && d.err != d.told {
+		p.toast.Show(mediaErrorText(d.err))
+	}
+	d.told = d.err
 	inRect(gtx, rect, func(gtx layout.Context) layout.Dimensions {
 		sc := scheme(gtx)
 		s := gtx.Constraints.Max
@@ -646,10 +692,27 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 				})
 			})
 		}
+		if c.recording != nil {
+			// While it records, the cross drops the recording and Send
+			// sends it.
+			button(0, &c.voiceCancel, iconClear, l.T("record.cancel"))
+			sendWidth := min(gtx.Dp(92), s.X/3)
+			inRect(gtx, image.Rect(s.X-sendWidth-gtx.Dp(8), 0, s.X-gtx.Dp(8), s.Y), func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &c.send, l.T("composer.send")) })
+			})
+			inRect(gtx, image.Rect(iconWidth, 0, max(iconWidth, s.X-sendWidth-gtx.Dp(8)), s.Y), c.layoutRecording)
+			return layout.Dimensions{Size: s}
+		}
 		button(0, &c.attach, iconAttach, l.T("composer.attach"))
-		button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		sendWidth := 0
-		if strings.TrimSpace(d.editor.Text()) != "" || d.sending || d.pending != nil {
+		if c.canRecord(d) {
+			// With nothing written, the microphone takes the far right, as
+			// in Telegram Desktop, and the emoji button moves left of it.
+			sendWidth = iconWidth
+			button(s.X-iconWidth, &c.micClick, iconMic, l.T("record.voice"))
+			button(s.X-2*iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
+		} else if strings.TrimSpace(d.editor.Text()) != "" || d.sending || d.pending != nil {
+			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 			sendWidth = min(gtx.Dp(92), s.X/3)
 			inRect(gtx, image.Rect(s.X-iconWidth-sendWidth, 0, s.X-iconWidth, s.Y), func(gtx layout.Context) layout.Dimensions {
 				if d.sending {
@@ -666,6 +729,8 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 					return textButton(gtx, &c.send, txt)
 				})
 			})
+		} else {
+			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		}
 		inRect(gtx, image.Rect(iconWidth, 0, max(iconWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
 			if d.sending || c.source == nil {
@@ -692,13 +757,6 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 		return layout.Dimensions{Size: s}
 	})
-	if d.err != nil && c.form == 0 {
-		inRect(gtx, image.Rect(pad, max(0, above-gtx.Dp(52)), size.X-pad, above-gtx.Dp(4)), func(gtx layout.Context) layout.Dimensions { return pill(gtx, mediaErrorText(d.err)) })
-	}
-	if c.notice != "" && gtx.Now.Before(c.noticeUntil) && d.err == nil && c.form == 0 && !c.pickerOpen && !c.attachOpen {
-		inRect(gtx, image.Rect(pad, max(0, above-gtx.Dp(48)), size.X-pad, above-gtx.Dp(4)), func(gtx layout.Context) layout.Dimensions { return pill(gtx, c.notice) })
-		gtx.Execute(op.InvalidateCmd{At: c.noticeUntil})
-	}
 	{
 		// The picker opens from the emoji button, at the composer's end.
 		w := min(gtx.Dp(372), max(0, size.X-2*pad))
@@ -832,12 +890,6 @@ func (c *messageComposer) formLayout(gtx layout.Context, bar image.Rectangle, l 
 					}
 					return label(gtx, l.T("composer."+k), token.TypestyleTitleMedium, scheme(gtx).Surface.OnColor, 1)
 				}), vspace(16),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if err := c.draft(c.chat).err; err != nil {
-						return label(gtx, mediaErrorText(err), token.TypestyleBodySmall, scheme(gtx).Error.Color, 3)
-					}
-					return layout.Dimensions{}
-				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					if form != 3 {
 						return flatEditor(gtx, &c.path, l.T("composer.path"))

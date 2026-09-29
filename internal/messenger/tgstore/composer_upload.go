@@ -13,11 +13,13 @@ import (
 	"time"
 
 	"github.com/gotd/td/tg"
+
+	"komarugram/pkg/video"
 )
 
 // Probe before uploading: video metadata is what makes Telegram render a video
 // bubble instead of an opaque file. The filename is an argument, never shell code.
-func uploadAttributes(ctx context.Context, path, mime string, asMedia bool) ([]tg.DocumentAttributeClass, error) {
+func uploadAttributes(ctx context.Context, path, mime string, asMedia bool, ffmpeg string) ([]tg.DocumentAttributeClass, error) {
 	attrs := []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: filepath.Base(path)}}
 	if !asMedia || !strings.HasPrefix(mime, "video/") {
 		return attrs, nil
@@ -28,7 +30,11 @@ func uploadAttributes(ctx context.Context, path, mime string, asMedia bool) ([]t
 	if err != nil {
 		return nil, err
 	}
-	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration", "-of", "json", "-i", path).Output()
+	ffprobe := video.ResolveFFprobe(ffmpeg)
+	if ffprobe == "" {
+		return nil, errors.New("could not inspect video; install ffprobe or attach it as a file")
+	}
+	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration", "-of", "json", "-i", path).Output()
 	if err != nil {
 		return nil, errors.New("could not inspect video; install ffprobe or attach it as a file")
 	}

@@ -3,3 +3,8 @@
 .agents/
 .codex/
 profiles/
+# Local clones of Telegram Desktop and its forks, for reference: see
+# AGENTS.md, "Telegram Desktop sources".
+/tdesktop/
+/ayugram/
+/materialgram/

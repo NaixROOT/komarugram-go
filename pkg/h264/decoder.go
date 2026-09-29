@@ -12,11 +12,14 @@
 // FFmpeg's fast paths are assembly, which WebAssembly cannot take: this
 // decoder is several times slower than a native FFmpeg, and is meant for
 // machines without one.
+//
+// The module, avcdec.wasm, is LGPL and is not part of this package: it is
+// built and published by https://github.com/komarugif/libavcodec-wasm, and
+// the caller hands it to NewRuntime.
 package h264
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"image"
@@ -28,9 +31,6 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
-
-// //go:embed avcdec.wasm
-var avcWasm []byte
 
 // Limits bounds what a hostile file can make the decoder take.
 type Limits struct {
@@ -67,13 +67,13 @@ type Runtime struct {
 	maxSide  int
 }
 
-// NewRuntime compiles the embedded decoder under DefaultLimits.
-func NewRuntime(ctx context.Context) (*Runtime, error) {
-	return NewRuntimeWithLimits(ctx, DefaultLimits)
+// NewRuntime compiles module, an avcdec.wasm, under DefaultLimits.
+func NewRuntime(ctx context.Context, module []byte) (*Runtime, error) {
+	return NewRuntimeWithLimits(ctx, module, DefaultLimits)
 }
 
-// NewRuntimeWithLimits compiles the embedded decoder under limits.
-func NewRuntimeWithLimits(ctx context.Context, limits Limits) (*Runtime, error) {
+// NewRuntimeWithLimits compiles module, an avcdec.wasm, under limits.
+func NewRuntimeWithLimits(ctx context.Context, module []byte, limits Limits) (*Runtime, error) {
 	if limits.MaxSide <= 0 {
 		return nil, fmt.Errorf("h264: picture side limit %d is out of range", limits.MaxSide)
 	}
@@ -87,7 +87,7 @@ func NewRuntimeWithLimits(ctx context.Context, limits Limits) (*Runtime, error) 
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("wasi: %w", err)
 	}
-	compiled, err := rt.Wazero().CompileModule(ctx, avcWasm)
+	compiled, err := rt.Wazero().CompileModule(ctx, module)
 	if err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("compile h264: %w", err)

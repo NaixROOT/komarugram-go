@@ -7,6 +7,7 @@ import (
 	"image"
 	"log"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,10 +22,10 @@ import (
 
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/op/clip"
 	"gioui.org/unit"
 	"gioui.org/widget"
 
+	"komarugram/internal/appwindow"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
 	"komarugram/internal/messenger/preferences"
@@ -99,8 +100,10 @@ func motionShort(l localization.Catalog) map[powersave.Mode]string {
 type settingsPage struct {
 	scrollPage
 	section settingsSection
-	items   map[settingsSection]*settingsItem
-	back    *button.Button
+	// layingOut stays set on panic, identifying the failed page to RecoverFrame.
+	layingOut bool
+	items     map[settingsSection]*settingsItem
+	back      *button.Button
 
 	motion      *motion.Settings
 	miniapps    *miniappprefs.Settings
@@ -126,6 +129,24 @@ type settingsPage struct {
 	private    func() bool
 	setPrivate func(bool)
 	visual     *toggle.Toggle[string]
+	// streamer and setStreamer read and switch Streamer Mode, where the
+	// platform has it.
+	streamer     func() bool
+	setStreamer  func(bool)
+	streamerMode *toggle.Toggle[string]
+	// ghost and setGhost read and change what the accounts tell others;
+	// without them the section is hidden.
+	ghost     func() preferences.Ghost
+	setGhost  func(preferences.Ghost)
+	ghostOpts *toggle.Toggle[string]
+	// keep and setKeep read and change what the cache keeps.
+	keep     func() preferences.Keep
+	setKeep  func(preferences.Keep)
+	keepOpts *toggle.Toggle[string]
+	// filtersView edits the message filters; hidden without its functions.
+	filtersView *filterSettings
+	// lookView changes how messages and avatars are drawn.
+	lookView *lookSettings
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -136,13 +157,18 @@ type settingsPage struct {
 	composerBlur    func() bool
 	setComposerBlur func(bool)
 	blur            *checkbox.Checkboxes[string]
+	// confirmations and setConfirmations read and change whether stickers
+	// and GIFs are sent only once confirmed.
+	confirmations    func() (sticker, gif bool)
+	setConfirmations func(sticker, gif bool)
+	confirmBoxes     *checkbox.Checkboxes[string]
 	// premium is the account's Premium; nil hides the section.
 	premium   model.PremiumSource
 	subscribe *button.Button
 	// players chooses the external player for videos and audio; browser,
 	// the browser Mini Apps run in.
 	players  *playerSettings
-	stickers *stickerPlayerSettings
+	decoders *decoderSettings
 	// sessions are the account's devices; nil hides the section.
 	sessions   *sessionsView
 	browser    *programSetting
@@ -178,7 +204,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 		confirmLogOut: button.Filled(),
 		cancelLogOut:  button.Text(),
 		players:       newPlayerSettings(),
-		stickers:      newStickerPlayerSettings(),
+		decoders:      newDecoderSettings(),
 		browser:       newBrowserSetting(),
 		invalidate:    invalidate,
 	}
@@ -188,9 +214,31 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 			p.setPrivate(len(values) == 1)
 		}
 	})
+	p.streamerMode = toggle.NewToggle([]string{"streamer"}, nil, func(values []string) {
+		if p.setStreamer != nil {
+			p.setStreamer(len(values) == 1)
+		}
+	})
+	p.ghostOpts = toggle.NewToggle(ghostOptions, nil, func(values []string) {
+		if p.setGhost != nil {
+			p.setGhost(ghostFromOptions(values))
+		}
+	})
+	p.filtersView = newFilterSettings()
+	p.lookView = newLookSettings()
+	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
+		if p.setKeep != nil {
+			p.setKeep(preferences.Keep{Deleted: slices.Contains(values, "deleted"), Edits: slices.Contains(values, "edits")})
+		}
+	})
 	p.composer = radio.NewRadios([]preferences.ComposerStyle{preferences.ComposerClassic, preferences.ComposerFloating}, preferences.ComposerFloating, func(style preferences.ComposerStyle) {
 		if p.setComposerStyle != nil {
 			p.setComposerStyle(style)
+		}
+	})
+	p.confirmBoxes = checkbox.NewCheckboxes([]string{"sticker", "gif"}, nil, func(values []string) {
+		if p.setConfirmations != nil {
+			p.setConfirmations(slices.Contains(values, "sticker"), slices.Contains(values, "gif"))
 		}
 	})
 	p.blur = checkbox.NewCheckboxes([]string{"blur"}, nil, func(values []string) {
@@ -288,11 +336,25 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 		}
 		p.blur.Update(gtx)
 	}
+	if p.confirmations != nil {
+		sticker, gif := p.confirmations()
+		var want []string
+		if sticker {
+			want = append(want, "sticker")
+		}
+		if gif {
+			want = append(want, "gif")
+		}
+		if !slices.Equal(want, p.confirmBoxes.GetValues()) {
+			p.confirmBoxes.SetValues(want)
+		}
+		p.confirmBoxes.Update(gtx)
+	}
 	p.animations.Update(gtx)
 	p.privacy.Update(gtx)
 	if p.section == settingsIntegrations {
 		p.players.Update(gtx)
-		p.stickers.Update(gtx)
+		p.decoders.Update(gtx)
 		p.browser.Update(gtx)
 	}
 	if p.section == settingsDevices && p.sessions != nil {
@@ -300,13 +362,18 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 	}
 	if p.section == settingsPrivacy {
 		p.security.UpdateSettings(gtx)
+		p.filtersView.Update(gtx)
+	}
+	if p.section == settingsAppearance {
+		p.lookView.Update(gtx)
 	}
 }
 
 func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appearance.Scheme, dark bool, l localization.Catalog) layout.Dimensions {
+	p.layingOut = true
 	sc := scheme(gtx)
 	titles := settingsTitles(l)
-	return p.layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dims := p.layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		header := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			title := func(gtx layout.Context) layout.Dimensions {
 				return label(gtx, titles[p.section], token.TypestyleHeadlineSmall, sc.Surface.OnColor, 1)
@@ -347,6 +414,30 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 						return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.security.WindowLockLayout(gtx, l) }, defaultCardPadding)
 					}),
 					vspace(12),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.ghost == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.layoutGhost(gtx, l) }, defaultCardPadding)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.filtersView.filters == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.filtersView.Layout(gtx, l) }, defaultCardPadding)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.keep == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.layoutKeep(gtx, l) }, defaultCardPadding)
+						})
+					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return card(gtx, p.privacy.Layout, defaultCardPadding) }),
 				)
 			}
@@ -369,6 +460,8 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 			layout.Rigid(content),
 		)
 	})
+	p.layingOut = false
+	return dims
 }
 
 func (p *settingsPage) isPrivate() bool {
@@ -386,7 +479,15 @@ func (p *settingsPage) layoutVisualPrivacy(gtx layout.Context, l localization.Ca
 			p.visual.SetValues(nil)
 		}
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	streamer := p.streamer != nil && appwindow.CaptureExclusionSupported
+	if streamer && p.streamer() != (len(p.streamerMode.GetValues()) == 1) {
+		if p.streamer() {
+			p.streamerMode.SetValues([]string{"streamer"})
+		} else {
+			p.streamerMode.SetValues(nil)
+		}
+	}
+	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return p.visual.Layout(gtx, map[string]string{"visual": l.T("privacy.visual")})
 		}),
@@ -394,7 +495,19 @@ func (p *settingsPage) layoutVisualPrivacy(gtx layout.Context, l localization.Ca
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return label(gtx, l.T("privacy.visual_body"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
 		}),
-	)
+	}
+	if streamer {
+		children = append(children, vspace(8),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return p.streamerMode.Layout(gtx, map[string]string{"streamer": l.T("privacy.streamer")})
+			}),
+			vspace(4),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return label(gtx, l.T("privacy.streamer_body"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+			}),
+		)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func (p *settingsPage) layoutMain(gtx layout.Context, mode themeMode, dark bool, l localization.Catalog) layout.Dimensions {
@@ -615,8 +728,28 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 						}
 						return p.blur.Layout(gtx, map[string]string{"blur": l.T("settings.composer_blur")})
 					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if p.confirmations == nil {
+							return layout.Dimensions{}
+						}
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Inset{Top: 8, Left: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return label(gtx, l.T("settings.confirm"), token.TypestyleTitleSmall, scheme(gtx).Primary.Color, 1)
+								})
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return p.confirmBoxes.Layout(gtx, map[string]string{"sticker": l.T("settings.confirm_sticker"), "gif": l.T("settings.confirm_gif")})
+							}),
+						)
+					}),
 				)
 			})
+		}))
+	}
+	if p.lookView.look != nil {
+		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.lookView.Layout(gtx, l) }, defaultCardPadding)
 		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, cards...)
@@ -692,7 +825,7 @@ func (p *settingsPage) layoutAccountAvatar(gtx layout.Context, account model.Acc
 		return avatar(gtx, account.UserID, model.KindUser, name, accountAvatarSize)
 	}
 	size := image.Pt(gtx.Dp(accountAvatarSize), gtx.Dp(accountAvatarSize))
-	defer clip.Ellipse{Max: size}.Push(gtx.Ops).Pop()
+	defer avatarShape(gtx, size).Push(gtx.Ops).Pop()
 	gtx.Constraints = layout.Exact(size)
 	widget.Image{Src: p.images.Op(account.Avatar), Fit: widget.Cover}.Layout(gtx)
 	return layout.Dimensions{Size: size}

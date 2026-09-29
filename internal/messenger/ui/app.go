@@ -6,6 +6,7 @@ import (
 	"image"
 	"komarugram/internal/diagnostics"
 	"log"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -43,8 +44,12 @@ type App struct {
 	store  model.Store
 
 	preferences *preferences.Store
-	lightTheme  *token.Theme
-	darkTheme   *token.Theme
+	// focused is set while the window has the focus.
+	focused bool
+	// filter hides messages as the settings ask.
+	filter     *messageFilter
+	lightTheme *token.Theme
+	darkTheme  *token.Theme
 
 	section section
 	// beforeSearch is the section search was opened from; opening search
@@ -197,6 +202,45 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
+	a.settings.filtersView.filters = func() preferences.Filters { return a.preferences.Global().Filters }
+	a.settings.filtersView.setFilters = func(f preferences.Filters) {
+		if err := services.Preferences.SetFilters(f); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.lookView.look = func() preferences.Look { return a.preferences.Global().Look }
+	a.settings.lookView.setLook = func(l preferences.Look) {
+		if err := services.Preferences.SetLook(l); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.keep = func() preferences.Keep { return a.preferences.Global().Keep }
+	a.settings.setKeep = func(k preferences.Keep) {
+		if err := services.Preferences.SetKeep(k); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.ghost = func() preferences.Ghost { return a.preferences.Global().Ghost }
+	a.settings.setGhost = func(g preferences.Ghost) {
+		if err := services.Preferences.SetGhost(g); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.streamer = func() bool { return a.preferences.Global().StreamerMode }
+	a.settings.setStreamer = func(on bool) {
+		if err := services.Preferences.SetStreamerMode(on); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.confirmations = func() (bool, bool) {
+		g := a.preferences.Global()
+		return g.ConfirmSticker, g.ConfirmGIF
+	}
+	a.settings.setConfirmations = func(sticker, gif bool) {
+		if err := services.Preferences.SetConfirmations(sticker, gif); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	a.settings.composerStyle = a.composerStyle
 	a.settings.setComposerStyle = func(style preferences.ComposerStyle) {
 		if err := services.Preferences.SetComposer(style); err != nil {
@@ -209,14 +253,26 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			log.Printf("save settings: %v", err)
 		}
 	}
-	a.settings.stickers.chosen = func() string { return a.preferences.Global().StickerPlayer }
-	a.settings.stickers.choose = func(value string) {
+	a.settings.decoders.stickers.chosen = func() string { return a.preferences.Global().StickerPlayer }
+	a.settings.decoders.stickers.choose = func(value string) {
 		if err := services.Preferences.SetStickerPlayer(value); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
-	a.settings.stickers.program.custom = func() string { return a.preferences.Global().FFmpegPath }
-	a.settings.stickers.program.save = func(path string) {
+	a.settings.decoders.audio.chosen = func() string { return a.preferences.Global().AudioPlayer }
+	a.settings.decoders.audio.choose = func(value string) {
+		if err := services.Preferences.SetAudioPlayer(value); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.decoders.animations.chosen = func() string { return a.preferences.Global().AnimationPlayer }
+	a.settings.decoders.animations.choose = func(value string) {
+		if err := services.Preferences.SetAnimationPlayer(value); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.decoders.program.custom = func() string { return a.preferences.Global().FFmpegPath }
+	a.settings.decoders.program.save = func(path string) {
 		if err := services.Preferences.SetFFmpegPath(path); err != nil {
 			log.Printf("save settings: %v", err)
 		}
@@ -245,6 +301,8 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	}
 	if source, ok := store.(model.SessionsSource); ok {
 		a.settings.sessions = newSessionsView(source, w.Invalidate)
+		a.settings.sessions.toast = &a.settings.toast
+		a.settings.sessions.private = a.private
 	}
 	a.security = a.settings.security
 	if services.Security != nil {
@@ -285,12 +343,38 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.player = a.settings.players.chosen
 	p.setPlayer = a.settings.players.choose
 	p.playerPaths = a.settings.players.paths
+	p.audioExternal = func() bool { return a.preferences.Global().AudioPlayer == "external" }
 	p.appearance = a.themes
 	p.avatar = a.layoutAvatar
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
+	if p.composer != nil {
+		p.composer.confirmations = func() (bool, bool) {
+			g := a.preferences.Global()
+			return g.ConfirmSticker, g.ConfirmGIF
+		}
+		p.composer.ffmpeg = func() string { return a.preferences.Global().FFmpegPath }
+	}
+	p.addFilter = func(pattern preferences.FilterPattern) {
+		f := a.preferences.Global().Filters
+		f.Patterns = append(slices.Clone(f.Patterns), pattern)
+		f.Enabled = true
+		if err := a.preferences.SetFilters(f); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
 	return p
+}
+
+// messageFilter is the filter the settings ask for, compiled again only
+// when they change.
+func (a *App) messageFilter() *messageFilter {
+	f := a.preferences.Global().Filters
+	if a.filter == nil || !a.filter.same(f) {
+		a.filter = compileFilter(f)
+	}
+	return a.filter
 }
 
 // Close releases process-wide subscriptions when this window closes.
@@ -554,6 +638,7 @@ func (a *App) open(pick chatPick) {
 
 // Layout implements appwindow.Content.
 func (a *App) Layout(gtx layout.Context) {
+	withLook(gtx, a.preferences.Global().Look)
 	if trace := diagnostics.From(gtx.Values); trace != nil && trace.Recorder.Due(trace.Window, "cache-gauges", time.Second) {
 		defer func() {
 			r := trace.Recorder
@@ -577,7 +662,7 @@ func (a *App) Layout(gtx layout.Context) {
 	}
 	decoderPrefs := a.preferences.Global()
 	configureMedia := func(m *chatmedia.Manager) {
-		m.ConfigureDecoders(decoderPrefs.StickerPlayer == "wasm", decoderPrefs.FFmpegPath)
+		m.ConfigureDecoders(decoderPrefs.StickerPlayer == "wasm", decoderPrefs.AnimationPlayer == "wasm", decoderPrefs.FFmpegPath)
 	}
 	if a.info != nil {
 		configureMedia(a.info.renderer.media)
@@ -620,7 +705,13 @@ func (a *App) Layout(gtx layout.Context) {
 		a.signIn.Layout(gtx, a.catalog(), a.private())
 		return
 	}
-	if a.info != nil && a.history.header.Clicked(gtx) {
+	a.tellGhost()
+	a.window.SetCaptureExcluded(a.preferences.Global().StreamerMode)
+	a.history.filter = a.messageFilter()
+	if a.comments != nil {
+		a.comments.filter = a.history.filter
+	}
+	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked()) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)
 		}
@@ -805,6 +896,29 @@ func (a *App) SetSuspended(hidden bool) {
 		a.avatars.media.Release()
 	}
 	a.images.Release()
+}
+
+// SetFocused is called on the UI goroutine when the window gains or loses
+// the focus: the account shows online while it has it, if Ghost allows.
+func (a *App) SetFocused(focused bool) {
+	a.focused = focused
+	a.tellGhost()
+}
+
+// tellGhost gives the store what Ghost allows, and whether the window is
+// active.
+func (a *App) tellGhost() {
+	g, ok := a.store.(model.GhostStore)
+	if !ok {
+		return
+	}
+	p := a.preferences.Global().Ghost
+	g.SetGhost(model.Ghost{SendRead: p.SendRead, SendOnline: p.SendOnline, SendTyping: p.SendTyping, ReadOnInteract: p.ReadOnInteract})
+	g.SetOnline(a.focused)
+	if k, ok := a.store.(model.KeepStore); ok {
+		keep := a.preferences.Global().Keep
+		k.SetKeep(model.Keep{Deleted: keep.Deleted, Edits: keep.Edits})
+	}
 }
 
 // SetMinimized is called for an explicit minimize or a suspended window.

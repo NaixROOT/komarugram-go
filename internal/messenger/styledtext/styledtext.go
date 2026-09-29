@@ -122,31 +122,33 @@ type spanResults struct {
 	clusters         []Cluster
 }
 
-func (t TextStyle) iterateSpan(gtx layout.Context, maxWidth int, span SpanStyle, truncate bool, clusters *[]Cluster) (op.CallOp, textIterator) {
+// iterateSpan shapes shaped, the start of span that has runeCount runes,
+// or all of it: one line of it when truncate is set.
+func (t TextStyle) iterateSpan(gtx layout.Context, maxWidth int, span SpanStyle, shaped string, runeCount int, truncate bool, clusters *[]Cluster) (op.CallOp, textIterator) {
 	var glyphs [32]text.Glyph
 	maxLines := 0
 	if truncate {
 		maxLines = 1
 	}
+	ppem := gtx.Sp(span.Size)
 	// shape the text of the current span
 	macro := op.Record(gtx.Ops)
 	paint.ColorOp{Color: span.Color}.Add(gtx.Ops)
 	t.Shaper.LayoutString(text.Parameters{
 		Font:       span.Font,
-		PxPerEm:    fixed.I(gtx.Sp(span.Size)),
+		PxPerEm:    fixed.I(ppem),
 		MaxLines:   maxLines,
 		MaxWidth:   maxWidth,
 		Truncator:  "\u200b", // Unicode zero-width space.
 		Locale:     gtx.Locale,
 		WrapPolicy: t.WrapPolicy.textPolicy(),
-	}, span.shaped)
+	}, shaped)
 	ti := textIterator{
 		hidden:   span.Color.A == 0,
 		viewport: image.Rectangle{Max: gtx.Constraints.Max},
 		maxLines: 1,
 	}
 
-	runeCount := span.runes
 	first := len(*clusters)
 	line := glyphs[:0]
 	var cluster image.Rectangle
@@ -176,8 +178,42 @@ func (t TextStyle) iterateSpan(gtx layout.Context, maxWidth int, span SpanStyle,
 	return macro.Stop(), ti
 }
 
+// lineRunesPerEm bounds how many runes of a line one em holds: no glyph
+// but a zero-width one is narrower than a quarter of an em.
+const lineRunesPerEm = 4
+
+// shapeWholeSpans turns linePrefix off, for tests that compare with it.
+var shapeWholeSpans = false
+
+// linePrefix is the start of span that holds its first line maxWidth wide,
+// ending before a space so that no word is cut, and its rune count: the
+// whole span when it is short.
+func linePrefix(span SpanStyle, maxWidth, ppem int) (string, int) {
+	limit := lineRunesPerEm*maxWidth/max(ppem, 1) + 16
+	if span.runes <= limit || shapeWholeSpans {
+		return span.shaped, span.runes
+	}
+	n := 0
+	for i, r := range span.Content {
+		if n >= limit && (r == ' ' || r == '\n') {
+			return span.Content[:i], n
+		}
+		n++
+	}
+	return span.shaped, span.runes
+}
+
 func (t TextStyle) layoutSpan(gtx layout.Context, maxWidth int, span SpanStyle, clusters *[]Cluster) spanResults {
-	call, ti := t.iterateSpan(gtx, maxWidth, span, true, clusters)
+	// One line needs only the start of the span: shaping all the rest of
+	// a long span for each of its lines made wrapping quadratic.
+	mark := len(*clusters)
+	prefix, runes := linePrefix(span, maxWidth, gtx.Sp(span.Size))
+	call, ti := t.iterateSpan(gtx, maxWidth, span, prefix, runes, true, clusters)
+	if runes < span.runes && ti.runes >= runes {
+		// All of the start fit on the line, which may go on past it.
+		*clusters = (*clusters)[:mark]
+		call, ti = t.iterateSpan(gtx, maxWidth, span, span.shaped, span.runes, true, clusters)
+	}
 	runesDisplayed := ti.runes
 	multiLine := runesDisplayed < span.runes
 	endedWithNewline := ti.hasNewline
@@ -195,7 +231,7 @@ func (t TextStyle) layoutSpan(gtx layout.Context, maxWidth int, span SpanStyle, 
 			// If we're only wrapping on word boundaries, we failed to display any runes whatsoever,
 			// and it wasn't due to a hard newline, we need to line-wrap without truncation to discover
 			// the word that doesn't fit on the line.
-			call, ti = t.iterateSpan(gtx, maxWidth, span, false, clusters)
+			call, ti = t.iterateSpan(gtx, maxWidth, span, span.shaped, span.runes, false, clusters)
 			runesDisplayed = ti.runes
 			multiLine = runesDisplayed < span.runes
 			endedWithNewline = ti.hasNewline

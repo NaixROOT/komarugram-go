@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Unlicense OR MIT
 
 // Package mp4 takes apart the MP4 files Telegram uses for GIFs and animated
-// avatars: H.264 video, without sound, looped.
+// avatars, H.264 video without sound, looped; and M4A files, AAC sound, for
+// voice messages and music.
 //
 // The container is parsed here, in Go, and only the compressed samples are
 // handed to the decoder, as the webm package does for stickers. The file
@@ -11,9 +12,11 @@
 package mp4
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"time"
 )
@@ -22,6 +25,12 @@ import (
 // video at 60 fps; this leaves room for longer loops without letting a
 // hostile count allocate much.
 const MaxSamples = 1 << 16
+
+// MaxAudioSamples bounds the access units of a sound track: about 26 hours
+// of AAC at 44.1 kHz. A table entry of 8 bytes can ask for this many
+// samples, so it bounds what a hostile file makes the parser allocate too,
+// to 16 MiB a table.
+const MaxAudioSamples = 1 << 22
 
 // ErrNotMP4 is returned for data that is not an MP4 file at all.
 var ErrNotMP4 = errors.New("mp4: not an MP4 file")
@@ -60,7 +69,9 @@ func (f *File) FrameDuration() time.Duration {
 
 // track is what is read of one trak box.
 type track struct {
-	video                bool
+	video, audio         bool
+	channels             int
+	rate                 uint32
 	timescale            uint32
 	width, height        int
 	codec                string
@@ -189,6 +200,7 @@ func parseTrak(body []byte, t *track) error {
 					return fmt.Errorf("mp4: truncated hdlr")
 				}
 				t.video = string(rest[4:8]) == "vide"
+				t.audio = string(rest[4:8]) == "soun"
 			case "minf":
 				return walk(body, func(kind string, body []byte) error {
 					if kind != "stbl" {
@@ -218,10 +230,19 @@ func entries(rest []byte, size int) (uint32, []byte, error) {
 	return n, rest, nil
 }
 
-// expand appends count copies of value, within MaxSamples.
-func expand(out []uint32, count, value uint32) ([]uint32, error) {
-	if uint64(len(out))+uint64(count) > MaxSamples {
-		return nil, fmt.Errorf("mp4: more than %d samples", MaxSamples)
+// limit is how many samples t may have: MaxSamples, MaxAudioSamples for
+// a sound track.
+func (t *track) limit() uint32 {
+	if t.audio {
+		return MaxAudioSamples
+	}
+	return MaxSamples
+}
+
+// expand appends count copies of value, within limit.
+func expand(out []uint32, count, value, limit uint32) ([]uint32, error) {
+	if uint64(len(out))+uint64(count) > uint64(limit) {
+		return nil, fmt.Errorf("mp4: more than %d samples", limit)
 	}
 	for range count {
 		out = append(out, value)
@@ -244,6 +265,9 @@ func parseTable(kind string, body []byte, t *track) error {
 				return nil
 			}
 			t.codec = kind
+			if kind == "mp4a" {
+				return parseMP4A(body, t)
+			}
 			if kind != "avc1" && kind != "avc3" {
 				return nil
 			}
@@ -283,7 +307,7 @@ func parseTable(kind string, body []byte, t *track) error {
 			// Composition offsets are read as signed, as version 1 has them
 			// and as muxers write them in version 0 too.
 			value := binary.BigEndian.Uint32(rest[i*8+4:])
-			if *out, err = expand(*out, count, value); err != nil {
+			if *out, err = expand(*out, count, value, t.limit()); err != nil {
 				return err
 			}
 		}
@@ -297,15 +321,15 @@ func parseTable(kind string, body []byte, t *track) error {
 		}
 		fixed := binary.BigEndian.Uint32(rest)
 		if fixed != 0 {
-			t.sizes, err = expand(nil, binary.BigEndian.Uint32(rest[4:]), fixed)
+			t.sizes, err = expand(nil, binary.BigEndian.Uint32(rest[4:]), fixed, t.limit())
 			return err
 		}
 		n, rest, err := entries(rest[4:], 4)
 		if err != nil {
 			return err
 		}
-		if n > MaxSamples {
-			return fmt.Errorf("mp4: more than %d samples", MaxSamples)
+		if n > t.limit() {
+			return fmt.Errorf("mp4: more than %d samples", t.limit())
 		}
 		t.sizes = make([]uint32, n)
 		for i := range n {
@@ -324,8 +348,8 @@ func parseTable(kind string, body []byte, t *track) error {
 		if err != nil {
 			return err
 		}
-		if n > MaxSamples {
-			return fmt.Errorf("mp4: more than %d chunks", MaxSamples)
+		if n > t.limit() {
+			return fmt.Errorf("mp4: more than %d chunks", t.limit())
 		}
 		t.chunkOffsets = make([]uint64, n)
 		for i := range n {
@@ -344,8 +368,8 @@ func parseTable(kind string, body []byte, t *track) error {
 		if err != nil {
 			return err
 		}
-		if n > MaxSamples {
-			return fmt.Errorf("mp4: more than %d chunk runs", MaxSamples)
+		if n > t.limit() {
+			return fmt.Errorf("mp4: more than %d chunk runs", t.limit())
 		}
 		t.chunkRuns = make([]chunkRun, n)
 		for i := range n {
@@ -360,8 +384,8 @@ func parseTable(kind string, body []byte, t *track) error {
 		if err != nil {
 			return err
 		}
-		if n > MaxSamples {
-			return fmt.Errorf("mp4: more than %d keyframes", MaxSamples)
+		if n > t.limit() {
+			return fmt.Errorf("mp4: more than %d keyframes", t.limit())
 		}
 		t.haveSSS = true
 		t.keyframes = make([]uint32, n)
@@ -389,37 +413,12 @@ func (t *track) file(data []byte) (*File, error) {
 	}
 	file := &File{Width: t.width, Height: t.height, Config: t.config, Samples: make([]Sample, 0, n)}
 
-	// Samples lie in chunks, which stsc says how many each holds.
-	if len(t.chunkRuns) == 0 || t.chunkRuns[0].first != 1 {
-		return nil, fmt.Errorf("mp4: bad stsc")
+	samples, err := t.samples(data)
+	if err != nil {
+		return nil, err
 	}
-	sample := 0
-	for i, run := range t.chunkRuns {
-		last := uint32(len(t.chunkOffsets))
-		if i+1 < len(t.chunkRuns) {
-			last = t.chunkRuns[i+1].first - 1
-		}
-		if run.first == 0 || last < run.first-1 || last > uint32(len(t.chunkOffsets)) || run.samples == 0 {
-			return nil, fmt.Errorf("mp4: bad stsc entry %d", i)
-		}
-		for chunk := run.first; chunk <= last && sample < n; chunk++ {
-			offset := t.chunkOffsets[chunk-1]
-			for range run.samples {
-				if sample >= n {
-					break
-				}
-				size := uint64(t.sizes[sample])
-				if offset > uint64(len(data)) || size > uint64(len(data))-offset {
-					return nil, fmt.Errorf("mp4: sample %d lies outside the file", sample)
-				}
-				file.Samples = append(file.Samples, Sample{Data: data[offset : offset+size], Keyframe: !t.haveSSS})
-				offset += size
-				sample++
-			}
-		}
-	}
-	if sample < n {
-		return nil, fmt.Errorf("mp4: chunks hold %d of %d samples", sample, n)
+	for _, b := range samples {
+		file.Samples = append(file.Samples, Sample{Data: b, Keyframe: !t.haveSSS})
 	}
 	for _, k := range t.keyframes {
 		if k >= 1 && int(k) <= n {
@@ -457,4 +456,313 @@ func (t *track) file(data []byte) (*File, error) {
 		return nil, fmt.Errorf("mp4: no duration")
 	}
 	return file, nil
+}
+
+// Unit is where a sample lies in the file.
+type Unit struct {
+	Offset int64
+	Size   uint32
+}
+
+// units lays the samples of t out over a file of size bytes: they lie in
+// chunks, which stsc says how many each holds.
+func (t *track) units(size int64) ([]Unit, error) {
+	n := len(t.sizes)
+	if len(t.chunkRuns) == 0 || t.chunkRuns[0].first != 1 {
+		return nil, fmt.Errorf("mp4: bad stsc")
+	}
+	out := make([]Unit, 0, n)
+	for i, run := range t.chunkRuns {
+		last := uint32(len(t.chunkOffsets))
+		if i+1 < len(t.chunkRuns) {
+			last = t.chunkRuns[i+1].first - 1
+		}
+		if run.first == 0 || last < run.first-1 || last > uint32(len(t.chunkOffsets)) || run.samples == 0 {
+			return nil, fmt.Errorf("mp4: bad stsc entry %d", i)
+		}
+		for chunk := run.first; chunk <= last && len(out) < n; chunk++ {
+			offset := t.chunkOffsets[chunk-1]
+			for range run.samples {
+				if len(out) >= n {
+					break
+				}
+				length := uint64(t.sizes[len(out)])
+				if offset > uint64(size) || length > uint64(size)-offset {
+					return nil, fmt.Errorf("mp4: sample %d lies outside the file", len(out))
+				}
+				out = append(out, Unit{Offset: int64(offset), Size: uint32(length)})
+				offset += length
+			}
+		}
+	}
+	if len(out) < n {
+		return nil, fmt.Errorf("mp4: chunks hold %d of %d samples", len(out), n)
+	}
+	return out, nil
+}
+
+// samples lays the samples of t out over data.
+func (t *track) samples(data []byte) ([][]byte, error) {
+	units, err := t.units(int64(len(data)))
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]byte, len(units))
+	for i, u := range units {
+		out[i] = data[u.Offset : u.Offset+int64(u.Size)]
+	}
+	return out, nil
+}
+
+// ErrNoAudio is returned for an MP4 file without an AAC sound track.
+var ErrNoAudio = errors.New("mp4: no AAC sound track")
+
+// Audio is the AAC sound track of an MP4 (M4A) file, read from where the
+// file is, as it plays: the file need not be all there.
+type Audio struct {
+	// Config is the AudioSpecificConfig of the decoder, from esds.
+	Config []byte
+	// Channels and Rate are what the sample entry states; the decoder
+	// tells what it puts out, which SBR can double.
+	Channels int
+	Rate     uint32
+	// Units are where the access units lie, in order; Starts[i] is where
+	// unit i starts, in Timescale units from the first, and Starts has one
+	// more entry, the end.
+	Units     []Unit
+	Starts    []int64
+	Timescale uint32
+	file      io.ReaderAt
+}
+
+// Unit reads access unit i into buf, grown as needed.
+func (a *Audio) Unit(i int, buf []byte) ([]byte, error) {
+	u := a.Units[i]
+	if cap(buf) < int(u.Size) {
+		buf = make([]byte, u.Size)
+	}
+	buf = buf[:u.Size]
+	if _, err := a.file.ReadAt(buf, u.Offset); err != nil && !(errors.Is(err, io.EOF) && u.Size == 0) {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// Duration is how long the track plays.
+func (a *Audio) Duration() time.Duration {
+	return time.Duration(float64(a.Starts[len(a.Starts)-1]) / float64(a.Timescale) * float64(time.Second))
+}
+
+// maxMoov bounds the movie box read into memory: the tables of a day of
+// sound fit.
+const maxMoov = 64 << 20
+
+// DemuxAudio parses data and returns its first AAC sound track.
+func DemuxAudio(data []byte) (*Audio, error) {
+	return DemuxAudioAt(bytes.NewReader(data), int64(len(data)))
+}
+
+// DemuxAudioAt parses the file of size bytes that r reads, and returns its
+// first AAC sound track. Of the file it reads the box headers and the
+// movie box, where it is, the start or the end.
+func DemuxAudioAt(r io.ReaderAt, size int64) (*Audio, error) {
+	var moov []byte
+	sawFtyp := false
+	for at := int64(0); at < size; {
+		var h [16]byte
+		n, err := r.ReadAt(h[:min(16, size-at)], at)
+		if n < 8 {
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, fmt.Errorf("mp4: box header: %w", err)
+		}
+		length, header, kind := int64(binary.BigEndian.Uint32(h[:])), int64(8), string(h[4:8])
+		switch length {
+		case 0:
+			length = size - at
+		case 1:
+			if n < 16 {
+				return nil, fmt.Errorf("mp4: truncated %q header", kind)
+			}
+			length, header = int64(binary.BigEndian.Uint64(h[8:])), 16
+		}
+		if length < header || length > size-at {
+			if !sawFtyp {
+				return nil, ErrNotMP4
+			}
+			return nil, fmt.Errorf("mp4: %q box of %d bytes in %d", kind, length, size-at)
+		}
+		switch kind {
+		case "ftyp":
+			sawFtyp = true
+		case "moov":
+			if length-header > maxMoov {
+				return nil, fmt.Errorf("mp4: movie box of %d bytes", length-header)
+			}
+			moov = make([]byte, length-header)
+			if _, err := r.ReadAt(moov, at+header); err != nil && !errors.Is(err, io.EOF) {
+				return nil, err
+			}
+		}
+		if moov != nil {
+			break
+		}
+		at += length
+	}
+	if !sawFtyp && moov == nil {
+		return nil, ErrNotMP4
+	}
+	var found *track
+	err := walk(moov, func(kind string, body []byte) error {
+		if kind != "trak" || found != nil {
+			return nil
+		}
+		t := &track{}
+		if err := parseTrak(body, t); err != nil {
+			return err
+		}
+		if t.audio && t.codec == "mp4a" && t.config != nil {
+			found = t
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, ErrNoAudio
+	}
+	t := found
+	if len(t.sizes) == 0 || t.timescale == 0 || len(t.deltas) < len(t.sizes) {
+		return nil, fmt.Errorf("mp4: bad sound track")
+	}
+	units, err := t.units(size)
+	if err != nil {
+		return nil, err
+	}
+	a := &Audio{Config: t.config, Channels: t.channels, Rate: t.rate, Units: units, Starts: make([]int64, len(units)+1), Timescale: t.timescale, file: r}
+	for i := range units {
+		a.Starts[i+1] = a.Starts[i] + int64(t.deltas[i])
+	}
+	if a.Starts[len(units)] <= 0 {
+		return nil, fmt.Errorf("mp4: no duration")
+	}
+	return a, nil
+}
+
+// parseMP4A reads an AudioSampleEntry, and the AudioSpecificConfig of the
+// esds box in it.
+func parseMP4A(body []byte, t *track) error {
+	// 8 bytes of SampleEntry, then version, revision, vendor, channels,
+	// sample size, compression id, packet size and the rate, 16.16; version
+	// 1 of QuickTime's adds 16 bytes, version 2 36.
+	if len(body) < 28 {
+		return fmt.Errorf("mp4: truncated mp4a entry")
+	}
+	t.channels = int(binary.BigEndian.Uint16(body[16:]))
+	t.rate = binary.BigEndian.Uint32(body[24:]) >> 16
+	at := 28
+	switch binary.BigEndian.Uint16(body[8:]) {
+	case 1:
+		at += 16
+	case 2:
+		at += 36
+	}
+	if len(body) < at {
+		return fmt.Errorf("mp4: truncated mp4a entry")
+	}
+	return walk(body[at:], func(kind string, body []byte) error {
+		if kind != "esds" || t.config != nil {
+			return nil
+		}
+		_, rest, err := fullBox(body)
+		if err != nil {
+			return err
+		}
+		t.config, err = audioConfig(rest)
+		if errors.Is(err, ErrNoAudio) {
+			// Not AAC: the track is left out.
+			return nil
+		}
+		return err
+	})
+}
+
+// audioConfig finds the DecoderSpecificInfo, the AudioSpecificConfig, in
+// the descriptors of an esds box (ISO/IEC 14496-1): ES_Descriptor (3)
+// holds DecoderConfigDescriptor (4), which holds it (5).
+func audioConfig(data []byte) ([]byte, error) {
+	for len(data) > 0 {
+		tag, body, rest, err := descriptor(data)
+		if err != nil {
+			return nil, err
+		}
+		switch tag {
+		case 3:
+			// ES_ID, then flags that tell what optional fields follow.
+			if len(body) < 3 {
+				return nil, fmt.Errorf("mp4: truncated ES descriptor")
+			}
+			flags, at := body[2], 3
+			if flags&0x80 != 0 {
+				at += 2
+			}
+			if flags&0x40 != 0 {
+				if len(body) <= at {
+					return nil, fmt.Errorf("mp4: truncated ES descriptor")
+				}
+				at += 1 + int(body[at])
+			}
+			if flags&0x20 != 0 {
+				at += 2
+			}
+			if len(body) < at {
+				return nil, fmt.Errorf("mp4: truncated ES descriptor")
+			}
+			return audioConfig(body[at:])
+		case 4:
+			// Object type, stream type, buffer size and bit rates: 13 bytes.
+			// 0x40 is MPEG-4 audio, 0x66 to 0x68 MPEG-2 AAC.
+			if len(body) < 13 {
+				return nil, fmt.Errorf("mp4: truncated decoder config")
+			}
+			if body[0] != 0x40 && (body[0] < 0x66 || body[0] > 0x68) {
+				return nil, ErrNoAudio
+			}
+			return audioConfig(body[13:])
+		case 5:
+			if len(body) == 0 {
+				return nil, fmt.Errorf("mp4: empty AudioSpecificConfig")
+			}
+			return body, nil
+		}
+		data = rest
+	}
+	return nil, fmt.Errorf("mp4: no AudioSpecificConfig")
+}
+
+// descriptor reads one descriptor: its tag, body and what follows it. Its
+// size takes up to four bytes of seven bits each.
+func descriptor(data []byte) (tag byte, body, rest []byte, err error) {
+	if len(data) < 2 {
+		return 0, nil, nil, fmt.Errorf("mp4: truncated descriptor")
+	}
+	tag = data[0]
+	size, at := 0, 1
+	for range 4 {
+		if at >= len(data) {
+			return 0, nil, nil, fmt.Errorf("mp4: truncated descriptor")
+		}
+		b := data[at]
+		at++
+		size = size<<7 | int(b&0x7f)
+		if b&0x80 == 0 {
+			break
+		}
+	}
+	if size > len(data)-at {
+		return 0, nil, nil, fmt.Errorf("mp4: descriptor of %d bytes in %d", size, len(data)-at)
+	}
+	return tag, data[at : at+size], data[at+size:], nil
 }

@@ -12,9 +12,19 @@ import (
 
 func TestZZVideo(t *testing.T) {
 	ctx := context.Background()
+	// The module is not in this repository: KOMARUGRAM_AVCDEC names a
+	// build of it, as it does for the messenger.
+	path := os.Getenv("KOMARUGRAM_AVCDEC")
+	if path == "" {
+		t.Skip("set KOMARUGRAM_AVCDEC to an avcdec.wasm")
+	}
+	module, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	data, _ := os.ReadFile("../../assets/video.mp4")
 	start := time.Now()
-	rt, err := NewRuntime(ctx)
+	rt, err := NewRuntime(ctx, module)
 	if err != nil {
 		t.Fatal(err)
 	}

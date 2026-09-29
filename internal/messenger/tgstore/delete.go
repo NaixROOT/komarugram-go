@@ -27,17 +27,35 @@ func (s *Store) DeleteMessages(ctx context.Context, chat int64, ids []model.Mess
 	if peer.Kind == "channel" && !revoke {
 		return errors.New("channel messages can only be deleted for everyone")
 	}
-	var all []int
+	var all, kept []int
 	seen := map[int]bool{}
 	for _, id := range ids {
 		n := int(id)
 		if n <= 0 {
 			return errors.New("invalid message ID")
 		}
-		if !seen[n] {
-			all = append(all, n)
-			seen[n] = true
+		if seen[n] {
+			continue
 		}
+		seen[n] = true
+		if s.keptDeleted(ctx, chat, id) {
+			kept = append(kept, n)
+		} else {
+			all = append(all, n)
+		}
+	}
+	if len(kept) > 0 {
+		// Telegram deleted them already: they go from this computer.
+		scope := int64(0)
+		if peer.Kind == "channel" {
+			scope = chat
+		}
+		tops, err := s.deleteMessages(ctx, scope, kept)
+		if err != nil {
+			return err
+		}
+		s.replaceDeletedPreviews(ctx, tops)
+		s.changed()
 	}
 	for len(all) > 0 {
 		n := min(len(all), 100)
@@ -64,4 +82,15 @@ func (s *Store) DeleteMessages(ctx context.Context, chat int64, ids []model.Mess
 		all = all[n:]
 	}
 	return s.persistDialogs(ctx)
+}
+
+// keptDeleted reports whether message id of chat is one Telegram deleted
+// that the cache keeps.
+func (s *Store) keptDeleted(ctx context.Context, chat int64, id model.MessageID) bool {
+	cache := s.Cache()
+	if cache == nil {
+		return false
+	}
+	m, ok, err := cache.Message(ctx, chat, int(id))
+	return err == nil && ok && m.Deleted
 }

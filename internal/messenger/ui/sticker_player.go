@@ -13,16 +13,32 @@ import (
 	"komarugram/pkg/video"
 )
 
-type stickerPlayerSettings struct {
-	program *programSetting
-	radios  *radio.Radios[string]
-	chosen  func() string
-	choose  func(string)
+// decoderSettings are the internal players: one FFmpeg, and for video
+// stickers (WebM) and for GIFs and animated avatars (MP4) the choice between
+// it and a WASM sandbox; and for voice messages and music, the choice
+// between the WASM sandboxes and the external player.
+type decoderSettings struct {
+	program                     *programSetting
+	stickers, animations, audio *decoderChoice
 }
 
-func newStickerPlayerSettings() *stickerPlayerSettings {
-	s := &stickerPlayerSettings{}
-	s.program = &programSetting{
+// decoderChoice is the player of one kind of media.
+type decoderChoice struct {
+	// title and hint are localization keys; hint may be empty.
+	title, hint string
+	program     *programSetting
+	// options are the values to choose from, "ffmpeg" and "wasm" unless set,
+	// and fallback the one that holds when none was chosen and FFmpeg's
+	// presence does not decide.
+	options  []string
+	fallback string
+	radios   *radio.Radios[string]
+	chosen   func() string
+	choose   func(string)
+}
+
+func newDecoderSettings() *decoderSettings {
+	program := &programSetting{
 		title:  "FFmpeg",
 		custom: func() string { return "" }, save: func(string) {},
 		check: video.CheckFFmpeg,
@@ -35,32 +51,67 @@ func newStickerPlayerSettings() *stickerPlayerSettings {
 			return path, about, err
 		},
 	}
-	s.radios = radio.NewRadios([]string{"ffmpeg", "wasm"}, "wasm", func(value string) {
-		if s.choose != nil {
-			s.choose(value)
-		}
-	})
-	return s
+	return &decoderSettings{
+		program:    program,
+		stickers:   newDecoderChoice(program, "sticker_player.title", ""),
+		animations: newDecoderChoice(program, "sticker_player.mp4_title", "sticker_player.mp4_hint"),
+		audio:      newDecoderChoice(program, "sticker_player.audio_title", "sticker_player.audio_hint", "external", "wasm"),
+	}
 }
 
-func (s *stickerPlayerSettings) current() string {
-	if s.chosen != nil && s.chosen() != "" {
-		return s.chosen()
+// newDecoderChoice is a choice among options, FFmpeg and the WASM sandbox
+// when none are given.
+func newDecoderChoice(program *programSetting, title, hint string, options ...string) *decoderChoice {
+	c := &decoderChoice{title: title, hint: hint, program: program, options: options}
+	if len(options) == 0 {
+		c.options = []string{"ffmpeg", "wasm"}
+	} else {
+		c.fallback = options[0]
 	}
-	if video.ResolveFFmpeg(s.program.custom()) != "" {
+	c.radios = radio.NewRadios(c.options, c.options[len(c.options)-1], func(value string) {
+		if c.choose != nil {
+			c.choose(value)
+		}
+	})
+	return c
+}
+
+func (c *decoderChoice) current() string {
+	if c.chosen != nil && c.chosen() != "" {
+		return c.chosen()
+	}
+	if c.fallback != "" {
+		return c.fallback
+	}
+	if video.ResolveFFmpeg(c.program.custom()) != "" {
 		return "ffmpeg"
 	}
 	return "wasm"
 }
 
-func (s *stickerPlayerSettings) Update(gtx layout.Context) {
+func (s *decoderSettings) Update(gtx layout.Context) {
 	s.program.Update(gtx)
-	s.radios.SetValue(s.current())
-	s.radios.Update(gtx)
+	for _, c := range []*decoderChoice{s.stickers, s.animations, s.audio} {
+		c.radios.SetValue(c.current())
+		c.radios.Update(gtx)
+	}
 }
 
-func (s *stickerPlayerSettings) Layout(gtx layout.Context, l localization.Catalog) layout.Dimensions {
-	return settingsChoiceCard(gtx, l.T("sticker_player.title"), "", func(gtx layout.Context) layout.Dimensions {
-		return s.radios.Layout(gtx, radio.LeadingKind, map[string]string{"ffmpeg": "FFmpeg", "wasm": l.T("sticker_player.wasm")})
+func (c *decoderChoice) Layout(gtx layout.Context, l localization.Catalog) layout.Dimensions {
+	labels := make(map[string]string, len(c.options))
+	for _, option := range c.options {
+		switch option {
+		case "ffmpeg":
+			labels[option] = "FFmpeg"
+		default:
+			labels[option] = l.T("sticker_player." + option)
+		}
+	}
+	hint := ""
+	if c.hint != "" {
+		hint = l.T(c.hint)
+	}
+	return settingsChoiceCard(gtx, l.T(c.title), hint, func(gtx layout.Context) layout.Dimensions {
+		return c.radios.Layout(gtx, radio.LeadingKind, labels)
 	})
 }

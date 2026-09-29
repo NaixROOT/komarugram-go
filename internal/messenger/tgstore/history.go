@@ -111,6 +111,10 @@ type conversation struct {
 	// threadIDs those ids by post.
 	threads   map[int64]*thread
 	threadIDs map[model.MessageKey]int64
+	// lookups are single messages found apart from their history's pages.
+	lookups map[model.MessageKey]*lookup
+	// pinned are the chats' pinned messages.
+	pinned map[int64]*pinned
 }
 type viewSave struct {
 	view    model.Viewport
@@ -233,9 +237,12 @@ func (s *Store) rememberPeers(users []tg.UserClass, chats []tg.ChatClass) {
 		if u, ok := u.(*tg.User); ok {
 			key := peerID(&tg.PeerUser{UserID: u.ID})
 			if old, ok := c.peers[key]; !u.Min || !ok {
-				c.peers[key] = peerRecord{ID: u.ID, Hash: u.AccessHash, Kind: "user", Name: userName(u), Rights: peerRights{Bot: u.Bot, Self: u.Self, Muted: u.Deleted}}
+				c.peers[key] = peerRecord{ID: u.ID, Hash: u.AccessHash, Kind: "user", Name: userName(u), Rights: peerRights{Bot: u.Bot, Self: u.Self, Muted: u.Deleted}, Username: userUsername(u)}
 			} else {
 				old.Name = userName(u)
+				if name := userUsername(u); name != "" {
+					old.Username = name
+				}
 				c.peers[key] = old
 			}
 			p := c.peers[key]
@@ -578,6 +585,12 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 	if e == nil {
 		e = s.persistDialogs(ctx)
 	}
+	// Telegram's page lacks the messages kept deleted; the cache has them.
+	for _, m := range cached {
+		if m.Deleted {
+			msgs = append(msgs, m)
+		}
+	}
 	s.finishPageAt(epoch, chat, dir, msgs, len(modified.GetMessages()) >= req.Limit, e, start)
 }
 func (s *Store) finishPage(chat int64, dir int, msgs []model.Message, more bool, err error, generation ...uint64) {
@@ -608,7 +621,10 @@ func (s *Store) finishPageAt(epoch uint64, chat int64, dir int, msgs []model.Mes
 				merged[m.Key.MessageID] = m
 			}
 			for _, m := range msgs {
-				if !c.deleted[m.Key] && !(m.Key.ChatID > -1000000000000 && c.globalDeleted[int(m.Key.MessageID)]) && (len(generation) == 0 || c.touched[m.Key] <= generation[0]) {
+				gone := c.deleted[m.Key] || m.Key.ChatID > -1000000000000 && c.globalDeleted[int(m.Key.MessageID)]
+				// A message kept deleted stays, as its tombstone keeps
+				// Telegram's version of it out.
+				if (!gone || m.Deleted) && (len(generation) == 0 || c.touched[m.Key] <= generation[0]) {
 					merged[m.Key.MessageID] = m
 				}
 			}
@@ -784,6 +800,12 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			chat = peerID(&tg.PeerChannel{ChannelID: u.ChannelID})
 		case *tg.UpdateMessageReactions:
 			s.applyReactions(peerID(u.Peer), u.MsgID, u.Reactions)
+		case *tg.UpdatePeerBlocked:
+			s.applyBlocked(u)
+		case *tg.UpdatePinnedMessages:
+			s.applyPinned(ctx, peerID(u.Peer), u.Messages, u.Pinned)
+		case *tg.UpdatePinnedChannelMessages:
+			s.applyPinned(ctx, peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.Messages, u.Pinned)
 		case *tg.UpdateChannelMessageViews:
 			s.changeMessage(peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.ID, func(m *model.Message) { m.Views = max(m.Views, u.Views) })
 		}
@@ -803,7 +825,7 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			}
 		}
 		if len(ids) > 0 {
-			tops, e := s.deleteMessages(ctx, chat, ids)
+			tops, e := s.deleteFromUpdate(ctx, chat, ids)
 			if e != nil {
 				return e
 			}
@@ -818,6 +840,10 @@ func (s *Store) mergeUpdate(m model.Message) {
 	c.mu.Lock()
 	isNew := int(m.Key.MessageID) > c.top[m.Key.ChatID]
 	c.top[m.Key.ChatID] = max(c.top[m.Key.ChatID], int(m.Key.MessageID))
+	if l := c.lookups[m.Key]; l != nil {
+		// An edit of a message looked up, as the one a reply quotes.
+		c.lookups[m.Key] = &lookup{msg: m, state: model.LookupFound}
+	}
 	if h := c.histories[m.Key.ChatID]; h != nil {
 		h.Revision++
 		found := false
@@ -904,6 +930,11 @@ func (s *Store) deleteMessages(ctx context.Context, chat int64, ids []int) (map[
 			c.deleted[model.MessageKey{AccountID: c.account, ChatID: chat, MessageID: model.MessageID(id)}] = true
 		}
 	}
+	for key, l := range c.lookups {
+		if removed[int(key.MessageID)] && (key.ChatID == chat || chat == 0 && key.ChatID > -1000000000000) {
+			l.state, l.msg = model.LookupGone, model.Message{}
+		}
+	}
 	threads := c.threadsOf(chat)
 	for id, h := range c.histories {
 		if id != chat && (chat != 0 || id <= -1000000000000) && !slices.Contains(threads, id) {
@@ -939,15 +970,23 @@ func (s *Store) replaceDeletedPreviews(ctx context.Context, tops map[int64]int) 
 		c.mu.Lock()
 		var last *model.Message
 		if h := c.histories[chat]; h != nil && !h.HasNewer && len(h.Messages) > 0 {
-			m := h.Messages[len(h.Messages)-1]
-			last = &m
+			// A message kept deleted is not the chat's last one.
+			for i := len(h.Messages) - 1; i >= 0 && last == nil; i-- {
+				if m := h.Messages[i]; !m.Deleted {
+					last = &m
+				}
+			}
 		}
 		cache, api, peer, start := c.cache, c.api, c.peers[chat], c.generation
 		c.mu.Unlock()
 		exact := last != nil
 		if last == nil && cache != nil {
-			if ms, e := cache.Page(ctx, chat, top, -1, 1); e == nil && len(ms) > 0 {
-				last = &ms[0]
+			if ms, e := cache.Page(ctx, chat, top, -1, 20); e == nil {
+				for i := len(ms) - 1; i >= 0 && last == nil; i-- {
+					if !ms[i].Deleted {
+						last = &ms[i]
+					}
+				}
 			}
 		}
 		top = s.replacePreview(chat, top, last)
@@ -1026,6 +1065,9 @@ func (s *Store) replacePreview(chat int64, top int, m *model.Message) int {
 // from Telegram show it.
 func setPreview(chat *model.Chat, m model.Message) {
 	text := strings.Join(strings.Fields(m.Text), " ")
+	if m.Kind == model.MessageService && m.Service != nil {
+		text = serviceSummary(m, *chat)
+	}
 	if kind := messageKindName(m); kind != "" {
 		if text == "" {
 			text = kind
@@ -1124,11 +1166,12 @@ func (s *Store) reconcile(ctx context.Context, chat int64, raw []tg.MessageClass
 	}
 	cache := c.cache
 	c.mu.Unlock()
-	ids, e := cache.Reconcile(ctx, chat, low, high, keep)
+	ids, kept, e := cache.Reconcile(ctx, chat, low, high, keep)
 	c.mu.Lock()
 	if e != nil {
 		return e
 	}
+	s.showKept(kept)
 	removed := map[int]bool{}
 	for _, id := range ids {
 		removed[id] = true

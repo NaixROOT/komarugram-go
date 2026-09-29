@@ -53,6 +53,12 @@ func (s *Store) MessageRights(chat int64, msgs []model.Message) model.MessageRig
 	channel := peer.Kind == "channel"
 	r.Everyone = channel
 	for _, m := range msgs {
+		if m.Deleted {
+			// Kept after Telegram deleted it: it is only this computer's,
+			// which deletes it alone.
+			r.Forward = false
+			continue
+		}
 		service := m.Kind == model.MessageService
 		if service || m.NoForwards {
 			r.Forward = false
@@ -90,6 +96,26 @@ func (s *Store) CanSend(chat int64) bool {
 		muted = peer.Rights.Banned || peer.Rights.Left && peer.Rights.JoinToSend
 	}
 	return known && !muted && s.Freeze() == (model.Freeze{})
+}
+
+// userUsername is a user's username, or its first active one.
+func userUsername(u *tg.User) string {
+	if u.Username != "" {
+		return u.Username
+	}
+	for _, name := range u.Usernames {
+		if name.Active {
+			return name.Username
+		}
+	}
+	return ""
+}
+
+// Username implements model.UsernameSource.
+func (s *Store) Username(chat int64) string {
+	s.history.mu.Lock()
+	defer s.history.mu.Unlock()
+	return s.history.peers[chat].Username
 }
 
 // channelUsername is the username of a public channel or supergroup: its

@@ -36,7 +36,7 @@ type reactionStrip struct {
 
 // canReact reports whether the account may react to m in the open chat.
 func (p *chatPage) canReact(m model.Message) bool {
-	return m.Kind != model.MessageService && m.Key.MessageID > 0 && !p.frozen.Frozen()
+	return m.Kind != model.MessageService && m.Key.MessageID > 0 && !m.Deleted && !p.frozen.Frozen()
 }
 
 // menuReactions are the reactions the menu of m offers, with the chosen ones
@@ -185,4 +185,18 @@ func (s *reactionStrip) layoutExpand(gtx layout.Context, at image.Point, cell in
 			})
 		})
 	})
+}
+
+// quickReact puts the account's default reaction on m, or takes it back,
+// as a double click does in Telegram Desktop.
+func (p *chatPage) quickReact(m model.Message) {
+	quick, ok := p.source.(model.QuickReactor)
+	reactor, canToggle := p.source.(model.Reactor)
+	if !ok || !canToggle || !p.canReact(m) {
+		return
+	}
+	if r, ok := quick.QuickReaction(p.chat); ok {
+		reactor.ToggleReaction(m, r, p.reportMedia)
+		p.invalidate()
+	}
 }

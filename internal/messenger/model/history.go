@@ -55,6 +55,9 @@ type MessageMedia struct {
 	Duration   time.Duration
 	Performer  string
 	Title      string
+	// Waveform is a voice message's loudness in 5-bit bars, as Telegram
+	// packs it (see voice.Bars); nil when the sender gave none.
+	Waveform []byte `json:",omitempty"`
 	// Variants are smaller renditions of the same picture that can be
 	// downloaded on their own, smallest first. The media itself is the
 	// largest. Messages cached before variants existed have none.
@@ -89,10 +92,13 @@ func (m *MessageMedia) Variant(w, h int) *MessageMedia {
 // ContentRevision must change when anything affecting layout changes (an edit,
 // media metadata becoming available, reply preview update, and so on).
 type Message struct {
-	WebPage          *WebPreview `json:",omitempty"`
-	Gift             *Gift       `json:",omitempty"`
-	Poll             *Poll       `json:",omitempty"`
-	Attachments      []Message   `json:"-"`
+	WebPage *WebPreview `json:",omitempty"`
+	Gift    *Gift       `json:",omitempty"`
+	Poll    *Poll       `json:",omitempty"`
+	// Service is what a service message tells. Messages cached before
+	// it existed have none, and show as a service message only.
+	Service          *ServiceAction `json:",omitempty"`
+	Attachments      []Message      `json:"-"`
 	Key              MessageKey
 	SenderID         int64
 	Kind             MessageKind
@@ -126,6 +132,10 @@ type Message struct {
 	CommentsOpen bool       `json:",omitempty"`
 	Commenters   []int64    `json:",omitempty"`
 	Reactions    []Reaction `json:",omitempty"`
+	// ReactionsListed is set when the account may see who reacted.
+	ReactionsListed bool `json:",omitempty"`
+	// Deleted marks a message Telegram deleted that the cache kept.
+	Deleted bool `json:",omitempty"`
 	// ReplyToTopID is the root of the thread a reply is in, when it
 	// replies to another reply there.
 	ReplyToTopID MessageID `json:",omitempty"`
@@ -302,4 +312,36 @@ type ConversationStore interface {
 	SaveView(Viewport, []MessageLayout)
 	Layouts(int64, RenderEnvironment) []MessageLayout
 	Media(context.Context, Message) ([]byte, error)
+}
+
+// LookupState tells how far finding a single message has gone.
+type LookupState uint8
+
+const (
+	// LookupLoading: the message is on its way.
+	LookupLoading LookupState = iota
+	// LookupFound: the message is at hand.
+	LookupFound
+	// LookupGone: Telegram has no such message, as a deleted one.
+	LookupGone
+)
+
+// MessageLookup finds single messages that a chat's loaded history does
+// not hold, such as the one a reply quotes or a pin names. It never
+// blocks: the first ask starts the search, and the store tells of its end
+// as of any change.
+type MessageLookup interface {
+	LookupMessage(chat int64, id MessageID) (Message, LookupState)
+}
+
+// PinnedSource knows the pinned messages of chats.
+type PinnedSource interface {
+	// PinnedMessages returns the ids of chat's pinned messages, oldest
+	// first, as far as they are known, and none while the account hid
+	// them. The first ask starts loading them; the store tells of changes
+	// as of any other.
+	PinnedMessages(chat int64) []MessageID
+	// HidePinned hides chat's pinned messages until another one is pinned,
+	// as Telegram Desktop does for a member who may not unpin them.
+	HidePinned(chat int64)
 }

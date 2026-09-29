@@ -37,6 +37,8 @@ const (
 
 // chatList is the list of chats of a section.
 type chatList struct {
+	// toast tells, at the bottom of the list, what happened in it.
+	toast  toast
 	avatar avatarLayout
 	// badges draw the marks around a chat's name: see App.badges.
 	badges badgesLayout
@@ -201,6 +203,10 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 		l.panel.tabs.Slide(gtx, area, func(gtx layout.Context) layout.Dimensions {
 			return l.layoutResults(gtx, selected, catalog)
 		})
+		if text := l.panel.failure(catalog); text != "" {
+			l.toast.Show(text)
+		}
+		l.toast.Layout(gtx, area)
 		return layout.Dimensions{Size: size}
 	}
 	l.items = l.items[:0]
@@ -224,6 +230,7 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 			return l.layoutRow(gtx, c, c.ID == selected, narrow, now, catalog)
 		})
 	})
+	l.toast.Layout(gtx, image.Rect(0, headerHeight, size.X, size.Y))
 	return layout.Dimensions{Size: size}
 }
 

@@ -39,6 +39,8 @@ type giftDialog struct {
 	retry   surface
 	terms   widget.Clickable
 	modal   modal
+	// told is the failure to load the gift told in the toast last.
+	told error
 }
 
 // newGiftDialog opens the dialog of the gift of m.
@@ -312,8 +314,12 @@ func (p *chatInfo) giftDetails(gtx layout.Context, d *giftDialog, l localization
 		}), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if m.Media != nil {
 				st := p.renderer.media.StatusFit(m, animate, image.Pt(gtx.Dp(224), gtx.Dp(224)), false)
+				if st.Err != nil && st.Err != d.told {
+					d.modal.Toast(mediaErrorText(st.Err))
+				}
+				d.told = st.Err
 				if st.Err != nil {
-					return textButton(gtx, &d.retry, l.T("history.retry")+" · "+mediaErrorText(st.Err))
+					return textButton(gtx, &d.retry, l.T("history.retry"))
 				}
 			}
 			return layout.Dimensions{}

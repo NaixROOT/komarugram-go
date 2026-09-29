@@ -46,6 +46,16 @@ func TestRenderStickerSet(t *testing.T) {
 			p.media.EndFrame()
 			p.images.EndFrame()
 		})
+		// What an action tells, at the dialog's bottom.
+		p.stickers.modal.Toast(localization.For(lang).Format("stickers.saved", map[string]string{"path": "/home/user/Cats.zip"}))
+		renderFrames(t, image.Pt(700, 620), filepath.Join(dir, lang+"-stickers-toast.png"), func(gtx layout.Context) {
+			p.images.BeginFrame()
+			p.media.BeginFrame()
+			p.stickers.layout(gtx, p, localization.For(lang))
+			p.media.EndFrame()
+			p.images.EndFrame()
+		})
+		p.stickers.modal.toast.Hide()
 		p.stickers.menuOpen = true
 		renderFrames(t, image.Pt(700, 620), filepath.Join(dir, lang+"-stickers-menu.png"), func(gtx layout.Context) {
 			p.images.BeginFrame()

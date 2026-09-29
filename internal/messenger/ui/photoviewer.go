@@ -90,7 +90,12 @@ type photoViewer struct {
 	exhausted [2]bool
 
 	backdrop, picture, prev, next, close, detach widget.Clickable
-	zoom                                         viewerZoom
+	// save and copy keep the photo on screen; kept brings what they gave,
+	// and toast tells it, over the strip of photos.
+	save, copy widget.Clickable
+	kept       chan viewerFile
+	toast      toast
+	zoom       viewerZoom
 	// popout, when set, is what the button beside ✕ calls to show the
 	// photos in a window of their own; the viewer then closes.
 	popout func(chat int64, current model.Message, known []model.Message)
@@ -312,6 +317,15 @@ func (v *photoViewer) Layout(gtx layout.Context, l localization.Catalog, animate
 		v.Close()
 		return
 	}
+	v.updateKept(gtx)
+	if cur := items[indexOf(items, v.current)]; canKeep(cur) {
+		if v.save.Clicked(gtx) {
+			v.keepPhoto(cur, false, l)
+		}
+		if v.copy.Clicked(gtx) {
+			v.keepPhoto(cur, true, l)
+		}
+	}
 	if v.detach.Clicked(gtx) && v.popout != nil {
 		i := indexOf(items, v.current)
 		v.popout(v.chat, items[i], items)
@@ -360,6 +374,7 @@ func (v *photoViewer) Layout(gtx layout.Context, l localization.Catalog, animate
 	v.zoomArea(gtx, view, photo)
 	v.layoutBar(gtx, items, i, l)
 	v.layoutStrip(gtx, items, i, image.Rect(0, size.Y-strip, size.X, size.Y))
+	v.toast.Layout(gtx, image.Rect(0, bar, size.X, size.Y-strip))
 	// Decode the neighbours ahead, so that the arrows switch at once.
 	for _, j := range []int{i - 1, i + 1} {
 		if j >= 0 && j < len(items) {
@@ -385,6 +400,12 @@ func (v *photoViewer) keyEvents(gtx layout.Context, items []model.Message, i int
 			key.Filter{Focus: &v.keys, Name: "+", Required: key.ModShortcut, Optional: key.ModShift},
 			key.Filter{Focus: &v.keys, Name: "-", Required: key.ModShortcut},
 			key.Filter{Focus: &v.keys, Name: "0", Required: key.ModShortcut},
+			// Copy and Save, as Telegram Desktop's viewer: also on a
+			// Russian layout.
+			key.Filter{Focus: &v.keys, Name: "C", Required: key.ModShortcut},
+			key.Filter{Focus: &v.keys, Name: "С", Required: key.ModShortcut},
+			key.Filter{Focus: &v.keys, Name: "S", Required: key.ModShortcut},
+			key.Filter{Focus: &v.keys, Name: "Ы", Required: key.ModShortcut},
 		)
 		if !ok {
 			return
@@ -416,6 +437,10 @@ func (v *photoViewer) keyEvents(gtx layout.Context, items []model.Message, i int
 			}
 		case "0":
 			v.zoom.unzoom(fitScale(photo, stage))
+		case "C", "С":
+			v.copy.Click()
+		case "S", "Ы":
+			v.save.Click()
 		}
 		i = indexOf(items, v.current)
 	}
@@ -598,6 +623,22 @@ func (v *photoViewer) layoutBar(gtx layout.Context, items []model.Message, i int
 							return label(gtx, txt, token.TypestyleLabelMedium, dim, 1)
 						}),
 					)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !canKeep(m) {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return viewerButton(gtx, &v.copy, iconCopy, d)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !canKeep(m) {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return viewerButton(gtx, &v.save, iconDownload, d)
 				})
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

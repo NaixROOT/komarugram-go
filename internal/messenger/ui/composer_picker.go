@@ -167,6 +167,9 @@ func (c *messageComposer) chooseIn(gtx layout.Context, tab model.PickerTab, item
 		d.pending = nil
 		d.err = nil
 		gtx.Execute(key.FocusCmd{Tag: &d.editor})
+	} else if c.asksConfirmation(tab) {
+		c.sendConfirm.ask(tab, item)
+		c.pickerOpen = false
 	} else {
 		c.submit(c.chat, model.OutgoingMessage{Item: &item})
 		c.pickerOpen = false
@@ -244,7 +247,7 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 							c.request(l, false)
 						}
 					}
-					return textButton(gtx, &c.retry, mediaErrorText(c.pickerErr)+" · "+l.T("composer.retry"))
+					return textButton(gtx, &c.retry, l.T("composer.retry"))
 				}
 				if c.page.Next != "" {
 					if c.more.Clicked(gtx) && c.source != nil {
@@ -410,6 +413,12 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 		dragHorizontalStrip(gtx, size.X, &c.stripDrag, &c.strip, c.invalidate)
 		return dims
 	})
+	if c.pickerErr != nil && c.pickerErr != c.pickerTold {
+		c.pickerToast.Show(mediaErrorText(c.pickerErr))
+	}
+	c.pickerTold = c.pickerErr
+	// Over the end of the list, above the footer of packs.
+	c.pickerToast.Layout(gtx, image.Rect(0, 0, size.X, size.Y-footer))
 	return layout.Dimensions{Size: size}
 }
 

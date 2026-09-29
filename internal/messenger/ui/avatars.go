@@ -56,7 +56,7 @@ func (a *App) layoutAvatar(gtx layout.Context, id int64, kind model.ChatKind, ti
 		return avatar(gtx, id, kind, title, size)
 	}
 	bounds := image.Rectangle{Max: dims.Size}
-	defer clip.Ellipse(bounds).Push(gtx.Ops).Pop()
+	defer avatarShape(gtx, bounds.Max).Push(gtx.Ops).Pop()
 	gtx.Constraints = layout.Exact(dims.Size)
 	widget.Image{Src: a.images.Op(im), Fit: widget.Cover}.Layout(gtx)
 	return dims

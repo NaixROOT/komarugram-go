@@ -69,7 +69,9 @@ type entry struct {
 	cover bool
 }
 type Manager struct {
-	wasm                          bool
+	// wasm plays video stickers in the VP9 sandbox, and gifWASM GIFs and
+	// animated avatars in the H.264 one, even with an FFmpeg.
+	wasm, gifWASM                 bool
 	ffmpeg                        string
 	retainAnimations              time.Duration
 	byteLimit                     int64
@@ -90,9 +92,10 @@ type Manager struct {
 	lottie    codec[*lottie.Runtime]
 	vp9       codec[*vp9.Runtime]
 	avc       codec[*h264.Runtime]
-	// sandboxGIFs is set when no FFmpeg is found: GIFs then play in the
-	// H.264 sandbox, one at a time, on hover. ffmpegChecked is whether the
-	// search was made for the FFmpeg configured.
+	// sandboxGIFs is set when GIFs play in the H.264 sandbox, one at a
+	// time, on hover: when chosen, or when no FFmpeg is found.
+	// ffmpegChecked is whether the search was made for the FFmpeg
+	// configured.
 	sandboxGIFs, ffmpegChecked bool
 }
 
@@ -101,7 +104,7 @@ func New(source Source, changed func()) *Manager {
 	m := &Manager{ctx: ctx, cancel: cancel, source: source, changed: changed, limit: 24, imageSize: 1024, videoHeight: 384, byteLimit: 96 << 20, entries: map[string]*entry{}, cancelled: map[string]bool{}, sem: make(chan struct{}, 4)}
 	m.lottie.open = lottie.NewRuntime
 	m.vp9.open = vp9.NewRuntime
-	m.avc.open = h264.NewRuntime
+	m.avc.open = newAVCRuntime
 	return m
 }
 func (m *Manager) Frame(msg model.Message, animate bool) (image.Image, error) {
@@ -238,21 +241,24 @@ func (m *Manager) frame(msg model.Message, animate bool, want image.Point, cover
 func (m *Manager) BeginFrame() { m.generation++ }
 
 // ConfigureDecoders runs on the UI goroutine. New workers capture these settings.
-func (m *Manager) ConfigureDecoders(wasm bool, ffmpeg string) {
-	if m.wasm == wasm && m.ffmpeg == ffmpeg {
+// wasm and gifWASM choose the sandboxes for video stickers and for GIFs over
+// an FFmpeg.
+func (m *Manager) ConfigureDecoders(wasm, gifWASM bool, ffmpeg string) {
+	if m.wasm == wasm && m.gifWASM == gifWASM && m.ffmpeg == ffmpeg {
 		return
 	}
-	m.wasm, m.ffmpeg = wasm, ffmpeg
+	m.wasm, m.gifWASM, m.ffmpeg = wasm, gifWASM, ffmpeg
 	m.ffmpegChecked = false
 	m.Release()
 }
 
-// SandboxGIFs reports whether GIFs play in the H.264 sandbox, for want of an
-// FFmpeg. It is several times as costly: a GIF then plays only while the
-// pointer is on it. The search for FFmpeg is made once per configuration.
+// SandboxGIFs reports whether GIFs play in the H.264 sandbox, chosen or for
+// want of an FFmpeg. It is several times as costly: a GIF then plays only
+// while the pointer is on it. The search for FFmpeg is made once per
+// configuration.
 func (m *Manager) SandboxGIFs() bool {
 	if !m.ffmpegChecked {
-		m.sandboxGIFs = video.ResolveFFmpeg(m.ffmpeg) == ""
+		m.sandboxGIFs = m.gifWASM || video.ResolveFFmpeg(m.ffmpeg) == ""
 		m.ffmpegChecked = true
 	}
 	return m.sandboxGIFs

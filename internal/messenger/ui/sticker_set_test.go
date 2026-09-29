@@ -96,5 +96,5 @@ func TestStickerSetMenuDownloadsArchive(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("menu did not download the set: open=%t busy=%t err=%v", h.p.stickers.menuOpen, h.p.stickers.busy, h.p.stickers.exportErr)
+	t.Fatalf("menu did not download the set: open=%t busy=%t toast=%q", h.p.stickers.menuOpen, h.p.stickers.busy, h.p.stickers.modal.toast.Text())
 }

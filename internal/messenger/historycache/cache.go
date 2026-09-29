@@ -20,14 +20,17 @@ import (
 )
 
 type Cache struct {
-	mu              sync.Mutex
-	db              *sql.DB
-	account, path   string
-	protection      *security.Manager
-	encrypted       bool
-	closed          bool
-	unregister      func()
-	unregisterPlain func()
+	mu sync.Mutex
+	// keepDeleted keeps messages Telegram deleted, marked so;
+	// keepEdits keeps the text others' messages had before an edit.
+	keepDeleted, keepEdits bool
+	db                     *sql.DB
+	account, path          string
+	protection             *security.Manager
+	encrypted              bool
+	closed                 bool
+	unregister             func()
+	unregisterPlain        func()
 }
 
 func Open(path, account string, protection *security.Manager) (*Cache, error) {
@@ -80,6 +83,7 @@ func (c *Cache) open() error {
  CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value BLOB);
  CREATE TABLE IF NOT EXISTS layouts(chat INTEGER,id INTEGER,env TEXT,revision INTEGER,height INTEGER,PRIMARY KEY(chat,id,env));
  CREATE TABLE IF NOT EXISTS media(key TEXT PRIMARY KEY,data BLOB,used INTEGER);
+ CREATE TABLE IF NOT EXISTS edits(chat INTEGER,id INTEGER,at INTEGER,payload BLOB,PRIMARY KEY(chat,id,at));
  CREATE INDEX IF NOT EXISTS photos ON messages(chat,id) WHERE ` + photoWhere + `;`)
 	if err == nil {
 		err = c.initSearch()
@@ -232,6 +236,11 @@ func (c *Cache) SaveMessages(ctx context.Context, msgs []model.Message) error {
 				continue
 			}
 		}
+		if c.keepEdits && !m.Outgoing {
+			if err = keepEdit(ctx, tx, m); err != nil {
+				return err
+			}
+		}
 		b, err := json.Marshal(m)
 		if err != nil {
 			return err
@@ -275,9 +284,9 @@ func (c *Cache) Around(ctx context.Context, chat int64, anchor int, limit int) (
 	var rows *sql.Rows
 	var err error
 	if anchor == 0 {
-		rows, err = c.db.QueryContext(ctx, `SELECT payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted=0 ORDER BY id DESC LIMIT ?) ORDER BY id`, chat, limit)
+		rows, err = c.db.QueryContext(ctx, `SELECT payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted!=1 ORDER BY id DESC LIMIT ?) ORDER BY id`, chat, limit)
 	} else {
-		rows, err = c.db.QueryContext(ctx, `SELECT payload FROM (SELECT id,payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted=0 AND id<=? ORDER BY id DESC LIMIT ?) UNION ALL SELECT id,payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted=0 AND id>? ORDER BY id LIMIT ?)) ORDER BY id`, chat, anchor, limit/2, chat, anchor, limit/2)
+		rows, err = c.db.QueryContext(ctx, `SELECT payload FROM (SELECT id,payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted!=1 AND id<=? ORDER BY id DESC LIMIT ?) UNION ALL SELECT id,payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted!=1 AND id>? ORDER BY id LIMIT ?)) ORDER BY id`, chat, anchor, limit/2, chat, anchor, limit/2)
 	}
 	if err != nil {
 		return nil, err
@@ -304,7 +313,7 @@ func (c *Cache) Message(ctx context.Context, chat int64, id int) (m model.Messag
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var b []byte
-	err = c.db.QueryRowContext(ctx, `SELECT payload FROM messages WHERE chat=? AND id=? AND deleted=0`, chat, id).Scan(&b)
+	err = c.db.QueryRowContext(ctx, `SELECT payload FROM messages WHERE chat=? AND id=? AND deleted!=1`, chat, id).Scan(&b)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, false, nil
 	}
@@ -386,9 +395,9 @@ func (c *Cache) SaveMedia(ctx context.Context, key string, b []byte) error {
 func (c *Cache) Page(ctx context.Context, chat int64, anchor, dir, limit int) ([]model.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	query := `SELECT payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted=0 AND id<? ORDER BY id DESC LIMIT ?) ORDER BY id`
+	query := `SELECT payload FROM (SELECT id,payload FROM messages WHERE chat=? AND deleted!=1 AND id<? ORDER BY id DESC LIMIT ?) ORDER BY id`
 	if dir > 0 {
-		query = `SELECT payload FROM messages WHERE chat=? AND deleted=0 AND id>? ORDER BY id LIMIT ?`
+		query = `SELECT payload FROM messages WHERE chat=? AND deleted!=1 AND id>? ORDER BY id LIMIT ?`
 	}
 	rows, e := c.db.QueryContext(ctx, query, chat, anchor, limit)
 	if e != nil {
@@ -421,9 +430,9 @@ const photoWhere = `json_extract(CAST(payload AS TEXT),'$.Kind')=1`
 func (c *Cache) Photos(ctx context.Context, chat int64, anchor, dir, limit int) ([]model.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	query := `SELECT payload FROM (SELECT id,payload FROM messages WHERE chat=? AND ` + photoWhere + ` AND deleted=0 AND id<? ORDER BY id DESC LIMIT ?) ORDER BY id`
+	query := `SELECT payload FROM (SELECT id,payload FROM messages WHERE chat=? AND ` + photoWhere + ` AND deleted!=1 AND id<? ORDER BY id DESC LIMIT ?) ORDER BY id`
 	if dir > 0 {
-		query = `SELECT payload FROM messages WHERE chat=? AND ` + photoWhere + ` AND deleted=0 AND id>? ORDER BY id LIMIT ?`
+		query = `SELECT payload FROM messages WHERE chat=? AND ` + photoWhere + ` AND deleted!=1 AND id>? ORDER BY id LIMIT ?`
 	}
 	rows, e := c.db.QueryContext(ctx, query, chat, anchor, limit)
 	if e != nil {
@@ -445,27 +454,60 @@ func (c *Cache) Photos(ctx context.Context, chat int64, anchor, dir, limit int) 
 	return out, rows.Err()
 }
 
-// Reconcile removes messages absent from an authoritative server interval.
+// Reconcile removes messages absent from an authoritative server interval,
+// or keeps them marked deleted when deleted messages are kept.
 // IDs touched by newer live updates must be included in keep by the caller.
-func (c *Cache) Reconcile(ctx context.Context, chat int64, low, high int, keep []int) ([]int, error) {
+func (c *Cache) Reconcile(ctx context.Context, chat int64, low, high int, keep []int) (removed []int, kept []model.Message, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	b, e := json.Marshal(keep)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
+	}
+	if c.keepDeleted {
+		tx, e := c.db.BeginTx(ctx, nil)
+		if e != nil {
+			return nil, nil, e
+		}
+		defer tx.Rollback()
+		rows, e := tx.QueryContext(ctx, `SELECT id FROM messages WHERE chat=? AND deleted=0 AND payload IS NOT NULL AND id>=? AND id<=? AND id NOT IN (SELECT value FROM json_each(?))`, chat, low, high, string(b))
+		if e != nil {
+			return nil, nil, e
+		}
+		var ids []int
+		for rows.Next() {
+			var id int
+			if e = rows.Scan(&id); e != nil {
+				rows.Close()
+				return nil, nil, e
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		var kept []model.Message
+		for _, id := range ids {
+			m, ok, e := markDeleted(ctx, tx, chat, id)
+			if e != nil {
+				return nil, nil, e
+			}
+			if ok {
+				kept = append(kept, m)
+			}
+		}
+		return nil, kept, tx.Commit()
 	}
 	rows, e := c.db.QueryContext(ctx, `UPDATE messages SET payload=NULL,deleted=1 WHERE chat=? AND deleted=0 AND id>=? AND id<=? AND id NOT IN (SELECT value FROM json_each(?)) RETURNING id`, chat, low, high, string(b))
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	defer rows.Close()
 	var ids []int
 	for rows.Next() {
 		var id int
 		if e = rows.Scan(&id); e != nil {
-			return nil, e
+			return nil, nil, e
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	return ids, nil, rows.Err()
 }

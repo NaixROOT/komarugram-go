@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf16"
 )
 
@@ -58,6 +59,19 @@ type OutgoingMessage struct {
 	// ReplyTo is the message of the same chat this one replies to, 0 for
 	// none.
 	ReplyTo MessageID
+	// Voice makes the file at Path, Opus in OGG, MP3 or M4A, a voice
+	// message.
+	Voice *VoiceNote
+	// FFmpeg is the FFmpeg the user set, beside which ffprobe inspects a
+	// video sent as media; empty for the one on PATH.
+	FFmpeg string
+}
+
+// VoiceNote is what Telegram shows of a voice message before it is played.
+type VoiceNote struct {
+	Duration time.Duration
+	// Waveform is its loudness in 5-bit bars, as Telegram packs it.
+	Waveform []byte
 }
 
 func (m OutgoingMessage) Validate() error {

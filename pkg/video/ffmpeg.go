@@ -5,7 +5,6 @@ package video
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -18,12 +17,13 @@ var (
 	ErrWrongProgram  = errors.New("the program is not FFmpeg")
 )
 
-// ResolveFFmpeg prefers a custom executable, falling back to PATH.
+// ResolveFFmpeg prefers a custom executable, falling back to PATH. It is ""
+// when there is neither.
 func ResolveFFmpeg(custom string) string {
 	if filepath.IsAbs(custom) && program.IsExecutable(custom) {
 		return custom
 	}
-	path, _ := exec.LookPath("ffmpeg")
+	path, _ := program.LookPath("ffmpeg")
 	return path
 }
 
@@ -42,16 +42,19 @@ func CheckFFmpeg(ctx context.Context, path string) (string, error) {
 	return banner, nil
 }
 
-func probeExecutable(ffmpeg string) string {
-	if ffmpeg != "" {
+// ResolveFFprobe is the ffprobe beside the FFmpeg ResolveFFmpeg(custom)
+// finds, or else the one on PATH. It is "" when there is neither.
+func ResolveFFprobe(custom string) string {
+	if ffmpeg := ResolveFFmpeg(custom); ffmpeg != "" {
 		name := "ffprobe"
 		if runtime.GOOS == "windows" {
 			name += ".exe"
 		}
-		sibling := filepath.Join(filepath.Dir(ResolveFFmpeg(ffmpeg)), name)
+		sibling := filepath.Join(filepath.Dir(ffmpeg), name)
 		if program.IsExecutable(sibling) {
 			return sibling
 		}
 	}
-	return "ffprobe"
+	path, _ := program.LookPath("ffprobe")
+	return path
 }

@@ -15,6 +15,7 @@ Russian; code, comments and docs are in English.
 | Path | What |
 |---|---|
 | `cmd/messenger` | Entry point; `account_host.go` runs accounts, windows and their stores |
+| `cmd/render-all` | Renders every screen of the render tests into one directory |
 | `internal/messenger/ui` | All messenger UI. Components: `docs/UI_COMPONENTS.md` |
 | `internal/messenger/tgstore` | `model.Store` backed by Telegram (gotd): chats, history, search, updates |
 | `internal/messenger/historycache` | Per-account SQLite cache: messages (JSON), media, layouts, FTS5 search index |
@@ -24,7 +25,7 @@ Russian; code, comments and docs are in English.
 | `internal/messenger/mockstore` | Demo store for `-demo` |
 | `pkg/*` | Reusable parts: `dcpool` (download connections), `tdata`, media decoders |
 | `third_party/gio`, `third_party/gio-mw` | Forks, wired with `replace`; changes to Gio go in `third_party/gio/LOCAL_CHANGES.md` |
-| `ayugram`, `materialgram` | Sources of two Telegram Desktop forks, without git history: the reference for Telegram behavior, texts and UI. AyuGram (AyuGram/AyuGramDesktop db3b989, 2026-08-08) adds features such as message snapshots (`ayu/features/message_shot`); materialgram (kukuruzka165/materialgram d31cdec, 2026-07-25) restyles the UI. Only the submodules `Telegram/lib_ui`, `lib_base` and `lib_tl` were fetched; the rest of `lib_*` and `ThirdParty` are empty |
+| `tdesktop`, `ayugram`, `materialgram` | Not in the repository, and ignored by git: local clones of Telegram Desktop and two of its forks, made when needed (see "Telegram Desktop sources") |
 
 ## Read before
 
@@ -33,11 +34,11 @@ Russian; code, comments and docs are in English.
   technical debts.
 - UI work: `docs/UI_COMPONENTS.md`. Reuse `surface`, `tabRow`, `folderChip`,
   `modal`… instead of new widgets; check the result by looking at it.
-- Telegram behavior (errors, limits, flows): how the forks do it in
-  `ayugram/Telegram/SourceFiles` and `materialgram/Telegram/SourceFiles`
-  (upstream tdesktop code plus their own), widgets in `*/Telegram/lib_ui`,
-  and https://core.telegram.org/api. Look at both forks: a feature may be
-  one fork's own, as AyuGram's snapshots are.
+- Telegram behavior (errors, limits, flows): how Telegram Desktop and the
+  forks do it, in `*/Telegram/SourceFiles`, widgets in `*/Telegram/lib_ui`,
+  and https://core.telegram.org/api. Clone what you need first, without
+  asking: see "Telegram Desktop sources". Look at both forks for a feature
+  to port: it may be one fork's own, as AyuGram's snapshots are.
   Texts shown to the user map to tdesktop's `lng_…` keys in
   `internal/messenger/localization` (`TelegramKeys`).
 - Performance or memory: `docs/PROFILING.md`; README "Pitfalls".
@@ -51,7 +52,11 @@ go test ./internal/... ./cmd/... ./pkg/...
 gofmt -l internal cmd pkg
 go vet gioui.org/app                           # the Gio fork, by its import path
 go run ./cmd/messenger -demo                   # no account needed
+go run ./cmd/render-all [dir]                  # every render test, into one directory
 ```
+
+Commands here are for a POSIX shell; in PowerShell, set a variable with
+`$env:NAME = "value"` before the command.
 
 These cross-builds must keep working:
 
@@ -62,14 +67,51 @@ GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/messenger
 ```
 
 Render tests save PNGs when their variable is set, and are skipped
-otherwise: `COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SESSIONS_PNG`
-(see `docs/UI_COMPONENTS.md`).
+otherwise, so `go test` never runs them: `COMPOSER_PNG` (with
+`COMPOSER_VIEW`), `COMPOSER_MOTION_PNG`, `SETTINGS_PNG` (with
+`SETTINGS_SECTION`), `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `SESSIONS_PNG`,
+`STICKER_SET_PNG_DIR`, `MENU_PNG`, `REACTED_PNG`, `VIEWER_PNG` (with
+`VIEWER_ZOOM`), `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`,
+`SERVICE_PNG`, `PINNED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`,
+`SAVED_EMPTY_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR` (see
+`docs/UI_COMPONENTS.md`). Run the one of the screen you changed, and look
+at the PNG. `go run ./cmd/render-all [dir]` renders all of them, every
+variant, into one directory (about a minute; `komarugram-renders` in the
+system's temporary directory by default; `-only composer` for some of
+them). Nothing compares them with references: the project is in active
+development, and the renders are for looking at.
+
+When a change reaches much of the UI at once (a shared component such as
+`surface`, `modal`, `toast` or `pill`, the theme, typography, spacing,
+the history's layout), run `cmd/render-all`, look over the PNGs of the
+places it touches, and remind the maintainer to look them over too.
+
+`pkg/h264`'s test needs `KOMARUGRAM_AVCDEC` set to the absolute path of an
+`avcdec.wasm` ([libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm)),
+and `pkg/aac`'s and the M4A voice message's `KOMARUGRAM_AACDEC`, of an
+`aacdec.wasm` ([fdk-aac-wasm](https://github.com/komarugif/fdk-aac-wasm)): these
+modules are not in this repository, and the client fetches them
+(`internal/messenger/wasmmodule`).
 
 ## Rules
 
+- **The README files in the root (`README.md`, `README_RU.md`) change only
+  with the maintainer's consent.** Propose the text instead; when a change
+  is agreed, make it in both languages.
+- **Dependencies are the maintainer's choice.** Do not add a Go module, a
+  library or a tool the build or the app needs on your own. Propose the
+  options with their trade-offs — for a decoder of media from strangers,
+  a C library compiled to wasm and run in `pkg/sandbox` beside a pure-Go
+  one, saying which runs outside the sandbox — and wait for the choice. A
+  direction agreed ("a small audio library") still leaves the library to
+  choose.
 - **Root causes, not workarounds.** Measure before and after; say what was
   verified and what was not.
-- **Live-test only the operating system the maintainer is using.** Other operating systems are tested manually by the maintainer: say when a change needs their check.
+- **Live-test on the operating system you work on.** The project is
+  developed on Linux and Windows alike: keep code and tools portable (Go,
+  not shell, for tools in `cmd`), and say which systems a change touches
+  and was not checked on, for someone who uses them. macOS builds but is
+  not supported yet.
 - **Memory is a feature.** The app must give memory back to the OS (hidden
   windows drop their GPU context, `malloc_trim` after a window closes). When
   RSS grows but the Go heap does not, look at the native side.
@@ -80,7 +122,7 @@ otherwise: `COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_D
   clients on one key, or parallel sessions to the main DC's non-media
   addresses, make Telegram kill the key with `AUTH_KEY_DUPLICATED`. `dcpool`
   sends downloads from the home DC to its media-only addresses for this.
-- **Accounts are the maintainer's real ones.** Read-only calls are fine for
+- **Accounts on a developer's machine are their real ones.** Read-only calls are fine for
   testing; never send, edit or delete. Don't search public posts: each search
   spends one of the day's free searches.
 - **Found messages are not saved to history.** The cache keeps each chat's
@@ -103,11 +145,23 @@ otherwise: `COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_D
 The full list, with the story behind each item, is README "Pitfalls met while
 working on this code".
 
-## Testing the app live (Linux, X11/XFCE)
+## Testing the app live
 
-- Run the built binary from a scratch directory in the background. Stop it
-  with `pkill -x messenger`: `pkill -f <path>` also matches, and kills, the
-  shell that runs it.
+- `-demo` runs on made-up data, without an account; nothing it does
+  reaches Telegram.
+- `-no-integrations` makes the client find no FFmpeg, player or browser on
+  the system, only the paths set in the settings: the way to see it as on a
+  machine without them.
+- Run the built binary from a scratch directory in the background.
+- Local data is in the user's configuration directory, `komarugram-go` in
+  it (accounts, sessions, `history.db.*`), crash reports in the cache
+  directory's `komarugram-go/crashes`: `~/.config` and `~/.cache` on Linux,
+  `%AppData%` and `%LocalAppData%` on Windows.
+
+On Linux under X11 (XFCE here):
+
+- Stop the client with `pkill -x messenger`: `pkill -f <path>` also
+  matches, and kills, the shell that runs it.
 - Drive a window with `xdotool mousemove --window <id> x y click 1` (client
   coordinates) and `xdotool type`; find it with `wmctrl -l`; screenshot the
   active window with `xfce4-screenshooter -w -s file.png`.
@@ -118,5 +172,29 @@ working on this code".
   org.kde.StatusNotifierItem Activate ii 0 0`.
 - The instance socket is `$XDG_RUNTIME_DIR/komarugram-go.sock`; a path over 107
   bytes fails, so point `XDG_RUNTIME_DIR` at a short symlink when needed.
-- Local data: `~/.config/komarugram-go` (accounts, sessions, `history.db.*`),
-  crash reports in `~/.cache/komarugram-go/crashes`.
+
+## Telegram Desktop sources
+
+Telegram Desktop is the reference for Telegram's behavior, texts and UI,
+and AyuGram and materialgram are the forks features are ported from
+(`docs/PLAN.md`). They are not in the repository. When a task needs one,
+clone it into the root under the name below, without asking, and without
+its history: a shallow clone, then remove every `.git` in it. `.gitignore`
+keeps these directories out of KomaruGram's commits. Only the submodules
+`Telegram/lib_ui`, `lib_base` and `lib_tl` are needed; the others, and
+`ThirdParty`, are large and can stay empty.
+
+| Directory | Repository |
+|---|---|
+| `tdesktop` | https://github.com/telegramdesktop/tdesktop |
+| `ayugram` | https://github.com/AyuGram/AyuGramDesktop (adds features such as message snapshots, `ayu/features/message_shot`) |
+| `materialgram` | https://github.com/kukuruzka165/materialgram (restyles the UI) |
+
+```sh
+git clone --depth 1 https://github.com/AyuGram/AyuGramDesktop ayugram
+git -C ayugram submodule update --init --depth 1 Telegram/lib_ui Telegram/lib_base Telegram/lib_tl
+# then delete ayugram/.git and the .git of each submodule
+```
+
+A clone that is there already may be old: pull a new one when the code it
+describes has to be current.

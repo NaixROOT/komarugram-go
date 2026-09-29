@@ -38,6 +38,7 @@ import (
 	"komarugram/internal/profilerui"
 	"komarugram/internal/tray"
 	"komarugram/pkg/miniapp"
+	"komarugram/pkg/program"
 )
 
 type pathsFlag []string
@@ -60,7 +61,11 @@ func main() {
 	profileDir := flag.String("profile-dir", "profiles", "directory for explicitly exported profiler artifacts")
 	profileExport := flag.Duration("profile-export", 0, "automatically export JSON at this interval (e.g. 2s); enables collection without profiler UI")
 	profileCapture := flag.String("profile-capture", "", "capture profiles without GUI: comma-separated cpu,heap,allocs,trace,goroutine")
+	noIntegrations := flag.Bool("no-integrations", false, "do not look for FFmpeg, mpv, VLC or a browser on the system; only the paths set in the settings are used, as on a machine without them")
 	flag.Parse()
+	if *noIntegrations {
+		program.SetSearching(false)
+	}
 	if *profileExport < 0 || *profileExport > 0 && *profileExport < 100*time.Millisecond {
 		log.Fatal("-profile-export must be zero or at least 100ms")
 	}

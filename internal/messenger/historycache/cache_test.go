@@ -209,7 +209,7 @@ func TestReconcileOnlyAuthoritativeInterval(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	ids, e := c.Reconcile(ctx, 1, 10, 20, []int{10, 20})
+	ids, _, e := c.Reconcile(ctx, 1, 10, 20, []int{10, 20})
 	if e != nil || len(ids) != 1 || ids[0] != 15 {
 		t.Fatal(ids, e)
 	}

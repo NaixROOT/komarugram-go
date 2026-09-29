@@ -16,7 +16,9 @@ import (
 )
 
 type Store struct {
-	sent   map[int64]bool
+	sent map[int64]bool
+	// files are what the voice messages sent in the demo hold, by media ID.
+	files  map[string][]byte
 	themes map[int64]model.ChatTheme
 	// mu guards histories and views: a photo viewer in its own window reads
 	// the store from that window's goroutine.
@@ -28,6 +30,8 @@ type Store struct {
 	// recent is the search history; query, the search asked for last.
 	recent []model.Chat
 	query  model.SearchQuery
+	// pinnedHidden are the chats whose pinned messages were hidden.
+	pinnedHidden map[int64]bool
 }
 
 // New returns a store with demo chats whose times are relative to now, and

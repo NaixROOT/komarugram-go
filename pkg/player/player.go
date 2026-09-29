@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -79,7 +78,10 @@ func (k Kind) Find() string {
 	if k == MPV && runtime.GOOS == "windows" {
 		return ""
 	}
-	if path, err := exec.LookPath(string(k)); err == nil && !isSnap(path) {
+	if !program.Searching() {
+		return ""
+	}
+	if path, err := program.LookPath(string(k)); err == nil && !isSnap(path) {
 		return path
 	}
 	if runtime.GOOS == "windows" {

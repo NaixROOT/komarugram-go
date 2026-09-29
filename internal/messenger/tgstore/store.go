@@ -52,6 +52,8 @@ type Store struct {
 	chats         []model.Chat
 	reactions     reactionState
 	recent        recentChats
+	ghost         ghostState
+	blocked       blockedState
 }
 
 // New returns an empty store that calls changed whenever Load has read more.
@@ -349,6 +351,9 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 
 	if m, ok := l.messages[[2]int64{id, int64(d.TopMessage)}]; ok {
 		chat.LastMessage, chat.LastTime = preview(m)
+		if service, ok := m.(*tg.MessageService); ok {
+			chat.LastMessage = l.servicePreview(service, chat)
+		}
 		if chat.Kind == model.KindGroup {
 			chat.LastSender = l.sender(m)
 		}

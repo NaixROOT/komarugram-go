@@ -44,6 +44,7 @@ put it next to these, and add it to this page.
 | `label`, `centeredLabel` | Text in a typestyle and color, limited to a number of lines (0 is unlimited). |
 | `card(gtx, content, padding)` | A rounded surface container; `defaultCardPadding` for settings and profile cards. |
 | `pill(gtx, text)` | Text on a rounded plate, like service messages and the "Choose a chat" hint. |
+| `toast` (`toast.go`) | Every error and outcome of an action (sent, copied, saved, failed): a grey plate at the bottom of the list or dialog it is about, gone after four seconds, a new one replacing it. Never keep such a message as text on screen. The history's is `chatPage.toast`, over the composer, floating or classic; a dialog's is `modal.Toast`, under the dialog when there is room; the chat list, `scrollPage` (settings, profile), the picker and the photo viewer have their own. A failure that repeats on every refresh is told once: compare with the one told last. A load that failed keeps a plain "Retry" button, without the error text. Errors of fields with room beside them (sign-in, passwords, profile, program paths) stay under the field. |
 | `vspace(dp)` | Vertical gap in a `layout.Flex`. |
 | `fillRect`, `fillRounded` | Filling a size with a theme color. |
 | `offset`, `inRect`, `exact` | Placing a widget at a point, in a rectangle or at an exact size. |
@@ -144,7 +145,31 @@ The history is drawn as materialgram draws it:
   through WASM, then close the decoder instances. FFmpeg only starts for
   playback; dormant previews wait for an event without a frame timer. The
   choice does not affect Lottie, GIFs or avatars. Stickers do not require
-  `ffprobe`. A GIF shown still starts no process either: it shows Telegram's
+  `ffprobe`. The internal MP4 animation player (`decoderSettings.animations`,
+  `sticker_player.go`) is the same choice for GIFs and animated avatars:
+  FFmpeg when found, otherwise, or when chosen, FFmpeg's H.264 decoder in a
+  WASM sandbox, one GIF at a time on hover. That decoder is not in the
+  binary: `wasmmodule.AVCDec` downloads it the first time it is needed
+  from [libavcodec-wasm](https://github.com/komarugif/libavcodec-wasm), at a
+  pinned commit, checks its SHA-256 and keeps it in the cache directory;
+  `KOMARUGRAM_AVCDEC` names a build of the user's instead (a path or a URL).
+  Every FFmpeg the client runs, voice messages' and the `ffprobe` beside it
+  for videos sent as media included, is `video.ResolveFFmpeg` of the path in
+  the settings, else PATH. Without one, the microphone (`composer_voice.go`)
+  opens the system's file chooser for Opus in OGG, MP3 or M4A
+  (`voice.FileExtensions`) and sends the file as a voice message, its
+  duration read from its headers (`voice.FileDuration`), without a waveform;
+  the file is the user's and is not removed. `program.LookPath` and
+  `FindFlatpak` are the only searches for external programs:
+  `-no-integrations` turns them off. Voice messages and music play in the
+  client (`audio_player.go`): `audioPlayer`, one per chat page;
+  `voiceLayout`, the row with its button, waveform (`drawWaveform`) and
+  time, and `musicLayout`, with the title, the performer and a bar
+  (`drawBar`); `audioRow.update` takes their clicks and drags. `showWaveform`
+  works one out, as soon as it is shown, for a voice message sent without
+  one; `audioFormat` picks libopus, dr_libs or fdk-aac, and a format none
+  takes goes to the external player (`takeExternal`); tests give
+  `audioPlayer.play` a silent playback, so that nothing is heard. A GIF shown still starts no process either: it shows Telegram's
   thumbnail, fetched before the file (a real GIF file's first frame is
   decoded in Go); large GIFs have none and stay blank until played, as in the
   official clients. `ffprobe` and `ffmpeg` start when it plays, and `ffmpeg`
@@ -155,11 +180,32 @@ The history is drawn as materialgram draws it:
   at the side.
 - **Reactions** (`reactions.go`): chips under a message toggle a reaction
   (`model.Reactor`); `reactionStrip` is the row at the top of the message
-  menu that expands into all the chat's reactions.
+  menu that expands into all the chat's reactions. A double click on a
+  bubble, off its text, puts the default reaction (`model.QuickReactor`);
+  `reactedDialog` (`reacted.go`) lists who reacted, a tab for each reaction.
 - **Comments** (`comments.go`): `commentsBar` ends a channel post's bubble,
   clipped to its shape; the comments open in a second `chatPage` under a
   `chatHead` — `layoutChatPageHead` with a back button in place of the
   avatar — over their channel.
+- **Service messages** (`history_service.go`): an action, as a user added or
+  a message pinned, is its words on a plate across the middle of the
+  history (`servicePill`), worded in the UI's language by
+  `localization.Catalog.Service` from `model.ServiceAction`. A pin's plate
+  quotes the message and shows it on a click; a call is a bubble.
+- **Header actions** (`chat_menu.go`, `chat_search.go`): the search and
+  menu buttons at the end of a chat's header. The search is a field over
+  the header (`model.ChatSearcher`) with a counter and buttons to the older
+  and newer found messages; the one shown is tinted for a moment
+  (`highlight`). The menu is a `contextMenu` under its button.
+- **Message shot** (`snapshot.go`): the dialog the selection's snapshot
+  button opens, as AyuGram's message shot box: a preview rendered off the
+  frame (`buildSnapshot`, `renderSnapshot`), the theme and what it shows,
+  and buttons that save the PNG or copy it (`clipboard.WriteCmd` with
+  `image/png`).
+- **Pinned bar** (`pinned_bar.go`): under the chat's header, the latest
+  pinned message above the history's bottom (`model.PinnedSource`); a click
+  goes to it and shows the one before, as Telegram Desktop's does. Its line
+  has a segment for each pinned message, up to four.
 - **Reply strip** (`composer_reply.go`): the message a draft replies to, over
   the composer; the history's end and what opens from the composer move up by
   its height (`replyHeight`).
@@ -187,14 +233,16 @@ new piece sits next to its neighbours.
   `TestRenderSessionEnded` show how. `TestRenderStickerSet` saves both sticker
   and emoji pack states; `TestRenderMessageMenu`, the message menu over a
   reply, with a floating and a classic composer. They are skipped unless their
-  variable (`COMPOSER_PNG`, `SETTINGS_PNG`, `SESSION_PNG_DIR`,
-  `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SESSIONS_PNG`) is set. The last one shows Saved Messages before its
+  variable (`COMPOSER_PNG`, `COMPOSER_MOTION_PNG`, `SETTINGS_PNG`,
+  `ACCOUNTS_PNG_DIR`, `SESSION_PNG_DIR`, `STICKER_SET_PNG_DIR`, `MENU_PNG`, `SAVED_EMPTY_PNG`, `VIEWER_PNG`, `PLAYER_PNG`, `COMMENTS_PNG`, `UNWRAPPED_PNG`, `SERVICE_PNG`, `PINNED_PNG`, `REACTED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`, `SESSIONS_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR`) is set; `go run ./cmd/render-all` runs them all. `TOAST_PNG_DIR` gets a toast in every place that has one, light and dark. The last one shows Saved Messages before its
   first dialog exists. `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
-  with `COMPOSER_PNG` shows the picker's recommendations.
+  with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
+  a voice message being recorded.
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the
-  header of the comments page; `UNWRAPPED_PNG`, stickers and lone emoji.
+  header of the comments page; `UNWRAPPED_PNG`, stickers and lone emoji; `SERVICE_PNG`, service messages
+  and calls.
 - **The app itself.** `go run ./cmd/messenger -demo` runs without an account.
   On Linux under X11, `xdotool` drives a window (`mousemove --window … click`)
   and `xfce4-screenshooter -w` saves the active one.

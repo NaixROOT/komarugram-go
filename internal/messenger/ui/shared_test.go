@@ -324,3 +324,86 @@ func TestSharedReleaseDropsGiftPixelsWithoutLosingNavigation(t *testing.T) {
 		t.Fatal("release changed navigation")
 	}
 }
+
+// usernameStore is the demo store whose chat 2 is public.
+type usernameStore struct{ *mockstore.Store }
+
+func (usernameStore) Username(chat int64) string {
+	if chat == 2 {
+		return "public_chat"
+	}
+	return ""
+}
+
+// The info of a public chat copies its @username and its link, as
+// AyuGram's; a chat without one shows neither.
+func TestChatInfoCopiesUsername(t *testing.T) {
+	store := usernameStore{mockstore.New(time.Now(), 0)}
+	var images imageOps
+	p := newChatInfo(store, &images, func() {})
+	defer p.Destroy()
+	var router input.Router
+	frame := func() {
+		ops := new(op.Ops)
+		gtx := sharedContext(ops, image.Pt(900, 800))
+		gtx.Source = router.Source()
+		p.Layout(gtx, localization.For("en"), false)
+		router.Frame(ops)
+	}
+	p.Open(model.Chat{ID: 3})
+	awaitShared(t, p)
+	if p.chatUsername() != "" {
+		t.Fatal("a private chat has a username")
+	}
+	p.Open(model.Chat{ID: 2})
+	awaitShared(t, p)
+	frame()
+	for _, c := range []struct {
+		item *settingsItem
+		want string
+	}{{&p.username, "@public_chat"}, {&p.usernameLink, "https://t.me/public_chat"}} {
+		c.item.click.Click()
+		frame()
+		if _, text, ok := router.WriteClipboard(); !ok || string(text) != c.want {
+			t.Fatalf("copied %q, want %q", text, c.want)
+		}
+		if p.modal.toast.Text() == "" {
+			t.Fatal("no notice of the copy")
+		}
+	}
+}
+
+// A user's info estimates the registration from the id, and tells where
+// the photo is kept, as materialgram's; a click copies the row.
+func TestChatInfoDetails(t *testing.T) {
+	store := mockstore.New(time.Now(), 0)
+	var images imageOps
+	p := newChatInfo(store, &images, func() {})
+	defer p.Destroy()
+	l := localization.For("en")
+	p.Open(model.Chat{ID: 2, Kind: model.KindUser})
+	awaitShared(t, p)
+	registration, dataCenter := p.detailTexts(l)
+	if registration != "before 09.2013" || dataCenter != "DC 3, Miami" {
+		t.Fatalf("details %q, %q", registration, dataCenter)
+	}
+	p.Open(model.Chat{ID: 3, Kind: model.KindGroup})
+	awaitShared(t, p)
+	if registration, dataCenter := p.detailTexts(l); registration != "" || dataCenter != "DC 4, Amsterdam" {
+		t.Fatalf("group's details %q, %q", registration, dataCenter)
+	}
+	var router input.Router
+	frame := func() {
+		ops := new(op.Ops)
+		gtx := sharedContext(ops, image.Pt(900, 800))
+		gtx.Source = router.Source()
+		p.Layout(gtx, l, false)
+		router.Frame(ops)
+	}
+	frame()
+	p.dataCenter.click.Click()
+	frame()
+	if _, text, ok := router.WriteClipboard(); !ok || string(text) != "DC 4, Amsterdam" {
+		t.Fatalf("copied %q", text)
+	}
+}

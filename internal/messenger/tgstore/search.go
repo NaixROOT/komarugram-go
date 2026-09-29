@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -404,6 +406,68 @@ func (s *Store) searchGlobal(ctx context.Context, api *tg.Client, q model.Search
 		return nil, false, err
 	}
 	return s.foundPage(ctx, res)
+}
+
+// SearchChat implements model.ChatSearcher: messages.search in the chat
+// while connected, the cache's index otherwise. next is "r<id>", the
+// message Telegram's next page starts under, or "l<n>", how many cached
+// messages were read. The messages found are not saved, as no found message
+// is: see foundPage.
+func (s *Store) SearchChat(ctx context.Context, chat int64, text string, next string, limit int) (model.ChatSearchPage, error) {
+	chat = s.realChat(chat)
+	s.history.mu.Lock()
+	api, cache, peer := s.history.api, s.history.cache, s.history.peers[chat]
+	s.history.mu.Unlock()
+	text = strings.TrimSpace(text)
+	if text == "" || chat == 0 {
+		return model.ChatSearchPage{}, nil
+	}
+	remote := api != nil && peer.ID != 0 && !strings.HasPrefix(next, "l")
+	if !remote {
+		if cache == nil {
+			return model.ChatSearchPage{}, model.ErrSearchOffline
+		}
+		offset, _ := strconv.Atoi(strings.TrimPrefix(next, "l"))
+		msgs, err := cache.Search(ctx, historycache.Query{Text: text, Chats: []int64{chat}}, offset, limit)
+		if err != nil {
+			return model.ChatSearchPage{}, err
+		}
+		page := model.ChatSearchPage{Messages: msgs}
+		if len(msgs) == limit {
+			page.Next = "l" + strconv.Itoa(offset+len(msgs))
+		}
+		return page, nil
+	}
+	offsetID, _ := strconv.Atoi(strings.TrimPrefix(next, "r"))
+	res, err := api.MessagesSearch(ctx, &tg.MessagesSearchRequest{Peer: peer.input(), Q: text, Filter: &tg.InputMessagesFilterEmpty{}, OffsetID: offsetID, Limit: limit})
+	if err != nil {
+		return model.ChatSearchPage{}, err
+	}
+	mod, ok := res.AsModified()
+	if !ok {
+		return model.ChatSearchPage{}, nil
+	}
+	s.rememberPeers(mod.GetUsers(), mod.GetChats())
+	raw := mod.GetMessages()
+	c := s.history
+	c.apply.Lock()
+	msgs, err := s.convert(ctx, raw, false, math.MaxUint64)
+	c.apply.Unlock()
+	if err != nil {
+		return model.ChatSearchPage{}, err
+	}
+	page := model.ChatSearchPage{Messages: msgs}
+	switch res := res.(type) {
+	case *tg.MessagesMessagesSlice:
+		page.Count = res.Count
+	case *tg.MessagesChannelMessages:
+		page.Count = res.Count
+	}
+	sort.Slice(page.Messages, func(i, j int) bool { return page.Messages[i].Key.MessageID > page.Messages[j].Key.MessageID })
+	if len(raw) == limit {
+		page.Next = "r" + strconv.Itoa(raw[len(raw)-1].GetID())
+	}
+	return page, nil
 }
 
 // searchPosts reads the next page of public posts.

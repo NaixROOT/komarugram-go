@@ -32,7 +32,10 @@ import (
 	"komarugram/internal/motion"
 )
 
-// Content is what a window shows.
+// Content is what a window shows. It may also implement RecoverFrame() bool
+// to leave or rebuild a failed view after its Update or Layout panics.
+// Recovery runs after the frame's operations have been discarded; returning
+// true schedules an immediate frame. See recoverContent.
 type Content interface {
 	// Theme returns the Material theme of the frame. It may create the theme
 	// on its first call, which needs a frame context.
@@ -89,6 +92,10 @@ type Window struct {
 	// transparent and blurred are what the platform granted of
 	// Options.Transparent and Options.BlurBehind.
 	transparent, blurred bool
+	// view is the native window, once there is one; captureExcluded is
+	// whether it is hidden from screen capture, once captureApplied.
+	view                            uintptr
+	captureApplied, captureExcluded bool
 }
 
 // Translucency reports whether the window is transparent and whether the
@@ -166,6 +173,8 @@ type Host struct {
 	crashOnce       sync.Once
 	crashDialogs    map[string]bool
 	ignoredPanics   map[string]bool
+	// captureExcluded hides the windows from screen capture.
+	captureExcluded atomic.Bool
 }
 
 // Hold keeps the process running without a window, for work that goes on in
@@ -415,7 +424,11 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 	demoPanicked := false
 	focused := false
 	for {
-		switch e := w.Event().(type) {
+		ev := w.Event()
+		if handle, ok := viewHandle(ev); ok {
+			w.view, w.captureApplied = handle, false
+		}
+		switch e := ev.(type) {
 		case app.DestroyEvent:
 			return e.Err
 		case app.ConfigEvent:
@@ -449,6 +462,9 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 			if e.Config.Focused && !focused && activated != nil {
 				activated()
 			}
+			if observer, ok := content.(interface{ SetFocused(bool) }); ok && e.Config.Focused != focused {
+				observer.SetFocused(e.Config.Focused)
+			}
 			focused = e.Config.Focused
 		case app.FrameEvent:
 			if w.suspended.Load() {
@@ -467,6 +483,7 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				frame.At = time.Now()
 				frame.Window = opts.ProfileName
 			}
+			w.applyCapture()
 			gtx := app.NewContext(&ops, e)
 			gtx.Values = make(map[string]any)
 			if !frame.At.IsZero() {
@@ -511,7 +528,11 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				// half recorded, so it is dropped as a whole.
 				ops.Reset()
 				gtx = app.NewContext(&ops, e)
+				recovered := recoverContent(content)
 				fallback.layout(gtx, p)
+				if recovered {
+					gtx.Execute(op.InvalidateCmd{})
+				}
 				e.Frame(gtx.Ops)
 				continue
 			}

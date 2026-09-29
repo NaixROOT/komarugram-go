@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"komarugram/pkg/program"
 )
 
 func TestCustomFFmpegPlayer(t *testing.T) {
@@ -64,4 +66,38 @@ func TestCustomFFmpegPlayer(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("custom FFmpeg did not produce a frame")
+}
+
+// With searching off, only the FFmpeg the user set is found, and the
+// ffprobe beside it.
+func TestResolveWithSearchingOff(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake programs are shell scripts")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"ffmpeg", "ffprobe"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	program.SetSearching(false)
+	t.Cleanup(func() { program.SetSearching(true) })
+	if got := ResolveFFmpeg(""); got != "" {
+		t.Fatalf("found %q with searching off", got)
+	}
+	if got := ResolveFFprobe(""); got != "" {
+		t.Fatalf("found ffprobe %q with searching off", got)
+	}
+	custom := filepath.Join(dir, "ffmpeg")
+	if got := ResolveFFmpeg(custom); got != custom {
+		t.Fatalf("custom FFmpeg resolved to %q", got)
+	}
+	if got := ResolveFFprobe(custom); got != filepath.Join(dir, "ffprobe") {
+		t.Fatalf("ffprobe beside the custom FFmpeg resolved to %q", got)
+	}
+	program.SetSearching(true)
+	if got := ResolveFFmpeg(""); got != custom {
+		t.Fatalf("found %q on PATH", got)
+	}
 }

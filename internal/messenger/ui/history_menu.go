@@ -6,11 +6,13 @@ import (
 	"context"
 	"image"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/preferences"
 
 	"gio-mw/token"
 	"gio-mw/wdk"
@@ -42,6 +44,12 @@ const (
 	actionSelect
 	actionClearSelection
 	actionEmojiPacks
+	actionReacted
+	actionRead
+	actionEdits
+	actionFilter
+	actionTranslate
+	actionRepeat
 	menuActions
 )
 
@@ -60,8 +68,10 @@ type messageMenu struct {
 	shown  []menuAction
 	items  [menuActions]surface
 	packs  emojiPackLookup
-	// reactions is the strip at the top, when the chat allows reactions.
+	// reactions is the strip at the top, when the chat allows reactions;
+	// reactedOf, the reactions of the message, which its item counts.
 	reactions reactionStrip
+	reactedOf []model.Reaction
 	// target takes right clicks on the history; dismiss, the clicks
 	// around the open menu; panel, those on it. Their sizes keep their
 	// addresses, which tag input, apart.
@@ -159,7 +169,7 @@ func (p *chatPage) menuSelectedText(m model.Message) string {
 
 // canReply reports whether what is sent to the open chat may reply to m.
 func (p *chatPage) canReply(m model.Message) bool {
-	if p.composer == nil || p.composer.source == nil || p.frozen.Frozen() || m.Key.MessageID <= 0 {
+	if p.composer == nil || p.composer.source == nil || p.frozen.Frozen() || m.Key.MessageID <= 0 || m.Deleted {
 		return false
 	}
 	rights, ok := p.source.(model.RightsSource)
@@ -214,8 +224,28 @@ func (p *chatPage) menuActions(m model.Message) []menuAction {
 		}
 		out = append(out, actionSelect)
 	}
+	if !selected && p.canRepeat(m) {
+		out = append(out, actionRepeat)
+	}
 	if p.messageMenu.packs.id == m.Key.MessageID && len(p.messageMenu.packs.found.refs) > 0 {
 		out = append(out, actionEmojiPacks)
+	}
+	if _, ok := p.source.(model.ReactionLister); ok && m.ReactionsListed {
+		out = append(out, actionReacted)
+	}
+	if _, ok := p.source.(model.Translator); ok && !m.Deleted && (menuText(m) != "" || p.menuSelectedText(m) != "") {
+		out = append(out, actionTranslate)
+	}
+	if p.addFilter != nil && p.menuSelectedText(m) != "" {
+		out = append(out, actionFilter)
+	}
+	if _, ok := p.source.(model.KeepStore); ok && !m.EditedAt.IsZero() && !m.Outgoing {
+		out = append(out, actionEdits)
+	}
+	// Without read receipts, a message is read when asked, as AyuGram's
+	// Read Message does.
+	if g, ok := p.source.(model.GhostStore); ok && !g.Ghost().SendRead && !m.Outgoing && p.kind != model.KindSaved && p.threadRoot == 0 && m.Key.MessageID > 0 {
+		out = append(out, actionRead)
 	}
 	return out
 }
@@ -266,9 +296,10 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 	case actionCopyLink:
 		if link, public, ok := p.menuLink(m); ok {
 			copyText(link)
-			p.selectionNotice = l.T("menu.link_copied")
-			if !public {
-				p.selectionNotice = l.T("menu.private_link")
+			if public {
+				p.toast.Show(l.T("menu.link_copied"))
+			} else {
+				p.toast.Show(l.T("menu.private_link"))
 			}
 		}
 	case actionForward:
@@ -285,9 +316,29 @@ func (p *chatPage) menuDo(gtx layout.Context, a menuAction, m model.Message, l l
 		}
 		p.selection.selected[m.Key.MessageID] = true
 		p.activeText = nil
-		p.selectionNotice = ""
 	case actionClearSelection:
 		p.clearSelection()
+	case actionReacted:
+		p.reacted.open(p, m)
+	case actionEdits:
+		p.edits.open(p, m)
+	case actionTranslate:
+		p.translation.open(p, m, p.menuSelectedText(m), string(l.Language()))
+	case actionRepeat:
+		p.repeat(m)
+	case actionFilter:
+		// A filter of the words selected, in every chat, as AyuGram's
+		// quick filter.
+		p.addFilter(preferences.FilterPattern{Text: regexp.QuoteMeta(strings.TrimSpace(p.menuSelectedText(m))), CaseInsensitive: true})
+		p.toast.Show(l.T("filters.added"))
+	case actionRead:
+		if g, ok := p.source.(model.GhostStore); ok {
+			last := m.Key.MessageID
+			for _, part := range parts {
+				last = max(last, part.Key.MessageID)
+			}
+			g.MarkRead(p.chat, last, true)
+		}
 	case actionEmojiPacks:
 		refs := p.messageMenu.packs.found.refs
 		if len(refs) == 1 {
@@ -324,6 +375,25 @@ func (p *chatPage) menuLabel(a menuAction, l localization.Catalog) string {
 		return l.T("menu.select")
 	case actionClearSelection:
 		return l.T("menu.clear_selection")
+	case actionRead:
+		return l.T("menu.read")
+	case actionEdits:
+		return l.T("menu.edits")
+	case actionFilter:
+		return l.T("menu.filter")
+	case actionRepeat:
+		return l.T("menu.repeat")
+	case actionTranslate:
+		if m, ok := p.menuMessage(); ok && p.menuSelectedText(m) != "" {
+			return l.T("menu.translate_selected")
+		}
+		return l.T("menu.translate")
+	case actionReacted:
+		total := 0
+		for _, r := range p.messageMenu.reactedOf {
+			total += r.Count
+		}
+		return l.Count("menu.reacted", total, nil)
 	case actionEmojiPacks:
 		found := p.messageMenu.packs.found
 		text := l.Count("menu.emoji_packs", len(found.refs), nil)
@@ -350,6 +420,18 @@ func menuIcon(a menuAction) wdk.IconWidget {
 		return iconDelete
 	case actionSelect, actionClearSelection:
 		return iconSelect
+	case actionReacted:
+		return iconReacted
+	case actionRead:
+		return iconRead
+	case actionEdits:
+		return iconHistory
+	case actionFilter:
+		return iconFilter
+	case actionTranslate:
+		return iconTranslate
+	case actionRepeat:
+		return iconRepeat
 	}
 	return iconEmoji
 }
@@ -393,6 +475,7 @@ func (p *chatPage) menuLayout(gtx layout.Context, l localization.Catalog) {
 		} else {
 			m.shown = p.menuActions(msg)
 			m.reactions.shown = p.menuReactions(msg)
+			m.reactedOf = msg.Reactions
 			m.rect, m.corner = menuRect(gtx, m.at, size, m.shown, m.reactions.height(gtx))
 		}
 	}

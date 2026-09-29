@@ -223,7 +223,9 @@ func autoBrowser() browser {
 			}
 			return
 		}
-		browserFound = newest(candidates())
+		if program.Searching() {
+			browserFound = newest(candidates())
+		}
 	})
 	return browserFound
 }
@@ -235,7 +237,7 @@ func candidates() []browser {
 	var found []browser
 	seen := map[string]bool{}
 	for _, name := range nativeBrowsers {
-		path, err := exec.LookPath(name)
+		path, err := program.LookPath(name)
 		if err != nil {
 			continue
 		}

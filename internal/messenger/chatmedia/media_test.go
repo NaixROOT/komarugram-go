@@ -24,10 +24,19 @@ import (
 type fakeSource struct {
 	calls atomic.Int32
 	data  []byte
+	// gate, when set, holds loads until it is closed.
+	gate chan struct{}
 }
 
-func (s *fakeSource) Media(context.Context, model.Message) ([]byte, error) {
+func (s *fakeSource) Media(ctx context.Context, _ model.Message) ([]byte, error) {
 	s.calls.Add(1)
+	if s.gate != nil {
+		select {
+		case <-s.gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return s.data, nil
 }
 func loadedManager(t *testing.T) (*Manager, *fakeSource, model.Message) {
@@ -90,7 +99,11 @@ func TestVisibleMediaSurvivesIdleAndPressure(t *testing.T) {
 	}
 }
 func TestAnimationStopsOffscreenWithoutDroppingFrame(t *testing.T) {
-	m, _, msg := loadedManager(t)
+	m, source, msg := loadedManager(t)
+	// The restarted load waits, so that the frame shown meanwhile is the
+	// one kept, not one the load decoded again.
+	source.gate = make(chan struct{})
+	defer close(source.gate)
 	frame, _ := m.Frame(msg, true)
 	entry := m.entries[msg.Media.ID]
 	entry.mu.Lock()
@@ -329,7 +342,7 @@ func TestWebMPreviewCachesLoopAndReusesItAfterScrolling(t *testing.T) {
 	}
 	source := &fakeSource{data: data}
 	m := NewShared(source, func() {})
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	defer m.Close()
 	msg := model.Message{Kind: model.MessageSticker, Media: &model.MessageMedia{ID: "cached-webm", MIMEType: "video/webm", Width: 512, Height: 512}}
 	var clip *stickerClip
@@ -593,7 +606,7 @@ func TestPlayedStickerKeepsItsStillWhenEvicted(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := New(&fakeSource{data: data}, func() {})
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	defer m.Close()
 	sticker := func(i int) model.Message {
 		return model.Message{Kind: model.MessageSticker, Media: &model.MessageMedia{ID: fmt.Sprintf("played/%d", i), MIMEType: "video/webm", Width: 512, Height: 512}}
@@ -658,7 +671,7 @@ func webmManager(t *testing.T, changed func()) *Manager {
 		t.Fatal(err)
 	}
 	m := New(&fakeSource{data: data}, changed)
-	m.ConfigureDecoders(true, "")
+	m.ConfigureDecoders(true, false, "")
 	t.Cleanup(m.Close)
 	return m
 }

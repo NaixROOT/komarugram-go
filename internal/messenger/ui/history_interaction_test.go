@@ -277,7 +277,7 @@ func TestSelectionActionsFollowRights(t *testing.T) {
 	gtx := layout.Context{Ops: new(op.Ops), Now: time.Unix(1000, 0), Constraints: layout.Exact(image.Pt(340, 56)), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Values: map[string]any{}}
 	wdk.InitMaterialThemeInContext(gtx, defaults.NewTheme(gtx, schemes.SchemeBaselineLight()))
 	p.selectionHeader(gtx, localization.For("en"))
-	if !p.snapshotDue || p.forwarding.modal.Shown() || p.selectionCount() != 1 {
+	if !p.shot.modal.Shown() || p.forwarding.modal.Shown() || p.selectionCount() != 1 {
 		t.Fatal("the header acted beyond the rights")
 	}
 	p.messages[0].NoForwards = true

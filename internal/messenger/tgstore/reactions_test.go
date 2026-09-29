@@ -149,6 +149,9 @@ func TestChatReactions(t *testing.T) {
 			full := &tg.ChannelFull{ID: 8, AvailableReactions: &tg.ChatReactionsAll{}}
 			full.SetFlags()
 			out.(*tg.MessagesChatFull).FullChat = full
+		case *tg.HelpGetConfigRequest:
+			// No config: the favorite reaction falls back.
+			return errors.New("no config")
 		default:
 			t.Errorf("unexpected request %T", in)
 		}

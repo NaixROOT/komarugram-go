@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"gio-mw/exp/powersave"
@@ -53,6 +54,9 @@ type Global struct {
 	// account's identifiers in its profile with spoilers, for showing the
 	// screen to others: streams, recordings, screenshots.
 	VisualPrivacy bool `json:"visual_privacy,omitempty"`
+	// StreamerMode hides the windows from screen capture, as AyuGram's
+	// Streamer Mode, where the platform allows it.
+	StreamerMode bool `json:"streamer_mode,omitempty"`
 	// Window locking only covers the UI; account connections stay running.
 	AutoLockMinutes int           `json:"auto_lock_minutes,omitempty"`
 	LockOnMinimize  bool          `json:"lock_on_minimize,omitempty"`
@@ -74,6 +78,93 @@ type Global struct {
 	FFmpegPath  string `json:"ffmpeg_path,omitempty"`
 	// StickerPlayer is empty for automatic selection, or ffmpeg/wasm.
 	StickerPlayer string `json:"sticker_player,omitempty"`
+	// AnimationPlayer plays GIFs and animated avatars, which are MP4: empty
+	// for automatic selection, or ffmpeg/wasm.
+	AnimationPlayer string `json:"animation_player,omitempty"`
+	// AudioPlayer plays voice messages and music: empty or wasm for the
+	// client's own, external for mpv or VLC.
+	AudioPlayer string `json:"audio_player,omitempty"`
+	// Ghost is what the accounts tell others of themselves, as AyuGram's
+	// Ghost Mode, the same for all of them.
+	Ghost Ghost `json:"ghost"`
+	// Keep is what the cache keeps that Telegram takes back, as AyuGram's
+	// saved deleted messages and edits history.
+	Keep Keep `json:"keep"`
+	// Filters hide messages, as AyuGram's message filters.
+	Filters Filters `json:"filters"`
+	// Look is how messages and avatars are drawn, as AyuGram's
+	// customization.
+	Look Look `json:"look"`
+	// ConfirmSticker and ConfirmGIF ask before a sticker or a GIF chosen
+	// in the composer is sent, as AyuGram's confirmations.
+	ConfirmSticker bool `json:"confirm_sticker,omitempty"`
+	ConfirmGIF     bool `json:"confirm_gif,omitempty"`
+}
+
+// Look is how messages and avatars are drawn.
+type Look struct {
+	// BubbleRadius rounds the corners of bubbles, in dp, up to 16.
+	BubbleRadius int `json:"bubble_radius"`
+	// AvatarCorners rounds avatars, from 0, square, to AvatarRound, a
+	// circle.
+	AvatarCorners int `json:"avatar_corners"`
+	// Seconds shows the seconds of a message's time.
+	Seconds bool `json:"seconds,omitempty"`
+	// EditedMark and DeletedMark take the place of the marks of edited and
+	// deleted messages; empty for the default ones.
+	EditedMark  string `json:"edited_mark,omitempty"`
+	DeletedMark string `json:"deleted_mark,omitempty"`
+}
+
+// The bounds of Look, as AyuGram's.
+const (
+	BubbleRadiusMax = 16
+	AvatarRound     = 23
+)
+
+// Filters hide others' messages that match a pattern, or that blocked
+// users sent; all are off by default, as in AyuGram.
+type Filters struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// InChats applies the filters in groups and private chats too; without
+	// it they apply in channels only.
+	InChats bool `json:"in_chats,omitempty"`
+	// HideBlocked hides what blocked users sent, in every chat.
+	HideBlocked bool            `json:"hide_blocked,omitempty"`
+	Patterns    []FilterPattern `json:"patterns,omitempty"`
+}
+
+// FilterPattern is a regular expression, in Go's syntax, that hides the
+// messages it matches, or, Reversed, the ones it does not; in Chat alone,
+// or in every chat for 0.
+type FilterPattern struct {
+	Text            string `json:"text"`
+	Reversed        bool   `json:"reversed,omitempty"`
+	CaseInsensitive bool   `json:"case_insensitive,omitempty"`
+	Chat            int64  `json:"chat,omitempty"`
+}
+
+// Keep is what the cache keeps: see model.Keep. Both are on by default,
+// as in AyuGram.
+type Keep struct {
+	Deleted bool `json:"deleted"`
+	Edits   bool `json:"edits"`
+}
+
+// Ghost is what the accounts tell others: see model.Ghost. Nothing is told
+// by default; a chat is read on sending to it or reacting in it.
+type Ghost struct {
+	SendRead       bool `json:"send_read,omitempty"`
+	SendOnline     bool `json:"send_online,omitempty"`
+	SendTyping     bool `json:"send_typing,omitempty"`
+	ReadOnInteract bool `json:"read_on_interact"`
+}
+
+// Equal reports whether g and o are the same preferences, as saved.
+func (g Global) Equal(o Global) bool {
+	a, errA := json.Marshal(g)
+	b, errB := json.Marshal(o)
+	return errA == nil && errB == nil && string(a) == string(b)
 }
 
 // PlayerPaths are the players the user pointed at, by kind.
@@ -107,6 +198,9 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
+		Ghost:          Ghost{ReadOnInteract: true},
+		Keep:           Keep{Deleted: true, Edits: true},
+		Look:           Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound},
 	}
 }
 
@@ -170,8 +264,17 @@ func validate(g Global) error {
 	if g.Composer < ComposerFloating || g.Composer > ComposerClassic {
 		return errors.New("invalid composer style")
 	}
+	if g.Look.BubbleRadius < 0 || g.Look.BubbleRadius > BubbleRadiusMax || g.Look.AvatarCorners < 0 || g.Look.AvatarCorners > AvatarRound {
+		return errors.New("invalid look")
+	}
 	if g.StickerPlayer != "" && g.StickerPlayer != "ffmpeg" && g.StickerPlayer != "wasm" {
 		return errors.New("invalid sticker player")
+	}
+	if g.AnimationPlayer != "" && g.AnimationPlayer != "ffmpeg" && g.AnimationPlayer != "wasm" {
+		return errors.New("invalid animation player")
+	}
+	if g.AudioPlayer != "" && g.AudioPlayer != "wasm" && g.AudioPlayer != "external" {
+		return errors.New("invalid audio player")
 	}
 	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
 		return errors.New("invalid external player")
@@ -195,6 +298,14 @@ func (s *Store) SetFFmpegPath(path string) error {
 
 func (s *Store) SetStickerPlayer(value string) error {
 	return s.change(func(g *Global) { g.StickerPlayer = value })
+}
+
+func (s *Store) SetAnimationPlayer(value string) error {
+	return s.change(func(g *Global) { g.AnimationPlayer = value })
+}
+
+func (s *Store) SetAudioPlayer(value string) error {
+	return s.change(func(g *Global) { g.AudioPlayer = value })
 }
 
 func (s *Store) SetTheme(value Theme) error {
@@ -224,12 +335,44 @@ func (s *Store) SetVisualPrivacy(on bool) error {
 	return s.change(func(g *Global) { g.VisualPrivacy = on })
 }
 
+// SetStreamerMode hides the windows from screen capture, or shows them.
+func (s *Store) SetStreamerMode(on bool) error {
+	return s.change(func(g *Global) { g.StreamerMode = on })
+}
+
 func (s *Store) SetWindowLock(minutes int, minimize, close bool) error {
 	return s.change(func(g *Global) {
 		g.AutoLockMinutes = minutes
 		g.LockOnMinimize = minimize
 		g.LockOnClose = close
 	})
+}
+
+// SetGhost changes what the accounts tell others of themselves.
+func (s *Store) SetGhost(g Ghost) error {
+	return s.change(func(global *Global) { global.Ghost = g })
+}
+
+// SetKeep changes what the cache keeps that Telegram takes back.
+func (s *Store) SetKeep(k Keep) error {
+	return s.change(func(global *Global) { global.Keep = k })
+}
+
+// SetFilters changes the message filters.
+func (s *Store) SetFilters(f Filters) error {
+	f.Patterns = slices.Clone(f.Patterns)
+	return s.change(func(global *Global) { global.Filters = f })
+}
+
+// SetLook changes how messages and avatars are drawn.
+func (s *Store) SetLook(l Look) error {
+	return s.change(func(global *Global) { global.Look = l })
+}
+
+// SetConfirmations chooses whether stickers and GIFs are sent only once
+// confirmed.
+func (s *Store) SetConfirmations(sticker, gif bool) error {
+	return s.change(func(g *Global) { g.ConfirmSticker, g.ConfirmGIF = sticker, gif })
 }
 
 // SetComposer changes the message composer style for all windows.
@@ -274,7 +417,7 @@ func (s *Store) change(update func(*Global)) error {
 	s.mu.Lock()
 	next := s.global
 	update(&next)
-	if next == s.global {
+	if next.Equal(s.global) {
 		s.mu.Unlock()
 		return nil
 	}

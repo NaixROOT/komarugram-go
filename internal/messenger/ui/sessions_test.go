@@ -89,3 +89,18 @@ func TestRenderSessions(t *testing.T) {
 		v.layoutDialog(gtx, l)
 	})
 }
+
+// Visual privacy mode hides the IP addresses of the devices.
+func TestSessionsPrivate(t *testing.T) {
+	private := true
+	v := newSessionsView(nil, func() {})
+	v.private = func() bool { return private }
+	s := model.Session{IP: "203.0.113.5", Country: ""}
+	if got := v.shown(s).IP; got != "" {
+		t.Fatalf("private mode shows %q", got)
+	}
+	private = false
+	if got := v.shown(s).IP; got != s.IP {
+		t.Fatalf("shows %q", got)
+	}
+}

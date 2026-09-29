@@ -4,9 +4,7 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"image"
-	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -80,6 +78,12 @@ func (p *chatPage) rightsFor(parts []model.Message) model.MessageRights {
 			}
 		}
 	}
+	for _, m := range parts {
+		// Telegram deleted it: only this computer has it.
+		if m.Deleted {
+			r.Forward = false
+		}
+	}
 	if _, ok := p.source.(model.MessageForwarder); !ok {
 		r.Forward = false
 	}
@@ -108,7 +112,7 @@ func (p *chatPage) selectionHeader(gtx layout.Context, l localization.Catalog) l
 		p.openDelete(gtx, rights)
 	}
 	if b.snapshot.Clicked(gtx) && rights.Save {
-		p.snapshotDue = true
+		p.shot.open(p, p.selectedMessages())
 		gtx.Execute(op.InvalidateCmd{})
 	}
 	count := p.selectionCount()
@@ -177,7 +181,6 @@ type forwardPicker struct {
 	rows    map[int64]*surface
 	cancel  surface
 	busy    bool
-	err     error
 	results chan error
 	from    int64
 	ids     []model.MessageID
@@ -207,7 +210,7 @@ func (p *chatPage) openForwardParts(gtx layout.Context, parts []model.Message, s
 	if len(f.ids) == 0 {
 		return
 	}
-	f.from, f.err = p.chat, nil
+	f.from = p.chat
 	f.search.SingleLine = true
 	f.search.SetText("")
 	f.list = scroll.List{List: layout.List{Axis: layout.Vertical}}
@@ -252,13 +255,16 @@ func (p *chatPage) updateForward(l localization.Catalog) {
 	}
 	select {
 	case err := <-f.results:
-		f.busy, f.err, f.results = false, err, nil
+		f.busy, f.results = false, nil
+		if err != nil {
+			f.modal.Toast(l.T("history.forward_failed") + ": " + mediaErrorText(err))
+		}
 		if err == nil {
 			f.modal.Close()
 			if f.from == p.chat && f.selection {
 				p.clearSelection()
 			}
-			p.selectionNotice = l.Format("history.forwarded", map[string]string{"chat": f.target.Title})
+			p.toast.Show(l.Format("history.forwarded", map[string]string{"chat": f.target.Title}))
 		}
 	default:
 	}
@@ -270,7 +276,7 @@ func (p *chatPage) forward(target model.Chat) {
 	if !ok || f.busy {
 		return
 	}
-	f.busy, f.err, f.target = true, nil, target
+	f.busy, f.target = true, target
 	f.results = make(chan error, 1)
 	results, from, ids := f.results, f.from, append([]model.MessageID(nil), f.ids...)
 	ctx := context.Background()
@@ -339,14 +345,6 @@ func (p *chatPage) forwardDialog(gtx layout.Context, l localization.Catalog) {
 						return p.forwardRow(gtx, targets[i])
 					})
 				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if f.err == nil {
-						return layout.Dimensions{}
-					}
-					return layout.Inset{Top: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return label(gtx, l.T("history.forward_failed")+": "+mediaErrorText(f.err), token.TypestyleBodySmall, sc.Error.Color, 3)
-					})
-				}),
 				vspace(8),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -397,132 +395,34 @@ func (p *chatPage) forwardRow(gtx layout.Context, c model.Chat) layout.Dimension
 // snapshotMaxHeight bounds a snapshot to what a GPU texture holds.
 const snapshotMaxHeight = 16384
 
-// snapshotResult is a saved snapshot, or why it was not saved.
-type snapshotResult struct {
-	path string
-	err  error
-}
-
-// takeSnapshot renders the selected messages as they are shown, on the
-// chat's background, to a PNG in the user's pictures. The rows are laid out
-// again into operations of their own, without the selection's highlight,
-// and with the avatars of private chats, which the history leaves out; a
-// headless GPU context renders them off the frame.
-func (p *chatPage) takeSnapshot(gtx layout.Context, l localization.Catalog) {
-	var msgs []model.Message
-	for _, m := range p.messages {
-		if p.selection.selected[m.Key.MessageID] {
-			msgs = append(msgs, m)
-		}
-	}
-	if len(msgs) == 0 {
-		return
-	}
-	width := gtx.Constraints.Max.X
-	ops := new(op.Ops)
-	sgtx := gtx.Disabled()
-	sgtx.Ops = ops
-	sgtx.Constraints = layout.Constraints{Min: image.Pt(width, 0), Max: image.Pt(width, snapshotMaxHeight)}
-	pad := gtx.Dp(8)
-	type row struct {
-		call   op.CallOp
-		height int
-	}
-	var rows []row
-	height := 2 * pad
-	p.snapshotting = true
-	joins := messageJoins(msgs)
-	for i, m := range msgs {
-		date := i == 0 || !sameDay(m.Date, msgs[i-1].Date)
-		macro := op.Record(ops)
-		dims := p.row(sgtx, m, date, joins[i], l, false)
-		if r := p.rows[m.Key.MessageID]; r != nil && p.avatar != nil && joins[i]&joinBelow == 0 {
-			if id := p.senderAvatar(m); id != 0 {
-				offset(sgtx, r.avatarPoint, func(gtx layout.Context) layout.Dimensions {
-					return p.avatar(gtx, id, model.KindUser, p.avatarName(m), 34)
-				})
-			}
-		}
-		rows = append(rows, row{macro.Stop(), dims.Size.Y})
-		height += dims.Size.Y
-	}
-	p.snapshotting = false
-	if height > snapshotMaxHeight {
-		p.selectionNotice = l.T("history.snapshot_too_tall")
-		return
-	}
-	size := image.Pt(width, height)
-	sgtx.Constraints = layout.Exact(size)
-	fillRect(sgtx, scheme(gtx).SurfaceContainerLow, size)
-	if p.appearance != nil {
-		p.appearance.Background(sgtx)
-	}
-	y := pad
-	for _, r := range rows {
-		stack := op.Offset(image.Pt(0, y)).Push(ops)
-		r.call.Add(ops)
-		stack.Pop()
-		y += r.height
-	}
-	results := make(chan snapshotResult, 1)
-	p.snapshots = results
-	name := fmt.Sprintf("komarugram-go-%s.png", time.Now().Format("2006-01-02-150405"))
-	go func() {
-		path, err := renderSnapshot(ops, size, name)
-		results <- snapshotResult{path, err}
-		p.invalidate()
-	}()
-}
-
-// updateSnapshot tells where the last snapshot was saved.
-func (p *chatPage) updateSnapshot(l localization.Catalog) {
-	if p.snapshots == nil {
-		return
-	}
-	select {
-	case r := <-p.snapshots:
-		p.snapshots = nil
-		if r.err != nil {
-			p.selectionNotice = l.T("history.snapshot_failed") + ": " + mediaErrorText(r.err)
-		} else {
-			p.selectionNotice = l.Format("history.snapshot_saved", map[string]string{"path": r.path})
-		}
-	default:
-	}
-}
-
-// renderSnapshot draws ops of size in a headless GPU context and saves the
-// picture as name in the user's pictures.
-func renderSnapshot(ops *op.Ops, size image.Point, name string) (string, error) {
+// renderSnapshot draws ops of size in a headless GPU context.
+func renderSnapshot(ops *op.Ops, size image.Point) (*image.RGBA, error) {
 	// The context is current on this thread only.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	win, err := headless.NewWindow(size.X, size.Y)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer win.Release()
 	if err := win.Frame(ops); err != nil {
-		return "", err
+		return nil, err
 	}
 	img := image.NewRGBA(image.Rectangle{Max: size})
 	if err := win.Screenshot(img); err != nil {
-		return "", err
+		return nil, err
 	}
+	return img, nil
+}
+
+// saveSnapshot saves a snapshot's PNG as name in the user's pictures.
+func saveSnapshot(png []byte, name string) (string, error) {
 	dir := picturesDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, name)
-	f, err := os.Create(path)
-	if err != nil {
-		return "", err
-	}
-	if err := png.Encode(f, img); err != nil {
-		f.Close()
-		return "", err
-	}
-	return path, f.Close()
+	return path, os.WriteFile(path, png, 0o644)
 }
 
 // picturesDir is the user's pictures directory: XDG_PICTURES_DIR on Linux,
@@ -555,4 +455,34 @@ func picturesDir() string {
 		return dir
 	}
 	return home
+}
+
+// canRepeat reports whether m may be sent again, as AyuGram's Repeat
+// Message does: a message that may be forwarded, in a private chat or a
+// group, where the account may write.
+func (p *chatPage) canRepeat(m model.Message) bool {
+	if _, ok := p.source.(model.MessageForwarder); !ok || p.threadRoot != 0 || p.kind == model.KindChannel || !p.canReply(m) {
+		return false
+	}
+	return m.Kind != model.MessageService && p.rightsFor(messageParts(m)).Forward
+}
+
+// repeat forwards m to its own chat, "+1".
+func (p *chatPage) repeat(m model.Message) {
+	forwarder, ok := p.source.(model.MessageForwarder)
+	if !ok {
+		return
+	}
+	var ids []model.MessageID
+	for _, part := range messageParts(m) {
+		ids = append(ids, part.Key.MessageID)
+	}
+	chat := p.chat
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := forwarder.ForwardMessages(ctx, chat, ids, chat); err != nil {
+			p.reportMedia(err)
+		}
+	}()
 }

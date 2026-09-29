@@ -61,6 +61,22 @@ type sessionsView struct {
 	detail  model.Session
 	dialog  modal
 	done    surface
+	// toast is the page's, where a failure to load is told; told is the
+	// failure told last, so that one that repeats on every refresh is told
+	// once.
+	toast *toast
+	told  string
+	// private hides the sessions' IP addresses, in visual privacy mode.
+	private func() bool
+}
+
+// shown is s as the view shows it: without its IP address in visual
+// privacy mode.
+func (v *sessionsView) shown(s model.Session) model.Session {
+	if v.private != nil && v.private() {
+		s.IP = ""
+	}
+	return s
 }
 
 func newSessionsView(source model.SessionsSource, invalidate func()) *sessionsView {
@@ -177,17 +193,17 @@ func (v *sessionsView) Update(gtx layout.Context) {
 func (v *sessionsView) Layout(gtx layout.Context, l localization.Catalog) layout.Dimensions {
 	sc := scheme(gtx)
 	current, others, incomplete, loaded, err := v.sessions()
+	told := ""
+	if err != nil {
+		told = l.T("sessions.failed") + ": " + mediaErrorText(err)
+	}
+	if told != "" && told != v.told && v.toast != nil {
+		v.toast.Show(told)
+	}
+	v.told = told
 	if !loaded {
 		if err != nil {
-			return card(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return label(gtx, l.T("sessions.failed")+": "+mediaErrorText(err), token.TypestyleBodyMedium, sc.Error.Color, 3)
-					}),
-					vspace(8),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &v.retry, l.T("history.retry")) }),
-				)
-			}, defaultCardPadding)
+			return card(gtx, func(gtx layout.Context) layout.Dimensions { return textButton(gtx, &v.retry, l.T("history.retry")) }, defaultCardPadding)
 		}
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -284,7 +300,7 @@ func (v *sessionsView) layoutRow(gtx layout.Context, s model.Session, now time.T
 					return label(gtx, s.App, token.TypestyleBodySmall, sc.Surface.OnColor, 1)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return label(gtx, sessionPlace(s, now, l), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 1)
+					return label(gtx, sessionPlace(v.shown(s), now, l), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 1)
 				}),
 			)
 		})
@@ -299,7 +315,7 @@ func (v *sessionsView) layoutDialog(gtx layout.Context, l localization.Catalog) 
 		return
 	}
 	sc := scheme(gtx)
-	s := v.detail
+	s := v.shown(v.detail)
 	when := l.T("sessions.online")
 	if !s.Current {
 		when = s.Active.Local().Format("02.01.2006 15:04")

@@ -37,8 +37,13 @@ Two applications built on the same base:
 | `pkg/lottie`                | Lottie/.tgs renderer: tlottie compiled to wasm, run by wazero       |
 | `pkg/webm`                  | Matroska/WebM demuxer written in Go                                 |
 | `pkg/vp9`                   | VP9 decoder: libvpx compiled to wasm, run by wazero                 |
+| `pkg/opus`                  | Opus decoder for voice messages: libopus compiled to wasm, OGG parsed in Go, seekable |
+| `pkg/drdec`                 | MP3, FLAC and WAV decoders: dr_libs compiled to wasm, run by wazero |
+| `pkg/aac`                   | AAC decoder for M4A: fdk-aac compiled to wasm, fetched from fdk-aac-wasm, run by wazero |
+| `pkg/audio`                 | Sound output through oto: PulseAudio/PipeWire or ALSA, WASAPI; suspended while idle; resampling to 48 kHz |
 | `pkg/sandbox`               | Limits for the wasm sandboxes: memory per sandbox, a shared budget, slow-operation cutoff |
 | `pkg/player`                | mpv or VLC as an external window, driven over its IPC socket         |
+| `pkg/voice`                 | Voice messages: the microphone through ffmpeg, Opus encoding, Telegram's waveform |
 | `pkg/program`               | Running external programs: `--version` checks, process groups, flatpak launchers |
 | `pkg/tdata`                 | Telegram Desktop tdata (and Telethon/Pyrogram sessions): read and write |
 | `pkg/set`, `pkg/helpers`    | Small generic helpers used by `pkg/tdata`                          |
@@ -316,8 +321,9 @@ Premium, as do two demo contacts.
 
 History opens around the saved message anchor, loads older/newer pages as needed,
 and caches messages, viewport and layout measurements in SQLite. Visible photos,
-GIFs, stickers, custom emoji and avatars load automatically; video and audio
-open on click in an external player, mpv or VLC. With both installed, the first
+GIFs, stickers, custom emoji and avatars load automatically; video opens on
+click in an external player, mpv or VLC. Voice messages and music play in the
+client, with their waveform: see "Voice messages". With both installed, the first
 video asks which one to use; the choice is kept and can be changed in Settings →
 External integrations. Links ask for confirmation before opening in an external
 browser.
@@ -396,6 +402,56 @@ a native file chooser (`kdialog` or `zenity` on Linux), with a path field as a
 fallback. Video upload uses `ffprobe` for dimensions and duration. Creating native
 Telegram checklists requires Premium; received checklists display their items and
 completion state. The demo simulates sending locally without network traffic.
+
+With nothing written, a microphone takes Send's place: it records a voice
+message (`pkg/voice`) through `ffmpeg` — PulseAudio/PipeWire or ALSA on Linux,
+DirectShow on Windows, AVFoundation on macOS — into PCM for its time, loudness
+and waveform, and encodes it to Opus in OGG when it is sent. The cross or Escape
+drops it; recordings under 0.2 s are dropped, as in Telegram Desktop.
+
+### Voice messages and music
+
+A voice message is drawn as in Telegram Desktop: a round play button, the
+waveform Telegram sends with it (`MessageMedia.Waveform`, 5-bit bars unpacked
+by `voice.Bars`), the heard part in the primary color, and the time. It plays
+in the client, without FFmpeg or an external player: `pkg/opus` parses the
+OGG file in Go and decodes its packets with libopus compiled to WebAssembly
+(`opusdec.wasm`, BSD-licensed and embedded; `pkg/opus/build`), as it plays,
+and `pkg/audio` puts the sound out through oto — PulseAudio or PipeWire,
+else ALSA through dlopen, on Linux, WASAPI on Windows, all without cgo. A
+click on the waveform, or a drag across it, moves the message there: the
+decoder starts 80 ms before the point and decodes a few packets, so a voice
+message of any length costs its compressed packets and one decoder. One
+message plays at a time; it stops when the chat changes. A voice message
+sent without a waveform gets one worked out while it plays, with a decoder
+of its own (`voice.Loudness`, the bars Telegram Desktop would send), kept
+for the session. One shown without a waveform gets it as soon as it is on
+screen: its file, 3 MiB at most, is downloaded and decoded in the
+background, one at a time, as Telegram Desktop does; Telegram sends none for
+the voice messages of bots and some services. MP3 voice messages, which
+some bots and clients send, play the same way through dr_mp3
+(`pkg/drdec`: dr_libs's MP3, FLAC and WAV decoders compiled to WebAssembly,
+public domain and embedded), taken to 48 kHz by `audio.Resample`. M4A voice
+messages, as those sent from a file, play through fdk-aac (`pkg/aac`),
+which `pkg/mp4` hands the access units of the sound track: the module is
+not in the binary, as its license grants no patent rights on AAC, and
+`wasmmodule.AACDec` fetches it from
+[fdk-aac-wasm](https://github.com/komarugif/fdk-aac-wasm), at a pinned
+commit, checked against its SHA-256; `KOMARUGRAM_AACDEC` names another
+build. Any other format opens in the external player.
+
+Music plays the same way, drawn as in Telegram Desktop: the button, the
+title and the performer, a bar of how much was heard, which a click or a
+drag moves, and the time. A file plays as it downloads: the decoders read
+it through `MediaStream`, a 128 KiB range at a time, any range — dr_libs
+through a `host.read` import, fdk-aac an access unit at a time, `pkg/mp4`
+only the box headers and the movie box, wherever it is — while the rest
+downloads ahead in the background; the time spent waiting for the network
+is not counted against a sandbox's time limit. An MP3 still downloading
+takes its length from Telegram, not from reading it through. OGG files are
+read whole, their length being on their last page. Settings → External
+integrations can send voice messages and music to the external player
+instead (`AudioPlayer`).
 
 The smile opens Emoji / Stickers / GIF with a debounced search and recent items.
 Installed sticker/custom-emoji packs are fetched through Telegram, standard emoji
@@ -796,7 +852,6 @@ bug, a failed test or a wrong first guess at least once.
   cannot be checked without them — leave such changes until they can.
 - On X11 with Mesa, the first EGL configs with alpha use 24-bit visuals, so a
   transparent X11 window needs an EGL config chosen for a 32-bit visual.
-- There is no git repository: keep a copy of a file before editing it for an
-  experiment.
-- Crash reports are in `~/.cache/komarugram-go/crashes`; a recovered panic is also
-  in the log with its stack.
+- Crash reports are in `~/.cache/komarugram-go/crashes`
+  (`%LocalAppData%\komarugram-go\crashes` on Windows); a recovered panic is
+  also in the log with its stack.

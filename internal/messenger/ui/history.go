@@ -9,11 +9,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"komarugram/internal/diagnostics"
 	"komarugram/internal/messenger/chatmedia"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/preferences"
 	"komarugram/internal/messenger/styledtext"
 	"komarugram/pkg/player"
 
@@ -23,6 +25,7 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/font"
+	"gioui.org/gesture"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -32,6 +35,9 @@ import (
 )
 
 type messageRow struct {
+	// mediaTold is the failure to load the row's media told in the toast
+	// last, so that a failure is told once, not on every frame.
+	mediaTold   error
 	avatarPoint image.Point
 	bodySize    image.Point
 	bodyTop     int
@@ -46,52 +52,84 @@ type messageRow struct {
 	// comments is the bar that opens a channel post's comments.
 	comments surface
 	// reply is the quote of the message replied to, which shows it.
-	reply    surface
+	reply surface
+	// quick takes double clicks on the bubble, which react to it.
+	quick    gesture.Click
 	media    widget.Clickable
 	sticker  surface
+	audio    audioRow
 	revealed bool
 	// tile shows the variant of the media chosen for tileSize pixels.
 	tile     model.Message
 	tileSize image.Point
 }
 type chatPage struct {
-	deletion messageDeletion
-	stickers stickerSetDialog
+	// pinned is the bar of the chat's pinned messages.
+	pinned pinnedBar
+	// reacted lists who reacted to a message; edits, the versions of an
+	// edited one.
+	reacted reactedDialog
+	edits   editsDialog
+	// translation shows a message translated.
+	translation translateDialog
+	// chatSearch searches the chat; chatMenu is the menu of its header.
+	chatSearch chatSearch
+	chatMenu   chatMenu
+	// highlight is the message a search went to, tinted until
+	// highlightUntil; infoAsked, set when the menu asks for the chat's info.
+	highlight      model.MessageID
+	highlightUntil time.Time
+	infoAsked      bool
+	// filter hides messages, as the settings ask; filtered counts what it
+	// hid in the open chat, and showFiltered are the chats that show it.
+	filter       *messageFilter
+	filterShown  *messageFilter
+	filtered     int
+	showFiltered map[int64]bool
+	// addFilter saves a pattern made from selected text.
+	addFilter func(preferences.FilterPattern)
+	deletion  messageDeletion
+	stickers  stickerSetDialog
 	// dialogStickers are the media of the sticker sets shown in the dialog
 	// in this chat; switching chats forgets them.
 	dialogStickers map[string]bool
 	// releaseMemory gives memory a view dropped back to the system later;
 	// keepMemory cancels that when a view is shown again.
-	releaseMemory, keepMemory         func()
-	emojiPacks                        emojiPacksDialog
-	messageMenu                       messageMenu
-	composer                          *messageComposer
-	header                            widget.Clickable
-	appearance                        *chatThemeController
-	files                             *attachmentFiles
-	trace                             *diagnostics.Trace
-	selection                         messageSelection
-	keyboard                          struct{}
-	activeText                        *messageRow
-	actions                           selectionBar
-	forwarding                        forwardPicker
-	selectionNotice                   string
-	images                            *imageOps
-	revision                          uint64
-	dates                             []string
-	dayStart                          []bool
-	joins                             []bubbleJoin
-	nextDay                           []int
-	avatar                            avatarLayout
-	kind                              model.ChatKind
-	linkModal                         modal
-	source                            model.ConversationStore
-	media                             *chatmedia.Manager
-	animate                           bool
-	chat                              int64
-	list                              scroll.List
-	messages                          []model.Message
-	rows                              map[model.MessageID]*messageRow
+	releaseMemory, keepMemory func()
+	emojiPacks                emojiPacksDialog
+	messageMenu               messageMenu
+	composer                  *messageComposer
+	header                    widget.Clickable
+	appearance                *chatThemeController
+	files                     *attachmentFiles
+	trace                     *diagnostics.Trace
+	selection                 messageSelection
+	keyboard                  struct{}
+	activeText                *messageRow
+	actions                   selectionBar
+	forwarding                forwardPicker
+	// toast tells, over the end of the history, what was done in the chat
+	// and what failed there.
+	toast     toast
+	images    *imageOps
+	revision  uint64
+	dates     []string
+	dayStart  []bool
+	joins     []bubbleJoin
+	nextDay   []int
+	avatar    avatarLayout
+	kind      model.ChatKind
+	linkModal modal
+	source    model.ConversationStore
+	media     *chatmedia.Manager
+	animate   bool
+	chat      int64
+	list      scroll.List
+	messages  []model.Message
+	rows      map[model.MessageID]*messageRow
+	// textRunes are the rune counts of the messages' texts, which the
+	// estimates of unmeasured heights need on every change of width.
+	textRunes                         map[model.MessageID]textRunes
 	env                               model.RenderEnvironment
 	heights                           *model.HeightIndex
 	measures                          map[model.MessageID]model.MessageLayout
@@ -101,9 +139,15 @@ type chatPage struct {
 	saved                             time.Time
 	older, newer, retry, open, cancel surface
 	link                              string
-	errorMu                           sync.Mutex
-	mediaError                        error
-	invalidate                        func()
+	// mediaError is a failure of a background task on the chat's media,
+	// reported from its goroutine and told in the toast.
+	errorMu    sync.Mutex
+	mediaError error
+	invalidate func()
+	// online counts the open group's members online.
+	online groupOnline
+	// audio plays the chat's voice messages and music.
+	audio audioPlayer
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
 	openPhoto  func(model.Message)
 	openAuthor func(model.Chat)
@@ -129,17 +173,22 @@ type chatPage struct {
 	chats func() []model.Chat
 	// title is the open chat's, for the initials of its avatar.
 	title string
-	// snapshotDue takes a snapshot of the selection at the end of the
-	// frame; snapshotting is set while its rows are laid out, and
-	// snapshots brings back where it was saved.
-	snapshotDue, snapshotting bool
-	snapshots                 chan snapshotResult
+	// snapshotting is set while the rows of a snapshot are laid out; shot
+	// is the dialog that makes one; historyWidth, how wide the history was
+	// in the last frame, which a snapshot is too.
+	snapshotting bool
+	shot         shotDialog
+	historyWidth int
 	// player and setPlayer read and save the external player the user
 	// chose; playerChoice asks for it.
-	player       func() player.Kind
-	setPlayer    func(player.Kind)
-	playerPaths  func() map[player.Kind]string
-	playerChoice playerChoice
+	player      func() player.Kind
+	setPlayer   func(player.Kind)
+	playerPaths func() map[player.Kind]string
+	// audioExternal reports whether voice messages and music open in the
+	// external player, as chosen in the settings, rather than in the
+	// client.
+	audioExternal func() bool
+	playerChoice  playerChoice
 }
 
 // classicComposer reports whether the composer is a bar below the history.
@@ -208,6 +257,7 @@ func (p *chatPage) Close() {
 		p.composer.cancel()
 	}
 	p.save(true)
+	p.audio.stop()
 	p.media.Close()
 	if p.files != nil {
 		p.files.Close()
@@ -256,9 +306,27 @@ func (p *chatPage) save(force bool) {
 	p.view = v
 	p.saved = time.Now()
 }
+
+// Layout draws the chat's pinned bar, if it has pinned messages, and its
+// history under it.
 func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
+	bar := p.pinnedHeight(gtx, c.ID)
+	if bar == 0 {
+		return p.layoutHistory(gtx, c, l, animate)
+	}
+	size := gtx.Constraints.Max
+	body := gtx
+	body.Constraints = layout.Exact(image.Pt(size.X, max(size.Y-bar, 0)))
+	offset(body, image.Pt(0, bar), func(gtx layout.Context) layout.Dimensions {
+		return p.layoutHistory(gtx, c, l, animate)
+	})
+	p.layoutPinned(gtx, c.ID, l)
+	return layout.Dimensions{Size: size}
+}
+
+func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
 	p.animate = animate
-	p.updateDelete(c.ID)
+	p.updateDelete(c.ID, l)
 	p.trace = diagnostics.From(gtx.Values)
 	if p.trace != nil {
 		p.trace.History = diagnostics.History{Window: p.trace.Window, Chat: c.ID}
@@ -282,9 +350,18 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 		}()
 	}
 	if p.chat != c.ID {
+		if p.audio.chat() != c.ID {
+			p.audio.stop()
+		}
 		p.forgetDialogStickers()
 		p.stickers.stop()
 		p.emojiPacks.stop()
+		p.reacted.stop()
+		p.edits.stop()
+		p.shot.stop()
+		p.translation.stop()
+		p.closeChatSearch()
+		p.chatMenu.open = false
 		p.closeMenu()
 		p.save(true)
 		p.clearSelection()
@@ -304,12 +381,16 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 	p.kind, p.title = c.Kind, c.Title
 	p.menuUpdate(gtx, l)
 	p.updateForward(l)
-	p.updateSnapshot(l)
 	p.source.OpenChat(c.ID)
 	if w, ok := p.source.(model.ChatWatcher); ok {
 		w.WatchChat(p, c.ID)
 	}
 	snapshotEnd := p.trace.Begin("history.snapshot+albums")
+	if p.filterShown != p.filter {
+		// Other filters: the history is read and filtered again.
+		p.filterShown = p.filter
+		p.revision = 0
+	}
 	var history model.History
 	fresh := true
 	if source, ok := p.source.(interface {
@@ -321,7 +402,7 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 	}
 	p.threadRoot = history.ThreadRoot
 	if fresh {
-		history.Messages = model.GroupAlbums(history.Messages)
+		history.Messages = p.filterMessages(model.GroupAlbums(history.Messages), c.ID)
 		p.revision = history.Revision
 	} else {
 		history.Messages = p.messages
@@ -343,8 +424,9 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 		p.appearance.Update(c.ID, token.IsDarkColorSet(sc.Surface))
 		p.appearance.Background(gtx)
 	}
+	p.historyWidth = size.X
 	theme := uint32(sc.Surface.Color.AsNRGBA().R)<<16 | uint32(sc.Surface.Color.AsNRGBA().G)<<8 | uint32(sc.Surface.Color.AsNRGBA().B)
-	env := model.RenderEnvironment{WidthPx: size.X, ScaleMilli: int(gtx.Metric.PxPerDp * 1000), TextScaleMilli: int(gtx.Metric.PxPerSp * 1000), Locale: string(l.Language()), FontRevision: 1, ThemeRevision: theme, RendererRevision: 9}
+	env := model.RenderEnvironment{WidthPx: size.X, ScaleMilli: int(gtx.Metric.PxPerDp * 1000), TextScaleMilli: int(gtx.Metric.PxPerSp * 1000), Locale: string(l.Language()), FontRevision: 1, ThemeRevision: theme, RendererRevision: 10}
 	if p.trace != nil {
 		p.trace.History.Environment = fmt.Sprintf("width:%d dp:%d sp:%d locale:%s font:%d theme:%x renderer:%d", env.WidthPx, env.ScaleMilli, env.TextScaleMilli, env.Locale, env.FontRevision, env.ThemeRevision, env.RendererRevision)
 	}
@@ -480,8 +562,21 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 		call.Add(gtx.Ops)
 		backdrop = &call
 	}
+	end := size.Y
 	if p.composer != nil {
 		p.composer.Layout(gtx, c.ID, l, p, animate, backdrop)
+		end = p.composer.top
+	}
+	p.errorMu.Lock()
+	if err := p.mediaError; err != nil {
+		p.mediaError = nil
+		p.toast.Show(mediaErrorText(err))
+	}
+	p.errorMu.Unlock()
+	p.toast.Layout(gtx, image.Rect(0, top, size.X, end))
+	// Audio of a format no decoder here takes goes to the external player.
+	if m := p.audio.takeExternal(); m != nil {
+		p.play(gtx, *m, p.reportMedia, l)
 	}
 	p.menuLayout(gtx, l)
 	if p.restored && p.list.Position.First < 3 && history.HasOlder && !history.LoadingOlder && history.Err == nil {
@@ -491,15 +586,17 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 		p.source.LoadNewer(p.chat)
 	}
 	p.save(false)
+	if g, ok := p.source.(model.GhostStore); ok && p.threadRoot == 0 {
+		// What the history shows is read, if Ghost allows telling that.
+		if id := p.bottomMessage(); id > 0 {
+			g.MarkRead(c.ID, id, false)
+		}
+	}
 	if len(p.dirty) > 0 {
 		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(500 * time.Millisecond)})
 		if p.trace != nil {
 			p.trace.Recorder.Count(p.trace.Window, "history.invalidate.pending-measurements")
 		}
-	}
-	if p.snapshotDue {
-		p.snapshotDue = false
-		p.takeSnapshot(gtx, l)
 	}
 	return layout.Dimensions{Size: size}
 }
@@ -515,6 +612,13 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	p.forwardDialog(gtx, l)
 	p.emojiPacks.layout(gtx, p, l)
 	p.stickers.layout(gtx, p, l)
+	p.reacted.layout(gtx, p, l)
+	p.edits.layout(gtx, p, l)
+	p.shot.layout(gtx, p, l)
+	p.translation.layout(gtx, p, l)
+	if p.composer != nil {
+		p.composer.layoutConfirm(gtx, p, l)
+	}
 }
 
 // hasMessage reports whether the history shows the message.
@@ -595,22 +699,36 @@ func (p *chatPage) rebuild(messages []model.Message, env model.RenderEnvironment
 
 	hs := make([]int, len(messages))
 	alive := map[model.MessageID]bool{}
+	if p.textRunes == nil {
+		p.textRunes = map[model.MessageID]textRunes{}
+	}
 	for i, m := range messages {
 		alive[m.Key.MessageID] = true
-		hs[i] = max(56, int(float32(60+len([]rune(m.Text))/55*20)*float32(env.ScaleMilli)/1000))
-		if m.Media != nil {
-			hs[i] += 240
-		}
 		if l, ok := p.measures[m.Key.MessageID]; ok && l.ContentRevision == m.ContentRevision {
 			hs[i] = l.HeightPx
 			if p.trace != nil {
 				p.trace.History.LayoutHits++
 			}
+			continue
+		}
+		runes, ok := p.textRunes[m.Key.MessageID]
+		if !ok || runes.revision != m.ContentRevision {
+			runes = textRunes{m.ContentRevision, utf8.RuneCountInString(m.Text)}
+			p.textRunes[m.Key.MessageID] = runes
+		}
+		hs[i] = max(56, int(float32(60+runes.n/55*20)*float32(env.ScaleMilli)/1000))
+		if m.Media != nil {
+			hs[i] += 240
 		}
 	}
 	for id := range p.rows {
 		if !alive[id] {
 			delete(p.rows, id)
+		}
+	}
+	for id := range p.textRunes {
+		if !alive[id] {
+			delete(p.textRunes, id)
 		}
 	}
 	p.pruneSelection(alive)
@@ -620,6 +738,12 @@ func (p *chatPage) rebuild(messages []model.Message, env model.RenderEnvironment
 		p.restore(anchor, off)
 	}
 	p.list.Position.BeforeEnd = !end
+}
+
+// textRunes is how many runes a message's text has, at a revision.
+type textRunes struct {
+	revision uint64
+	n        int
 }
 
 func (p *chatPage) richText(gtx layout.Context, r *messageRow, l localization.Catalog, animate bool) layout.Dimensions {

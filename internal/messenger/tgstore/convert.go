@@ -86,6 +86,7 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 		}
 		if reactions, ok := m.GetReactions(); ok {
 			out.Reactions = convertReactions(reactions)
+			out.ReactionsListed = reactions.CanSeeList && len(out.Reactions) > 0
 		}
 		for _, e := range m.Entities {
 			entity := model.Entity{Offset: e.GetOffset(), Length: e.GetLength()}
@@ -179,8 +180,19 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 		out.Key.ChatID = peerID(m.PeerID)
 		out.Date = time.Unix(int64(m.Date), 0)
 		out.Kind = model.MessageService
-		// Preserve the action type without leaking Go type names into the UI.
-		out.Text = ""
+		out.Outgoing = m.Out
+		out.Post = m.Post
+		if m.FromID != nil {
+			out.SenderID = peerID(m.FromID)
+			out.SenderName = names[out.SenderID]
+		}
+		if r, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
+			out.ReplyToMessageID = model.MessageID(r.ReplyToMsgID)
+		}
+		if reactions, ok := m.GetReactions(); ok {
+			out.Reactions = convertReactions(reactions)
+		}
+		out.Service = serviceAction(m.Action, names)
 	}
 	b, _ := json.Marshal(out)
 	h := fnv.New64a()
@@ -255,6 +267,7 @@ func documentMedia(d *tg.Document) (model.MessageKind, *model.MessageMedia, *fil
 		case *tg.DocumentAttributeAudio:
 			if a.Voice {
 				k = model.MessageVoice
+				m.Waveform = a.Waveform
 			} else {
 				k = model.MessageMusic
 			}

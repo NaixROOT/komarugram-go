@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/voice"
 
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
@@ -353,9 +354,17 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 		if typ == "" {
 			typ = "application/octet-stream"
 		}
-		attrs, err := uploadAttributes(ctx, msg.Path, typ, msg.AsMedia)
+		attrs, err := uploadAttributes(ctx, msg.Path, typ, msg.AsMedia, msg.FFmpeg)
 		if err != nil {
 			return err
+		}
+		if v := msg.Voice; v != nil {
+			typ = voice.FileMIME(msg.Path)
+			if typ == "" {
+				// A recording is encoded to a temporary .ogg file.
+				typ = "audio/ogg"
+			}
+			attrs = []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Voice: true, Duration: int(v.Duration.Round(time.Second) / time.Second), Waveform: v.Waveform}}
 		}
 		file, err := uploader.NewUploader(api).FromPath(ctx, msg.Path)
 		if err != nil {
@@ -364,7 +373,7 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 		if msg.AsMedia && (typ == "image/jpeg" || typ == "image/png") {
 			media = &tg.InputMediaUploadedPhoto{File: file}
 		} else {
-			media = &tg.InputMediaUploadedDocument{File: file, MimeType: typ, ForceFile: !msg.AsMedia, Attributes: attrs}
+			media = &tg.InputMediaUploadedDocument{File: file, MimeType: typ, ForceFile: !msg.AsMedia && msg.Voice == nil, Attributes: attrs}
 		}
 	}
 	var res tg.UpdatesClass
@@ -387,6 +396,8 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 	if err != nil {
 		return fmt.Errorf("send: %w", err)
 	}
+	// Once the message is in the history, the chat may be read up to it.
+	defer s.readOnInteract(chat)
 	if short, ok := res.(*tg.UpdateShortSentMessage); ok {
 		var destination tg.PeerClass
 		switch peer.Kind {

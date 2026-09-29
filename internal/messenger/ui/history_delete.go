@@ -21,7 +21,6 @@ type messageDeletion struct {
 	busy              bool
 	chat              int64
 	ids               []model.MessageID
-	err               error
 	results           chan error
 	rights            model.MessageRights
 	cancel, self, all surface
@@ -54,11 +53,10 @@ func (p *chatPage) openDeleteParts(gtx layout.Context, parts []model.Message, ri
 	}
 	d.ids = ids
 	d.chat = p.chat
-	d.err = nil
 	d.modal.Open()
 	gtx.Execute(op.InvalidateCmd{})
 }
-func (p *chatPage) updateDelete(chat int64) {
+func (p *chatPage) updateDelete(chat int64, l localization.Catalog) {
 	d := &p.deletion
 	if d.modal.Shown() && d.chat != chat {
 		d.modal.Hide()
@@ -69,8 +67,10 @@ func (p *chatPage) updateDelete(chat int64) {
 	select {
 	case err := <-d.results:
 		d.busy = false
-		d.err = err
 		d.results = nil
+		if err != nil {
+			d.modal.Toast(l.T("delete.failed") + ": " + mediaErrorText(err))
+		}
 		if err == nil {
 			d.modal.Close()
 			if d.chat == chat {
@@ -92,7 +92,6 @@ func (p *chatPage) deleteSelected(revoke bool) {
 		return
 	}
 	d.busy = true
-	d.err = nil
 	d.results = make(chan error, 1)
 	results := d.results
 	chat := d.chat
@@ -150,14 +149,6 @@ func (p *chatPage) deleteDialog(gtx layout.Context, l localization.Catalog) {
 					}
 					return layout.Inset{Top: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return label(gtx, hint, token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 3)
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if d.err == nil {
-						return layout.Dimensions{}
-					}
-					return layout.Inset{Top: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return label(gtx, l.T("delete.failed")+": "+mediaErrorText(d.err), token.TypestyleBodySmall, sc.Error.Color, 4)
 					})
 				}),
 				vspace(16),

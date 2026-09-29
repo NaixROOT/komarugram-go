@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"gio-mw/exp"
 	"image"
 	"image/color"
 	"image/png"
@@ -38,8 +39,8 @@ func (staticAccounts) LogOut(string)              {}
 func (staticAccounts) Subscribe(func()) func()    { return func() {} }
 
 // TestRenderSettingsAccounts draws the main settings page with a list of
-// saved accounts and saves a screenshot, for looking at it. SETTINGS_SECTION=appearance
-// or integrations draws that section instead:
+// saved accounts and saves a screenshot, for looking at it. SETTINGS_SECTION=appearance,
+// privacy or integrations draws that section instead:
 //
 //	SETTINGS_PNG=/tmp/settings.png go test ./internal/messenger/ui -run RenderSettingsAccounts
 func TestRenderSettingsAccounts(t *testing.T) {
@@ -67,11 +68,30 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	size := image.Pt(900, 700)
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance
-		size.Y = 1000
+		p.confirmations = func() (bool, bool) { return true, false }
+		p.setConfirmations = func(bool, bool) {}
+		look := preferences.Look{BubbleRadius: 8, AvatarCorners: 10, Seconds: true}
+		p.lookView.look = func() preferences.Look { return look }
+		p.lookView.setLook = func(l preferences.Look) { look = l }
+		size.Y = 1800
+	}
+	if os.Getenv("SETTINGS_SECTION") == "privacy" {
+		p.section = settingsPrivacy
+		size.Y = 2300
+		ghost := preferences.Ghost{ReadOnInteract: true}
+		p.ghost = func() preferences.Ghost { return ghost }
+		p.setGhost = func(g preferences.Ghost) { ghost = g }
+		keep := preferences.Keep{Deleted: true, Edits: true}
+		p.keep = func() preferences.Keep { return keep }
+		p.setKeep = func(k preferences.Keep) { keep = k }
+		filters := preferences.Filters{Enabled: true, Patterns: []preferences.FilterPattern{{Text: "реклама|промокод", CaseInsensitive: true}, {Text: "^#", Reversed: true, Chat: 5}}}
+		p.filtersView.filters = func() preferences.Filters { return filters }
+		p.filtersView.setFilters = func(f preferences.Filters) { filters = f }
+		p.filtersView.remove = make([]surface, 2)
 	}
 	if os.Getenv("SETTINGS_SECTION") == "integrations" {
 		p.section = settingsIntegrations
-		size.Y = 1100
+		size.Y = 1300
 		// A VLC the user pointed at, and a file that is not mpv.
 		custom := map[player.Kind]string{player.VLC: "/var/lib/flatpak/exports/bin/org.videolan.VLC", player.MPV: "/usr/bin/ls"}
 		p.players.paths = func() map[player.Kind]string { return custom }
@@ -99,6 +119,8 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	gtx := layout.Context{Ops: ops, Now: time.Now(), Constraints: layout.Exact(size), Metric: unit.Metric{PxPerDp: 1.25, PxPerSp: 1.25}, Values: map[string]any{}}
 	wdk.InitMaterialThemeInContext(gtx, defaults.NewTheme(gtx, schemes.SchemeBaselineLight()))
 	images.BeginFrame()
+	// The root surface, which sections drawn by exp widgets read.
+	exp.Background(gtx)
 	p.Update(gtx, themeAuto, "ru")
 	p.Layout(gtx, themeAuto, appearance.Light, false, localization.For("ru"))
 	images.EndFrame()

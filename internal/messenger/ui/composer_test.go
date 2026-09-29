@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -259,11 +260,14 @@ func TestRenderComposer(t *testing.T) {
 			Items: []model.PickerItem{{ID: "preview/1", Emoji: "🐈"}, {ID: "preview/2", Emoji: "🐕"}, {ID: "preview/3", Emoji: "🐱"}}}}
 	case "gif":
 		h.p.composer.tab = model.PickerGIF
-	case "classic", "floating":
+	case "classic", "floating", "toast", "toast-classic":
 		h.p.composer.pickerOpen = false
-		classic := os.Getenv("COMPOSER_VIEW") == "classic"
+		classic := strings.HasSuffix(os.Getenv("COMPOSER_VIEW"), "classic")
 		h.p.classic = func() bool { return classic }
 		h.chat = 2
+		if strings.HasPrefix(os.Getenv("COMPOSER_VIEW"), "toast") {
+			h.p.toast.Show("Не удалось отправить сообщение: нет соединения с Telegram")
+		}
 	case "blur":
 		// The history scrolled so that messages pass behind the blurred capsule.
 		h.p.composer.pickerOpen = false
@@ -284,6 +288,16 @@ func TestRenderComposer(t *testing.T) {
 		h.p.list.Position.BeforeEnd = true
 		h.p.list.Position.First = len(h.p.messages) - 4
 		h.p.list.Position.Offset = 120
+	case "voice":
+		// A voice message being recorded.
+		h.p.composer.pickerOpen = false
+		h.chat = 2
+		h.frame()
+		levels := make([]float32, 200)
+		for i := range levels {
+			levels[i] = float32(math.Abs(math.Sin(float64(i)/5))) * 0.6
+		}
+		h.p.composer.recording = &voiceRecording{rec: &fakeRecorder{}, chat: 2, levels: levels, sampled: h.now.Add(time.Hour)}
 	case "tasks":
 		h.p.composer.pickerOpen = false
 		h.p.composer.form = 3

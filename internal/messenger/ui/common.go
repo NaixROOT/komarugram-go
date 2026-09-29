@@ -94,7 +94,7 @@ func avatar(gtx layout.Context, id int64, kind model.ChatKind, title string, siz
 	if kind == model.KindSaved {
 		color = avatarColors[5]
 	}
-	paint.FillShape(gtx.Ops, color.AsNRGBA(), clip.Ellipse{Max: sz}.Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, color.AsNRGBA(), avatarShape(gtx, sz).Op(gtx.Ops))
 	gtx.Constraints = layout.Exact(sz)
 	if kind == model.KindSaved {
 		iconPx := px / 2

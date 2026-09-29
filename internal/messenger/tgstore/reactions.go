@@ -33,8 +33,14 @@ type reactionState struct {
 	toggling sync.Mutex
 	// all are Telegram's reactions (messages.getAvailableReactions), and
 	// premium the emoji among them only Premium may choose.
-	all        []model.Reaction
-	premium    map[string]bool
+	all     []model.Reaction
+	premium map[string]bool
+	// top are the account's top reactions (messages.getTopReactions), whose
+	// custom emoji a Premium account may choose where a chat allows them;
+	// favorite, the reaction of a double click (the config's
+	// reactions_default).
+	top        []model.Reaction
+	favorite   model.Reaction
 	allLoaded  bool
 	allLoading bool
 	// chats are the reactions each chat allows; loading, the chats asked.
@@ -124,6 +130,13 @@ func (s *Store) ChatReactions(chat int64) ([]model.Reaction, int, bool) {
 				list = append(list, one)
 			}
 		}
+		if premium && allowed.custom {
+			for _, one := range r.top {
+				if one.DocumentID != 0 {
+					list = append(list, one)
+				}
+			}
+		}
 	} else {
 		list = allowed.some
 	}
@@ -164,11 +177,33 @@ func (s *Store) forgetReactionLoads() {
 }
 
 func (s *Store) loadAvailableReactions(ctx context.Context, api *tg.Client) {
+	// Telegram Desktop's favorite without a config is the thumbs up.
+	favorite := model.Reaction{Emoji: "👍"}
+	if cfg, err := api.HelpGetConfig(ctx); err == nil {
+		if def, ok := cfg.GetReactionsDefault(); ok {
+			if one, ok := convertReaction(def); ok && !one.Paid {
+				favorite = one
+			}
+		}
+	}
+	var top []model.Reaction
+	if s.Me().Premium {
+		if res, err := api.MessagesGetTopReactions(ctx, &tg.MessagesGetTopReactionsRequest{Limit: 50}); err == nil {
+			if list, ok := res.(*tg.MessagesReactions); ok {
+				for _, one := range list.Reactions {
+					if reaction, ok := convertReaction(one); ok && !reaction.Paid {
+						top = append(top, reaction)
+					}
+				}
+			}
+		}
+	}
 	res, err := api.MessagesGetAvailableReactions(ctx, 0)
 	r := &s.reactions
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.allLoading = false
+	r.favorite, r.top = favorite, top
 	list, ok := res.(*tg.MessagesAvailableReactions)
 	if err != nil || !ok {
 		return
@@ -274,6 +309,7 @@ func (s *Store) ToggleReaction(msg model.Message, reaction model.Reaction, repor
 		c.mu.Unlock()
 		err := s.sendReaction(ctx, api, peer, id, model.ChosenReactions(after))
 		if err == nil {
+			s.readOnInteract(chat)
 			return
 		}
 		// Undo, unless something changed the reactions since.
@@ -331,6 +367,10 @@ func (s *Store) applyReactions(chat int64, id int, reactions tg.MessageReactions
 			}
 		}
 		m.Reactions = next
+		if !reactions.Min {
+			m.ReactionsListed = reactions.CanSeeList
+		}
+		m.ReactionsListed = m.ReactionsListed && len(next) > 0
 	})
 }
 
@@ -397,4 +437,70 @@ func (s *Store) changeMessage(chat int64, id int, change func(*model.Message)) b
 	_ = cache.SaveMessages(ctx, []model.Message{*changed})
 	s.changed()
 	return true
+}
+
+// QuickReaction implements model.QuickReactor: the account's default
+// reaction, where the chat allows it.
+func (s *Store) QuickReaction(chat int64) (model.Reaction, bool) {
+	available, _, ok := s.ChatReactions(chat)
+	if !ok {
+		return model.Reaction{}, false
+	}
+	s.reactions.mu.Lock()
+	favorite := s.reactions.favorite
+	s.reactions.mu.Unlock()
+	for _, one := range available {
+		if one.Same(favorite) {
+			return favorite, true
+		}
+	}
+	return model.Reaction{}, false
+}
+
+// Reacted implements model.ReactionLister with
+// messages.getMessageReactionsList.
+func (s *Store) Reacted(ctx context.Context, msg model.Message, reaction model.Reaction, offset string, limit int) (model.ReactedPage, error) {
+	c := s.history
+	c.mu.Lock()
+	api, peer := c.api, c.peers[msg.Key.ChatID]
+	c.mu.Unlock()
+	if api == nil {
+		return model.ReactedPage{}, errNotConnected
+	}
+	req := &tg.MessagesGetMessageReactionsListRequest{Peer: peer.input(), ID: int(msg.Key.MessageID), Limit: limit}
+	if reaction != (model.Reaction{}) {
+		req.SetReaction(inputReaction(reaction))
+	}
+	if offset != "" {
+		req.SetOffset(offset)
+	}
+	res, err := api.MessagesGetMessageReactionsList(ctx, req)
+	if err != nil {
+		return model.ReactedPage{}, err
+	}
+	s.rememberPeers(res.Users, res.Chats)
+	names := map[int64]string{}
+	for _, u := range res.Users {
+		if u, ok := u.(*tg.User); ok {
+			names[peerID(&tg.PeerUser{UserID: u.ID})] = userName(u)
+		}
+	}
+	for _, ch := range res.Chats {
+		switch ch := ch.(type) {
+		case *tg.Chat:
+			names[peerID(&tg.PeerChat{ChatID: ch.ID})] = ch.Title
+		case *tg.Channel:
+			names[peerID(&tg.PeerChannel{ChannelID: ch.ID})] = ch.Title
+		}
+	}
+	page := model.ReactedPage{Count: res.Count, Next: res.NextOffset}
+	for _, one := range res.Reactions {
+		r, ok := convertReaction(one.Reaction)
+		if !ok {
+			continue
+		}
+		id := peerID(one.PeerID)
+		page.List = append(page.List, model.Reacted{PeerID: id, Name: names[id], Reaction: r, Date: time.Unix(int64(one.Date), 0)})
+	}
+	return page, nil
 }

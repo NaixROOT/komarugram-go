@@ -296,7 +296,7 @@ func (p *settingsPage) refreshPrograms() {
 		p.players.programs[kind].refresh(context.Background(), p.invalidate)
 	}
 	p.browser.refresh(context.Background(), p.invalidate)
-	p.stickers.program.refresh(context.Background(), p.invalidate)
+	p.decoders.program.refresh(context.Background(), p.invalidate)
 }
 
 func (p *settingsPage) layoutIntegrations(gtx layout.Context, l localization.Catalog) layout.Dimensions {
@@ -304,7 +304,11 @@ func (p *settingsPage) layoutIntegrations(gtx layout.Context, l localization.Cat
 	children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return p.players.Layout(gtx, l)
 	}), vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return p.stickers.Layout(gtx, l)
+		return p.decoders.stickers.Layout(gtx, l)
+	}), vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return p.decoders.animations.Layout(gtx, l)
+	}), vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return p.decoders.audio.Layout(gtx, l)
 	})}
 	for _, kind := range []player.Kind{player.VLC, player.MPV} {
 		children = append(children, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -312,7 +316,7 @@ func (p *settingsPage) layoutIntegrations(gtx layout.Context, l localization.Cat
 		}))
 	}
 	children = append(children, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return p.stickers.program.Layout(gtx, l)
+		return p.decoders.program.Layout(gtx, l)
 	}), vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return p.browser.Layout(gtx, l)
 	}))

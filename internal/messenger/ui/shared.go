@@ -5,6 +5,9 @@ package ui
 import (
 	"context"
 	"image"
+	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"komarugram/internal/crash"
@@ -16,6 +19,7 @@ import (
 	"gio-mw/wdk"
 	"gio-mw/widget/scroll"
 
+	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -57,13 +61,25 @@ type chatInfo struct {
 	modal             modal
 	sections          map[model.SharedKind]*settingsItem
 	themesButton      settingsItem
-	themePage         bool
-	themes            *chatThemeController
+	// username copies the chat's @username, and usernameLink its link, as
+	// AyuGram's Copy Username and Copy Username as Link.
+	usernames              model.UsernameSource
+	username, usernameLink settingsItem
+	// told is the failure to load told in the toast last.
+	told error
+	// details tells the registration of a user and the data center of a
+	// chat's photo, as materialgram's profile; each row copies its text.
+	details                  model.ChatDetailer
+	registration, dataCenter settingsItem
+	themePage                bool
+	themes                   *chatThemeController
 }
 
 func newChatInfo(source model.ConversationStore, images *imageOps, invalidate func()) *chatInfo {
 	p := &chatInfo{invalidate: invalidate, sections: map[model.SharedKind]*settingsItem{}}
 	p.source, _ = source.(model.SharedMediaSource)
+	p.usernames, _ = source.(model.UsernameSource)
+	p.details, _ = source.(model.ChatDetailer)
 	p.collection, _ = source.(model.SharedCollectionSource)
 	p.renderer = newChatPage(source, invalidate)
 	p.renderer.media.Close()
@@ -249,6 +265,27 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 		return
 	}
 	p.drain()
+	if p.problem != nil && p.problem != p.told {
+		p.modal.Toast(mediaErrorText(p.problem))
+	}
+	p.told = p.problem
+	if p.themes != nil {
+		if err := p.themes.newProblem(); err != nil {
+			p.modal.Toast(mediaErrorText(err))
+		}
+	}
+	// What the media shown here tell goes in this dialog's toast: the
+	// renderer's own is not drawn.
+	p.renderer.errorMu.Lock()
+	if err := p.renderer.mediaError; err != nil {
+		p.renderer.mediaError = nil
+		p.modal.Toast(mediaErrorText(err))
+	}
+	p.renderer.errorMu.Unlock()
+	if text := p.renderer.toast.Text(); text != "" {
+		p.renderer.toast.Hide()
+		p.modal.Toast(text)
+	}
 	// The dialogs over this one take Escape first.
 	if p.renderer.link != "" {
 		p.renderer.linkModal.Update(gtx, false)
@@ -265,6 +302,26 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 	for k, c := range p.sections {
 		if c.click.Clicked(gtx) {
 			p.selectSection(k)
+		}
+	}
+	if name := p.chatUsername(); name != "" {
+		if p.username.click.Clicked(gtx) {
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("@" + name))})
+			p.modal.Toast(l.T("info.username_copied"))
+		}
+		if p.usernameLink.click.Clicked(gtx) {
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("https://t.me/" + name))})
+			p.modal.Toast(l.T("info.link_copied"))
+		}
+	}
+	registration, dataCenter := p.detailTexts(l)
+	for _, row := range []struct {
+		item *settingsItem
+		text string
+	}{{&p.registration, registration}, {&p.dataCenter, dataCenter}} {
+		if row.text != "" && row.item.click.Clicked(gtx) {
+			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(row.text))})
+			p.modal.Toast(l.T("info.copied"))
 		}
 	}
 	if p.themesButton.click.Clicked(gtx) {
@@ -368,9 +425,52 @@ func (p *chatInfo) layoutInfo(gtx layout.Context, l localization.Catalog) layout
 		return layout.Inset{Top: 8, Bottom: 16, Left: 16, Right: 16}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return label(gtx, chatStatus(p.chat, l), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
+					return label(gtx, p.renderer.chatStatusOnline(p.chat, gtx.Now, l), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.status(gtx, l) }), vspace(12),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					name := p.chatUsername()
+					if name == "" {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return card(gtx, func(gtx layout.Context) layout.Dimensions {
+							subtitle := l.T("info.username")
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return p.username.Layout(gtx, iconCopy, "@"+name, subtitle)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return p.usernameLink.Layout(gtx, iconLink, l.T("info.copy_link"), "t.me/"+name)
+								}),
+							)
+						}, 6)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					registration, dataCenter := p.detailTexts(l)
+					if registration == "" && dataCenter == "" {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return card(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if registration == "" {
+										return layout.Dimensions{}
+									}
+									return p.registration.Layout(gtx, iconCalendar, registration, l.T("info.registration"))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if dataCenter == "" {
+										return layout.Dimensions{}
+									}
+									return p.dataCenter.Layout(gtx, iconDataCenter, dataCenter, l.T("info.dc"))
+								}),
+							)
+						}, 6)
+					})
+				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if p.themes == nil {
 						return layout.Dimensions{}
@@ -425,13 +525,7 @@ func (p *chatInfo) status(gtx layout.Context, l localization.Catalog) layout.Dim
 		})
 	}
 	if p.problem != nil {
-		return textButton(gtx, &p.retry, l.T("history.retry")+" · "+mediaErrorText(p.problem))
-	}
-	p.renderer.errorMu.Lock()
-	err := p.renderer.mediaError
-	p.renderer.errorMu.Unlock()
-	if err != nil {
-		return label(gtx, mediaErrorText(err), token.TypestyleBodySmall, scheme(gtx).Error.Color, 3)
+		return textButton(gtx, &p.retry, l.T("history.retry"))
 	}
 	if p.section != "" && len(p.messages) == 0 {
 		return label(gtx, l.SharedEmpty(p.section), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
@@ -542,4 +636,32 @@ var sharedIcons = map[model.SharedKind]wdk.IconWidget{
 	model.SharedPolls: wdk.RequireIconWidget(icons.SocialPoll), model.SharedGIFs: wdk.RequireIconWidget(icons.ActionGIF),
 	model.SharedSaved: iconSaved, model.SharedStories: wdk.RequireIconWidget(icons.AVPlayCircleOutline),
 	model.SharedGifts: wdk.RequireIconWidget(icons.ActionCardGiftcard), model.SharedGroups: iconGroups,
+}
+
+// chatUsername is the open chat's public username, when it has one.
+func (p *chatInfo) chatUsername() string {
+	if p.usernames == nil || p.chat.ID == 0 {
+		return ""
+	}
+	return p.usernames.Username(p.chat.ID)
+}
+
+// detailTexts are the rows of the chat's details: when a user registered,
+// and where the chat's photo is kept; empty when not known.
+func (p *chatInfo) detailTexts(l localization.Catalog) (registration, dataCenter string) {
+	if p.details == nil || p.chat.ID == 0 {
+		return "", ""
+	}
+	if p.chat.Kind == model.KindUser || p.chat.Kind == model.KindBot {
+		at, how := model.RegisteredAround(p.chat.ID)
+		key := map[model.Registration]string{model.RegisteredAbout: "info.registered_about", model.RegisteredBefore: "info.registered_before", model.RegisteredAfter: "info.registered_after"}[how]
+		registration = l.Format(key, map[string]string{"date": at.Local().Format("01.2006")})
+	}
+	if dc := p.details.ChatDetails(p.chat.ID).PhotoDC; dc > 0 {
+		dataCenter = "DC " + strconv.Itoa(dc)
+		if name := model.DataCenterName(dc); name != "" {
+			dataCenter += ", " + name
+		}
+	}
+	return registration, dataCenter
 }

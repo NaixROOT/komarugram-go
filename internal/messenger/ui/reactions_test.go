@@ -3,11 +3,14 @@
 package ui
 
 import (
+	"context"
 	"image"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gioui.org/f32"
 	"gioui.org/io/pointer"
@@ -178,4 +181,122 @@ func TestMenuReactionsArriveOpen(t *testing.T) {
 	if got := len(h.page.messageMenu.reactions.shown); got != len(demoEmoji) {
 		t.Fatalf("strip shows %d reactions", got)
 	}
+}
+
+// quickReactionStore also knows the reaction of a double click.
+type quickReactionStore struct {
+	reactionMenuStore
+}
+
+func (s *quickReactionStore) QuickReaction(int64) (model.Reaction, bool) {
+	return model.Reaction{Emoji: "👍"}, true
+}
+
+// A double click on a bubble, off its text, puts the default reaction on
+// its message; a single click does not.
+func TestQuickReactionOnDoubleClick(t *testing.T) {
+	var store *quickReactionStore
+	h := newMenuHarnessOn(t, nil, func(s *menuStore) model.ConversationStore {
+		store = &quickReactionStore{reactionMenuStore{menuStore: s}}
+		return store
+	})
+	p := h.page
+	at := h.messageAt(5)
+	r := p.rows[5]
+	top := at.Y - float32(p.measures[5].HeightPx)/2
+	// The corner of the bubble under its time, where no text is.
+	pt := f32.Pt(float32(r.avatarPoint.X+r.bodySize.X-3), top+float32(r.bodyTop+r.bodySize.Y-3))
+	h.press(pointer.ButtonPrimary, pt)
+	h.frames(30)
+	if len(store.toggled) != 0 {
+		t.Fatalf("a single click reacted: %v", store.toggled)
+	}
+	h.press(pointer.ButtonPrimary, pt)
+	h.press(pointer.ButtonPrimary, pt)
+	h.frame()
+	if len(store.toggled) != 1 || store.toggled[0].Emoji != "👍" {
+		t.Fatalf("a double click reacted with %v", store.toggled)
+	}
+}
+
+// reactedStore lists who reacted.
+type reactedStore struct {
+	reactionMenuStore
+	asked []model.Reaction
+}
+
+func (s *reactedStore) Reacted(_ context.Context, _ model.Message, r model.Reaction, offset string, _ int) (model.ReactedPage, error) {
+	s.mu.Lock()
+	s.asked = append(s.asked, r)
+	s.mu.Unlock()
+	if offset != "" {
+		return model.ReactedPage{Count: 3, List: []model.Reacted{{PeerID: 9, Name: "Carl", Reaction: model.Reaction{Emoji: "❤"}}}}, nil
+	}
+	return model.ReactedPage{Count: 3, Next: "2", List: []model.Reacted{{PeerID: 7, Name: "Ann", Reaction: model.Reaction{Emoji: "❤"}}, {PeerID: 8, Name: "Bob", Reaction: model.Reaction{Emoji: "👍"}}}}, nil
+}
+
+// The menu of a message whose reactions may be listed shows how many
+// reacted, and its item lists them, page after page.
+func TestReactedList(t *testing.T) {
+	var store *reactedStore
+	h := newMenuHarnessOn(t, func(_ *menuStore, messages []model.Message) {
+		messages[2].Reactions = []model.Reaction{{Emoji: "❤", Count: 2}, {Emoji: "👍", Count: 1}}
+		messages[2].ReactionsListed = true
+	}, func(s *menuStore) model.ConversationStore {
+		store = &reactedStore{reactionMenuStore: reactionMenuStore{menuStore: s}}
+		return store
+	})
+	h.openMenu(4)
+	if slices.Contains(h.page.messageMenu.shown, actionReacted) {
+		t.Fatal("a message without its reactions listed offers who reacted")
+	}
+	h.page.closeMenu()
+	h.frames(30)
+	h.openMenu(3)
+	if got := h.page.menuLabel(actionReacted, localization.For("en")); got != "3 Reacted" {
+		t.Fatalf("the item reads %q", got)
+	}
+	h.choose(actionReacted)
+	d := &h.page.reacted
+	deadline := time.Now().Add(5 * time.Second)
+	for len(d.lists) == 0 || len(d.lists[0].items) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("listed %+v", d.lists)
+		}
+		time.Sleep(time.Millisecond)
+		h.frame()
+	}
+	if len(d.filters) != 3 || d.lists[0].items[2].Name != "Carl" || !d.lists[0].done {
+		t.Fatalf("tabs %v, list %+v", d.filters, d.lists[0])
+	}
+}
+
+// TestRenderReacted saves the list of who reacted, for looking at it:
+// REACTED_PNG=/tmp/reacted.png.
+func TestRenderReacted(t *testing.T) {
+	path := os.Getenv("REACTED_PNG")
+	if path == "" {
+		t.Skip("set REACTED_PNG to a file")
+	}
+	var store *reactedStore
+	h := newMenuHarnessOn(t, func(_ *menuStore, messages []model.Message) {
+		messages[2].Reactions = []model.Reaction{{Emoji: "❤", Count: 2}, {Emoji: "👍", Count: 1}}
+		messages[2].ReactionsListed = true
+	}, func(s *menuStore) model.ConversationStore {
+		store = &reactedStore{reactionMenuStore: reactionMenuStore{menuStore: s}}
+		return store
+	})
+	p := h.page
+	m, _ := p.messageByID(3)
+	p.reacted.open(p, m)
+	l := localization.For("ru")
+	renderFrames(t, image.Pt(500, 700), path, func(gtx layout.Context) {
+		p.images.BeginFrame()
+		p.media.BeginFrame()
+		p.Layout(gtx, model.Chat{ID: 1, Title: "Чат", Kind: model.KindGroup}, l, false)
+		p.layoutDialogs(gtx, l)
+		p.media.EndFrame()
+		p.images.EndFrame()
+		time.Sleep(2 * time.Millisecond)
+	})
 }

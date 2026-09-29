@@ -12,6 +12,7 @@ import (
 	"gio-mw/token"
 	"gio-mw/wdk"
 
+	"gioui.org/gesture"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -25,11 +26,12 @@ import (
 )
 
 var (
-	iconViews    = wdk.RequireIconWidget(icons.ActionVisibility)
-	iconComments = wdk.RequireIconWidget(icons.CommunicationChatBubbleOutline)
-	iconFileRow  = wdk.RequireIconWidget(icons.EditorInsertDriveFile)
-	iconPlayFile = wdk.RequireIconWidget(icons.AVPlayArrow)
-	iconInfo     = wdk.RequireIconWidget(icons.ActionInfoOutline)
+	iconViews     = wdk.RequireIconWidget(icons.ActionVisibility)
+	iconComments  = wdk.RequireIconWidget(icons.CommunicationChatBubbleOutline)
+	iconFileRow   = wdk.RequireIconWidget(icons.EditorInsertDriveFile)
+	iconPlayFile  = wdk.RequireIconWidget(icons.AVPlayArrow)
+	iconPauseFile = wdk.RequireIconWidget(icons.AVPause)
+	iconInfo      = wdk.RequireIconWidget(icons.ActionInfoOutline)
 	// The marks of a chat's kind before its title in the chat list.
 	iconKindGroup   = wdk.RequireIconWidget(icons.SocialPeople)
 	iconKindChannel = wdk.RequireIconWidget(icons.ActionAnnouncement)
@@ -37,10 +39,9 @@ var (
 )
 
 const (
-	// bubbleRadius rounds a bubble's corners; bubbleRadiusJoined, the
-	// corners where it touches another bubble of the same sender, as
-	// materialgram draws them.
-	bubbleRadius       = unit.Dp(16)
+	// bubbleRadiusJoined rounds a bubble's corners where it touches
+	// another bubble of the same sender, as materialgram draws them; the
+	// others are as round as the look asks (bubbleRadiusOf).
 	bubbleRadiusJoined = unit.Dp(6)
 	// joinGap is the time within which messages of one sender join.
 	joinGap = 15 * time.Minute
@@ -82,7 +83,8 @@ type bubbleShape struct{ nw, ne, se, sw int }
 // shapeOf is the shape of a bubble that joins its neighbours so: the
 // corners on its sender's side that touch them are less round.
 func shapeOf(gtx layout.Context, join bubbleJoin, outgoing bool) bubbleShape {
-	r, small := gtx.Dp(bubbleRadius), gtx.Dp(bubbleRadiusJoined)
+	r := bubbleRadiusOf(gtx)
+	small := min(gtx.Dp(bubbleRadiusJoined), r)
 	s := bubbleShape{r, r, r, r}
 	if outgoing {
 		if join&joinAbove != 0 {
@@ -154,6 +156,20 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 	if m.ReplyToMessageID != 0 && r.reply.Clicked(gtx) {
 		p.jumpTo(m.ReplyToMessageID)
 	}
+	for {
+		e, ok := r.quick.Update(gtx.Source)
+		if !ok {
+			break
+		}
+		if e.Kind == gesture.KindClick && e.NumClicks == 2 {
+			p.quickReact(m)
+		}
+	}
+	if m.Service != nil && m.Service.Kind == model.ServiceHidden && !date {
+		// Telegram Desktop shows nothing for it, as a group's migration.
+		r.bodySize = image.Point{}
+		return layout.Dimensions{}
+	}
 	top, bottom := unit.Dp(4), unit.Dp(4)
 	if join&joinAbove != 0 {
 		top = 1
@@ -182,8 +198,12 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 				if m.Outgoing {
 					align = layout.E
 				}
-				if m.Kind == model.MessageService {
-					align = layout.Center
+				if m.ServicePill() {
+					dims := layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return p.servicePill(gtx, r, m, l)
+					})
+					r.bodySize = dims.Size
+					return dims
 				}
 				return align.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(660))
@@ -203,6 +223,11 @@ func (p *chatPage) row(gtx layout.Context, m model.Message, date bool, join bubb
 	call := record.Stop()
 	if p.selection.selected[m.Key.MessageID] && !p.snapshotting {
 		fillRect(gtx, scheme(gtx).Primary.Color.SetOpacity(.13), dims.Size)
+	} else if p.highlight == m.Key.MessageID && gtx.Now.Before(p.highlightUntil) && !p.snapshotting {
+		// A message a search went to, which fades out.
+		left := float32(p.highlightUntil.Sub(gtx.Now)) / float32(highlightTime)
+		fillRect(gtx, scheme(gtx).Primary.Color.SetOpacity(token.OpacityLevel(.2*min(1, 2*left))), dims.Size)
+		gtx.Execute(op.InvalidateCmd{})
 	}
 	call.Add(gtx.Ops)
 	r.bodyTop = gtx.Dp(top) + dateHeight
@@ -228,6 +253,11 @@ func (p *chatPage) bubble(gtx layout.Context, r *messageRow, m model.Message, jo
 			if p.appearance != nil {
 				p.appearance.Bubble(gtx, m.Outgoing, animate, shape)
 			}
+			// A double click on the bubble, where nothing over it takes
+			// clicks, reacts to it.
+			area := shape.rrect(size).Push(gtx.Ops)
+			r.quick.Add(gtx.Ops)
+			area.Pop()
 			return layout.Dimensions{Size: size}
 		}),
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
@@ -301,11 +331,10 @@ func (p *chatPage) bubbleContent(gtx layout.Context, r *messageRow, m model.Mess
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.richText(gtx, r, l, animate) }))
 	} else if m.Media == nil && m.Poll == nil {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			key := "history.empty_message"
 			if m.Kind == model.MessageService {
-				key = "history.service"
+				return label(gtx, p.serviceText(m, l), token.TypestyleBodyMedium, sc.Surface.OnColor, 0)
 			}
-			return label(gtx, l.T(key), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+			return label(gtx, l.T("history.empty_message"), token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
 		}))
 	}
 	for y, row := range m.Buttons {
@@ -368,16 +397,35 @@ func messageFooterIn(gtx layout.Context, m model.Message, l localization.Catalog
 	if m.Views > 0 {
 		counter(iconViews, m.Views)
 	}
+	text(footerText(gtx, m, l))
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, items...)
+}
+
+// footerText is the line of a message's time: who signed it, whether it
+// was edited or deleted, with the look's marks, and the time.
+func footerText(gtx layout.Context, m model.Message, l localization.Catalog) string {
 	var parts []string
 	if m.PostAuthor != "" {
 		parts = append(parts, m.PostAuthor)
 	}
+	look := lookOf(gtx)
 	if !m.EditedAt.IsZero() {
-		parts = append(parts, l.T("history.edited"))
+		mark := look.EditedMark
+		if mark == "" {
+			mark = l.T("history.edited")
+		}
+		parts = append(parts, mark)
 	}
-	parts = append(parts, m.Date.Local().Format("15:04"))
-	text(strings.Join(parts, " · "))
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, items...)
+	if m.Deleted {
+		// Kept after Telegram deleted it, with AyuGram's mark.
+		mark := look.DeletedMark
+		if mark == "" {
+			mark = l.T("history.deleted_mark")
+		}
+		parts = append(parts, mark)
+	}
+	parts = append(parts, m.Date.Local().Format(timeFormat(gtx)))
+	return strings.Join(parts, " · ")
 }
 
 // shortCount writes a count as Telegram does: 1.2K, 3.4M.
@@ -478,10 +526,16 @@ func (p *chatPage) reactionIcon(gtx layout.Context, reaction model.Reaction, ani
 // replyQuote draws the message a message replies to, as a quote with a bar
 // in its sender's color; a click shows it.
 func (p *chatPage) replyQuote(gtx layout.Context, r *messageRow, m model.Message, l localization.Catalog) layout.Dimensions {
-	replied, ok := p.messageByID(m.ReplyToMessageID)
+	replied, state, known := p.referenced(m.Key.ChatID, m.ReplyToMessageID)
 	name, text := l.T("history.reply_missing"), ""
+	switch {
+	case known && state == model.LookupLoading:
+		text = l.T("service.loading")
+	case known && state == model.LookupGone:
+		text = l.T("service.deleted_message")
+	}
 	color := scheme(gtx).Primary.Color
-	if ok {
+	if state == model.LookupFound {
 		if replied.SenderName != "" {
 			name = replied.SenderName
 		} else if replied.Post && p.title != "" {
@@ -522,6 +576,20 @@ func (p *chatPage) replyQuote(gtx layout.Context, r *messageRow, m model.Message
 		call.Add(gtx.Ops)
 		return layout.Dimensions{Size: size}
 	})
+}
+
+// referenced is a message another one names, as the one it replies to:
+// the loaded one, or else one the store looks up, which may be on its way
+// or gone. known is false when the store cannot look it up.
+func (p *chatPage) referenced(chat int64, id model.MessageID) (m model.Message, state model.LookupState, known bool) {
+	if m, ok := p.messageByID(id); ok {
+		return m, model.LookupFound, true
+	}
+	if s, ok := p.source.(model.MessageLookup); ok && chat != 0 {
+		m, state = s.LookupMessage(chat, id)
+		return m, state, true
+	}
+	return model.Message{}, model.LookupGone, false
 }
 
 // messageByID is the loaded message with the id, a part of an album too.

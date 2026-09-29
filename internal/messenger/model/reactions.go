@@ -2,6 +2,11 @@
 
 package model
 
+import (
+	"context"
+	"time"
+)
+
 // Reactor lets the account react to messages.
 type Reactor interface {
 	// ChatReactions returns the reactions the account may put on messages
@@ -80,4 +85,35 @@ func ChosenReactions(reactions []Reaction) []Reaction {
 		}
 	}
 	return out
+}
+
+// QuickReactor knows the reaction a double click puts on a message: the
+// account's default one, which Telegram's config names.
+type QuickReactor interface {
+	// QuickReaction is the reaction for messages of chat; ok is false
+	// when the chat does not allow it or it is not known yet.
+	QuickReaction(chat int64) (r Reaction, ok bool)
+}
+
+// Reacted is someone who put a reaction on a message.
+type Reacted struct {
+	PeerID   int64
+	Name     string
+	Reaction Reaction
+	Date     time.Time
+}
+
+// ReactedPage is a page of who reacted to a message: Count in all, and
+// Next to ask for the next page with, empty after the last.
+type ReactedPage struct {
+	Count int
+	List  []Reacted
+	Next  string
+}
+
+// ReactionLister lists who reacted to messages whose ReactionsListed is set.
+type ReactionLister interface {
+	// Reacted lists who put reaction on msg, or any reaction when it is
+	// the zero Reaction, from offset.
+	Reacted(ctx context.Context, msg Message, reaction Reaction, offset string, limit int) (ReactedPage, error)
 }
