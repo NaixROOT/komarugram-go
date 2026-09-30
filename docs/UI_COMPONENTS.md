@@ -235,7 +235,11 @@ The history is drawn as materialgram draws it:
   it for any new external program. `fontSettings` (`settings_fonts.go`) is
   the same for font files, a row per role in one card of the appearance
   settings: a file is kept once `internal/messenger/fonts` loaded it, and
-  the windows' themes are made anew (`defaults.FontsVersion`). FFmpeg uses the same picker and validation;
+  the windows' themes are made anew (`defaults.FontsVersion`).
+  `emojiSettings` (`settings_emoji.go`) is the card of the emoji packs: a
+  row a pack with its state (to download, downloading, installed, in use,
+  outdated) and the buttons of that state; downloads run off the frame and
+  report through a channel, as `programSetting`'s checks do. FFmpeg uses the same picker and validation;
   its path also applies to GIFs and animated avatars (with a companion
   `ffprobe` beside it, or on PATH). The internal WebM sticker player defaults
   to FFmpeg when found and falls back to WASM on decode failures; WASM can

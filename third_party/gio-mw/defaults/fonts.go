@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"gioui.org/font"
+	"gioui.org/text"
 )
 
 // Fonts are fonts of the program's own that every theme made after
@@ -21,6 +22,9 @@ type Fonts struct {
 	// Emoji is the family of the collection that draws emoji, "" for the
 	// system's.
 	Emoji string
+	// EmojiImages draws the emoji it has as pictures, before any font;
+	// nil for none.
+	EmojiImages text.EmojiImages
 }
 
 type fontsState struct {

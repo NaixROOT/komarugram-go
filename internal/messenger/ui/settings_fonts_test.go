@@ -25,7 +25,7 @@ import (
 func TestFontOfTheSettingsReachesTheTheme(t *testing.T) {
 	w := newSettingsWindow(t, "ru", preferences.ThemeLight, image.Pt(900, 700))
 	defer w.close()
-	t.Cleanup(func() { applyFonts(preferences.Fonts{}) })
+	t.Cleanup(func() { applyFonts(preferences.Fonts{}, nil) })
 	gtx := layout.Context{Ops: new(op.Ops)}
 	typeface := func() string { return string(w.a.Theme(gtx).Typescale[token.TypestyleBodyLarge].Font) }
 	before, theme := typeface(), w.a.Theme(gtx)

@@ -123,8 +123,10 @@ type messageComposer struct {
 	itemClicks                map[string]*surface
 	selectedPack              int64
 	recent                    [3][]model.PickerItem
-	more, retry               surface
-	attachmentActions         [3]surface
+	// drawn tells the emoji the fonts draw, which the picker offers.
+	drawn             emojiDrawn
+	more, retry       surface
+	attachmentActions [3]surface
 	// replies is the strip of the message a draft replies to.
 	replies replyBar
 	// The picker, the attachment menu and the attachment forms open as

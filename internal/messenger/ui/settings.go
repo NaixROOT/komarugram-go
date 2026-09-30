@@ -155,6 +155,9 @@ type settingsPage struct {
 	// fontsView points the client at font files; hidden without its
 	// functions.
 	fontsView *fontSettings
+	// emojiView chooses the emoji pack; hidden without a catalog and
+	// without packs installed.
+	emojiView *emojiSettings
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -264,6 +267,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	p.filtersView = newFilterSettings()
 	p.lookView = newLookSettings()
 	p.fontsView = newFontSettings(invalidate)
+	p.emojiView = newEmojiSettings(invalidate)
 	p.chats = newChatsSettings(invalidate)
 	p.chats.toast = &p.toast
 	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
@@ -465,6 +469,7 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 		p.filtersView.Update(gtx)
 	}
 	if p.section == settingsAppearance {
+		p.emojiView.Update(gtx)
 		p.fontsView.Update(gtx)
 	}
 	if p.section == settingsChats {
@@ -821,6 +826,11 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 	}
 	if p.composerBlur != nil {
 		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutOverlays(gtx, l) }))
+	}
+	if p.emojiView.available() {
+		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.emojiView.Layout(gtx, l) }, defaultCardPadding)
+		}))
 	}
 	if p.fontsView.files != nil {
 		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {

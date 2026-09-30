@@ -25,6 +25,10 @@ func NewTheme(gtx layout.Context, scheme *token.Scheme) *token.Theme {
 	}
 
 	var typefaces token.TypefaceArray
+	if own.EmojiImages != nil {
+		shaperOptions = append(shaperOptions, text.WithEmojiImages(own.EmojiImages))
+	}
+
 	families := "Noto Sans, Liberation Sans, Noto Sans Arabic, Noto Sans Hebrew, Noto Color Emoji, sans-serif"
 	if own.Emoji != "" {
 		// The shaper draws emoji with the font of the program's own. Named

@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"context"
 	"image"
 	"komarugram/internal/diagnostics"
 	"log"
@@ -26,6 +27,7 @@ import (
 
 	"komarugram/internal/appwindow"
 	"komarugram/internal/messenger/chatmedia"
+	"komarugram/internal/messenger/emojipacks"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/login"
 	"komarugram/internal/messenger/model"
@@ -56,6 +58,8 @@ type App struct {
 	darkTheme  *token.Theme
 	// themeFonts is the version of the fonts the themes were made with.
 	themeFonts uint64
+	// emojiPacks keeps the emoji packs installed, beside the settings.
+	emojiPacks *emojipacks.Store
 
 	section section
 	// beforeSearch is the section search was opened from; opening search
@@ -179,7 +183,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		w.Motion.SetLowBattery(global.LowBattery)
 		services.MiniApps.SetStorage(global.MiniAppStorage)
 		miniapp.SetBrowser(global.BrowserPath)
-		applyFonts(global.Fonts)
+		applyFonts(global.Fonts, a.emojiPacks)
 		title := localization.For(global.Language).T("app.title")
 		if services.WindowLocked == nil || !services.WindowLocked.Load() {
 			if name := store.Me().Name(); name != "" {
@@ -240,6 +244,25 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		if err := services.Preferences.SetFonts(f); err != nil {
 			log.Printf("save settings: %v", err)
 		}
+	}
+	a.emojiPacks = emojipacks.Open(emojiPackDir(services.Preferences))
+	a.settings.emojiView.files = a.settings.fontsView.files
+	a.settings.emojiView.setFiles = a.settings.fontsView.setFiles
+	a.settings.emojiView.store = a.emojiPacks
+	// The packs whose files are in Telegram's cloud are downloaded through
+	// the window's account, which only reads the channel they are in.
+	a.settings.emojiView.source = emojipacks.WithTelegram(emojipacks.SourceFromEnv(), func(ctx context.Context, channel string, post int, progress func(done, total int64)) ([]byte, error) {
+		files, ok := store.(interface {
+			ChannelFile(ctx context.Context, username string, post int, progress func(done, total int64)) ([]byte, error)
+		})
+		if !ok {
+			return nil, emojipacks.ErrNeedsTelegram
+		}
+		return files.ChannelFile(ctx, channel, post, progress)
+	})
+	a.settings.emojiView.applied = func() {
+		applyFonts(a.preferences.Global().Fonts, a.emojiPacks)
+		w.Invalidate()
 	}
 	a.settings.keep = func() preferences.Keep { return a.preferences.Global().Keep }
 	a.settings.setKeep = func(k preferences.Keep) {
@@ -354,7 +377,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		a.settings.players.refresh()
 	}
 	miniapp.SetBrowser(global.BrowserPath)
-	applyFonts(global.Fonts)
+	applyFonts(global.Fonts, a.emojiPacks)
 	a.settings.players.choose = func(kind player.Kind) {
 		if err := services.Preferences.SetPlayer(kind); err != nil {
 			log.Printf("save settings: %v", err)

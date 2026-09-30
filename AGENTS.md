@@ -16,9 +16,11 @@ Russian; code, comments and docs are in English.
 |---|---|
 | `cmd/messenger` | Entry point; `account_host.go` runs accounts, windows and their stores |
 | `cmd/render-all` | Renders every screen of the render tests into one directory |
+| `cmd/emoji-pack` | Makes the catalog of emoji packs: fonts, and Telegram Desktop's emoji sets |
 | `internal/messenger/ui` | All messenger UI. Components: `docs/UI_COMPONENTS.md` |
 | `internal/messenger/tgstore` | `model.Store` backed by Telegram (gotd): chats, history, search, updates |
 | `internal/messenger/historycache` | Per-account SQLite cache: messages (JSON), media, layouts, FTS5 search index |
+| `internal/messenger/{fonts,emojipacks}` | Font files of the user's own; emoji packs of a catalog, installed beside the settings |
 | `internal/messenger/account` | Registry, sign-in, tdata import, one client per auth key |
 | `internal/messenger/model` | Data types and the interfaces the UI reads |
 | `internal/messenger/{security,securedb}` | TPM-sealed key, encrypted SQLite (Adiantum VFS) |
@@ -78,7 +80,10 @@ otherwise, so `go test` never runs them: `COMPOSER_PNG` (with
 at the PNG. `KOMARUGRAM_FONT`, `KOMARUGRAM_FONT_EXTRA`,
 `KOMARUGRAM_FONT_MONO` and `KOMARUGRAM_FONT_EMOJI` name a font file for the
 text, for what it lacks, for code and for emoji, over the settings: in the
-client and in the render tests alike (`internal/messenger/fonts`). `go run ./cmd/render-all [dir]` renders all of them, every
+client and in the render tests alike (`internal/messenger/fonts`).
+`KOMARUGRAM_EMOJI_SET` names the directory of an emoji pack to draw emoji
+with, there too, and `KOMARUGRAM_EMOJI_PACKS` the catalog of packs the
+settings offer, a directory or a URL (`cmd/emoji-pack` makes one). `go run ./cmd/render-all [dir]` renders all of them, every
 variant, into one directory (about a minute; `komarugram-renders` in the
 system's temporary directory by default; `-only composer` for some of
 them). Nothing compares them with references: the project is in active

@@ -211,6 +211,9 @@ type Fonts struct {
 	Mono string `json:"mono,omitempty"`
 	// Emoji draws emoji.
 	Emoji string `json:"emoji,omitempty"`
+	// EmojiPack is the installed emoji pack that draws emoji, before the
+	// font of Emoji: a font of the catalog, or sprites. "" for none.
+	EmojiPack string `json:"emoji_pack,omitempty"`
 }
 
 // The bounds of Look, as AyuGram's.
@@ -510,6 +513,15 @@ func (s *Store) SetChats(c ChatLook) error {
 		return err
 	}
 	return s.pruneWallpapers(c)
+}
+
+// DataDir is a directory of the given name beside the settings, for what
+// is kept with them; empty for a store in memory.
+func (s *Store) DataDir(name string) string {
+	if s.path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(s.path), name)
 }
 
 // wallpaperDir is where the wallpapers' pictures are, beside the settings;

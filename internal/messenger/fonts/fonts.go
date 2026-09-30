@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -18,9 +19,8 @@ import (
 
 	"gioui.org/font"
 	"gioui.org/font/opentype"
-	gofont "github.com/go-text/typesetting/font"
-	"github.com/go-text/typesetting/font/opentype/tables"
 
+	"komarugram/internal/messenger/emojipacks"
 	"komarugram/internal/messenger/preferences"
 )
 
@@ -85,16 +85,15 @@ func WithEnv(f Files) Files {
 // the settings then do not change.
 func FromEnv(r Role) bool { return os.Getenv(envNames[r]) != "" }
 
-// MaxSize is the largest font file loaded: a file is kept in memory whole,
-// and the largest CJK fonts of one weight are under it.
-const MaxSize = 64 << 20
+// MaxSize is the largest font file loaded. A font takes about its file's
+// size of memory for as long as it is chosen: its tables are read whole,
+// the bitmaps of an emoji font among them. The emoji fonts of bitmaps are
+// the largest met, under 100 MB; the limit keeps a file picked by mistake
+// from taking all the memory there is.
+const MaxSize = 128 << 20
 
 // ErrNoEmoji is the error of a font picked for emoji that has none.
 var ErrNoEmoji = errors.New("the font has no emoji")
-
-// ErrColorFormat is the error of a font picked for emoji whose glyphs are
-// COLR version 1 paints, with gradients, which the shaper does not draw.
-var ErrColorFormat = errors.New("the font's color glyphs are COLR version 1")
 
 // ErrTooLarge is the error of a font file over MaxSize.
 var ErrTooLarge = errors.New("the font file is too large")
@@ -106,6 +105,8 @@ type Font struct {
 	Family   string
 	Families []string
 	Faces    []font.FontFace
+	// Size is the size of the file, about what the font takes of memory.
+	Size int64
 }
 
 type loaded struct {
@@ -118,9 +119,42 @@ var (
 	mu    sync.Mutex
 	cache = map[string]loaded{}
 	// applied is what the themes have now.
-	applied    Files
+	applied    appliedKey
 	appliedSet bool
 )
+
+// appliedKey tells one state of the fonts from another: the files, and the
+// sprites of the emoji pack as they are installed.
+type appliedKey struct {
+	files   Files
+	sprites string
+}
+
+// SetEnv names the variable that names the directory of an emoji pack to
+// draw emoji with, over the settings: a pack of a catalog, or one
+// installed. It is for trying a pack and for the render tests.
+const SetEnv = "KOMARUGRAM_EMOJI_SET"
+
+// chosenPack returns the emoji pack to draw with and its directory: the one
+// SetEnv names, or, unless the environment names an emoji font, the one of
+// the settings. The pack is of no kind when none is chosen.
+func chosenPack(files Files, packs *emojipacks.Store) (emojipacks.Pack, string, error) {
+	if dir := os.Getenv(SetEnv); dir != "" {
+		p, err := emojipacks.ReadDir(dir)
+		if err != nil {
+			return emojipacks.Pack{}, "", fmt.Errorf("%s: %w", SetEnv, err)
+		}
+		return p, dir, nil
+	}
+	if FromEnv(Emoji) || files.EmojiPack == "" {
+		return emojipacks.Pack{}, "", nil
+	}
+	p, ok := packs.Pack(files.EmojiPack)
+	if !ok {
+		return emojipacks.Pack{}, "", fmt.Errorf("emoji pack %s is not installed", files.EmojiPack)
+	}
+	return p, packs.PackDir(p.ID), nil
+}
 
 // revision tells the fonts applied from others, and lasts across runs.
 var revision atomic.Uint32
@@ -161,7 +195,7 @@ func Load(path string) (Font, error) {
 	if len(faces) == 0 {
 		return Font{}, errors.New("no fonts in the file")
 	}
-	f := Font{Family: string(faces[0].Font.Typeface), Faces: faces}
+	f := Font{Family: string(faces[0].Font.Typeface), Faces: faces, Size: info.Size()}
 	for _, face := range faces {
 		if family := string(face.Font.Typeface); family != "" && !slices.Contains(f.Families, family) {
 			f.Families = append(f.Families, family)
@@ -193,22 +227,14 @@ func Check(role Role, path string) (Font, error) {
 }
 
 // checkEmoji makes sure the first face of f, the one the shaper takes for
-// emoji, has them in a form it draws: bitmaps, outlines, or the layers of
-// COLR version 0.
+// emoji, has them.
 func checkEmoji(f Font) error {
 	parsed, ok := f.Faces[0].Face.(opentype.Face)
 	if !ok {
 		return ErrNoEmoji
 	}
-	face := parsed.Face()
-	gid, ok := face.NominalGlyph('\U0001F600')
-	if !ok {
+	if _, ok := parsed.Face().NominalGlyph('\U0001F600'); !ok {
 		return ErrNoEmoji
-	}
-	if glyph, ok := face.GlyphData(gid).(gofont.GlyphColor); ok {
-		if _, ok := glyph.Paint.(tables.PaintColrLayersResolved); !ok {
-			return ErrColorFormat
-		}
 	}
 	return nil
 }
@@ -217,20 +243,54 @@ func checkEmoji(f Font) error {
 // the environment's over them. A file that does not load is left out, and
 // its error returned with the others'; the rest still apply. Windows see
 // the change by defaults.FontsVersion.
-func Apply(files Files) error {
+//
+// The emoji are those of the pack chosen, installed in packs: a font, which
+// takes the place of the emoji font's file, or sprites, which draw the
+// emoji they have before any font. SetEnv names a pack's directory over
+// the settings.
+func Apply(files Files, packs *emojipacks.Store) error {
 	files = WithEnv(files)
+	var (
+		out     defaults.Fonts
+		errs    []error
+		sprites *emojipacks.SpriteSet
+	)
+	pack, dir, err := chosenPack(files, packs)
+	files.EmojiPack = ""
+	switch {
+	case err != nil:
+		errs = append(errs, err)
+	case pack.Kind == emojipacks.KindFont:
+		files.Emoji = filepath.Join(dir, pack.Font)
+	case pack.Kind == emojipacks.KindSprites:
+		// The sprites of an installed pack are opened once for all windows.
+		if packs != nil && dir == packs.PackDir(pack.ID) {
+			sprites, err = packs.Sprites(pack.ID)
+		} else {
+			sprites, err = emojipacks.OpenSprites(dir, pack)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("emoji pack %s: %w", pack.ID, err))
+			sprites = nil
+		}
+	}
+	key := appliedKey{files: files}
+	if sprites != nil {
+		key.sprites = dir + "\x00" + pack.Revision()
+	}
 	mu.Lock()
-	same := appliedSet && applied == files
-	applied, appliedSet = files, true
+	same := appliedSet && applied == key
+	applied, appliedSet = key, true
 	mu.Unlock()
 	if same {
-		return nil
+		// Nothing to make anew; a pack that is not there is still said.
+		return errors.Join(errs...)
 	}
-	var (
-		out  defaults.Fonts
-		errs []error
-	)
 	sum := fnv.New32a()
+	if sprites != nil {
+		out.EmojiImages = sprites
+		fmt.Fprintf(sum, "sprites\x00%s\x00", key.sprites)
+	}
 	for _, r := range Roles {
 		path := Of(files, r)
 		if path == "" {
@@ -256,7 +316,7 @@ func Apply(files Files) error {
 		}
 	}
 	rev := uint32(1)
-	if len(out.Collection) > 0 {
+	if len(out.Collection) > 0 || sprites != nil {
 		// 0 and 1 are taken.
 		rev = sum.Sum32() | 2
 	}

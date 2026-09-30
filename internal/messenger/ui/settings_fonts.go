@@ -8,12 +8,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gio-mw/token"
 
 	"gioui.org/layout"
 	"gioui.org/op"
 
+	"komarugram/internal/messenger/emojipacks"
 	"komarugram/internal/messenger/fonts"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/preferences"
@@ -43,9 +45,10 @@ type fontRow struct {
 	picking       bool
 	// pickErr is why the file picked last was turned down.
 	pickErr error
-	// path is the file looked at last, and family its font's, or err why
-	// it does not load.
+	// path is the file looked at last, family its font's and size the
+	// file's, or err why it does not load.
 	path, family string
+	size         int64
 	err          error
 	known        bool
 }
@@ -54,6 +57,7 @@ type fontRow struct {
 type fontAnswer struct {
 	role         fonts.Role
 	path, family string
+	size         int64
 	err          error
 	// picked marks a file the user picked now; cancelled, a chooser closed
 	// without one.
@@ -80,10 +84,10 @@ func (s *fontSettings) Update(gtx layout.Context) {
 				row.pickErr = a.err
 				if a.err == nil {
 					s.setFiles(fonts.With(s.files(), a.role, a.path))
-					row.path, row.family, row.err, row.known = a.path, a.family, nil, true
+					row.path, row.family, row.size, row.err, row.known = a.path, a.family, a.size, nil, true
 				}
 			} else if a.path == row.path {
-				row.family, row.err, row.known = a.family, a.err, true
+				row.family, row.size, row.err, row.known = a.family, a.size, a.err, true
 			}
 		default:
 			done = true
@@ -116,7 +120,7 @@ func (s *fontSettings) Update(gtx layout.Context) {
 // look loads the file of a and answers what it is.
 func (s *fontSettings) look(a fontAnswer) {
 	f, err := fonts.Check(a.role, a.path)
-	a.family, a.err = f.Family, err
+	a.family, a.size, a.err = f.Family, f.Size, err
 	s.results <- a
 	s.invalidate()
 }
@@ -139,10 +143,11 @@ func (s *fontSettings) pick(role fonts.Role) {
 	s.look(a)
 }
 
-// applyFonts makes the themes use the font files of the settings. A file
-// that is gone or does not load is passed over: the settings say so.
-func applyFonts(f preferences.Fonts) {
-	if err := fonts.Apply(f); err != nil {
+// applyFonts makes the themes use the font files and the emoji pack of the
+// settings, the pack being one of those installed in packs. A file that is
+// gone or does not load is passed over: the settings say so.
+func applyFonts(f preferences.Fonts, packs *emojipacks.Store) {
+	if err := fonts.Apply(f, packs); err != nil {
 		log.Printf("fonts: %v", err)
 	}
 }
@@ -205,7 +210,8 @@ func (s *fontSettings) layoutRow(gtx layout.Context, role fonts.Role, path strin
 	case row.err != nil:
 		children = append(children, line(filepath.Base(path)+": "+fontErrorText(row.err, l), true))
 	default:
-		children = append(children, line(row.family+" · "+filepath.Base(path), false))
+		// The size is what the font takes of memory while it is chosen.
+		children = append(children, line(row.family+" · "+filepath.Base(path)+" · "+l.Format("fonts.size", map[string]string{"size": strconv.FormatFloat(float64(row.size)/(1<<20), 'f', 1, 64)}), false))
 	}
 	if row.pickErr != nil {
 		children = append(children, line(l.T("fonts.rejected")+": "+fontErrorText(row.pickErr, l), true))
@@ -234,8 +240,7 @@ func fontErrorText(err error, l localization.Catalog) string {
 	switch {
 	case errors.Is(err, fonts.ErrNoEmoji):
 		return l.T("fonts.no_emoji")
-	case errors.Is(err, fonts.ErrColorFormat):
-		return l.T("fonts.color_format")
+
 	case errors.Is(err, fonts.ErrTooLarge):
 		return l.T("fonts.too_large")
 	case errors.Is(err, os.ErrNotExist):
