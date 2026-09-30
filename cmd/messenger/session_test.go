@@ -4,8 +4,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
+
+	"github.com/gotd/td/tgerr"
 
 	"komarugram/internal/appwindow"
 	"komarugram/internal/messenger/preferences"
@@ -40,6 +43,59 @@ func TestKeepInBackground(t *testing.T) {
 	h.Quit()
 	if h.keepInBackground("b") {
 		t.Fatal("kept while quitting")
+	}
+}
+
+type fakeConnection struct {
+	failed     chan error
+	reconnects chan struct{}
+}
+
+func (c *fakeConnection) FailConnection(err error)    { c.failed <- err }
+func (c *fakeConnection) Reconnects() <-chan struct{} { return c.reconnects }
+
+func TestKeepConnected(t *testing.T) {
+	c := &fakeConnection{failed: make(chan error, 1), reconnects: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	broken := errors.New("history cache: disk full")
+	var calls atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		keepConnected(ctx, func(ctx context.Context) error {
+			if calls.Add(1) == 1 {
+				return broken
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}, c)
+	}()
+	if err := <-c.failed; err != broken {
+		t.Fatalf("told %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("connected again without being asked")
+	}
+	c.reconnects <- struct{}{}
+	cancel()
+	<-done
+	if calls.Load() != 2 {
+		t.Fatalf("connected %d times", calls.Load())
+	}
+	select {
+	case err := <-c.failed:
+		t.Fatalf("the window closing told as a failure: %v", err)
+	default:
+	}
+
+	// An ended session is not a connection to make again.
+	ended := tgerr.New(401, "SESSION_REVOKED")
+	keepConnected(context.Background(), func(context.Context) error { return ended }, c)
+	select {
+	case err := <-c.failed:
+		t.Fatalf("the ended session told as a failure: %v", err)
+	default:
 	}
 }
 

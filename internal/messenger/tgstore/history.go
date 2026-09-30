@@ -130,11 +130,27 @@ func (s *Store) Configure(ctx context.Context, account, path string, p *security
 	c := s.history
 	c.mu.Lock()
 	defer func() { c.mu.Unlock(); s.changed() }()
-	cache, e := historycache.Open(path, account, p)
-	if e != nil {
-		return e
+	// Configure runs again when the connection is made again: the cache
+	// stays open, and what it holds is read anew.
+	cache, e := c.cache, error(nil)
+	if cache == nil {
+		if cache, e = historycache.Open(path, account, p); e != nil {
+			return e
+		}
+		c.cache = cache
+		c.wg.Go(func() {
+			for save := range c.saves {
+				saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				start := diagnostics.Start()
+				err := cache.SaveView(saveCtx, save.view, save.layouts)
+				s.profileHistory("cache.save-view.written", save.view.ChatID, 0, int(save.view.AnchorMessageID), len(save.layouts), start, err)
+				cancel()
+				if err != nil {
+					s.historyError(save.view.ChatID, err)
+				}
+			}
+		})
 	}
-	c.cache = cache
 	c.account = account
 	c.ctx = ctx
 	var chats []model.Chat
@@ -155,20 +171,10 @@ func (s *Store) Configure(ctx context.Context, account, path string, p *security
 	s.recent.list = recent
 	s.recent.mu.Unlock()
 	s.mu.Lock()
-	s.chats = chats
+	if s.chats == nil {
+		s.chats = chats
+	}
 	s.mu.Unlock()
-	c.wg.Go(func() {
-		for save := range c.saves {
-			saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			start := diagnostics.Start()
-			err := cache.SaveView(saveCtx, save.view, save.layouts)
-			s.profileHistory("cache.save-view.written", save.view.ChatID, 0, int(save.view.AnchorMessageID), len(save.layouts), start, err)
-			cancel()
-			if err != nil {
-				s.historyError(save.view.ChatID, err)
-			}
-		}
-	})
 	return nil
 }
 func (s *Store) Close() (err error) {

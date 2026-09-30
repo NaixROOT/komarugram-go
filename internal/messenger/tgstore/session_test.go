@@ -3,7 +3,10 @@
 package tgstore
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,6 +14,50 @@ import (
 
 	"komarugram/internal/messenger/model"
 )
+
+func TestReconnectAsksOnceAfterFailure(t *testing.T) {
+	changes := 0
+	s := New(func() { changes++ })
+	s.Reconnect()
+	select {
+	case <-s.Reconnects():
+		t.Fatal("a connection that did not fail was asked for again")
+	default:
+	}
+	s.FailConnection(errors.New("no cache"))
+	if s.ConnectionFailed() == nil || changes != 1 {
+		t.Fatalf("failure not told: %v, %d changes", s.ConnectionFailed(), changes)
+	}
+	s.Reconnect()
+	s.Reconnect()
+	if s.ConnectionFailed() != nil {
+		t.Fatal("the failure stays while the connection is made again")
+	}
+	<-s.Reconnects()
+	select {
+	case <-s.Reconnects():
+		t.Fatal("asked for twice")
+	default:
+	}
+}
+
+// TestConfigureAgainKeepsCache: the connection made again configures the
+// store again, which must neither open the cache a second time nor drop the
+// chats loaded since.
+func TestConfigureAgainKeepsCache(t *testing.T) {
+	s := testStore(t)
+	cache := s.Cache()
+	s.publish(func() { s.chats = []model.Chat{{ID: 7}} })
+	if err := s.Configure(context.Background(), "a", filepath.Join(t.TempDir(), "other"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if s.Cache() != cache {
+		t.Fatal("the cache was opened again")
+	}
+	if chats := s.Chats(); len(chats) != 1 || chats[0].ID != 7 {
+		t.Fatalf("chats replaced: %+v", chats)
+	}
+}
 
 func TestSessionEnd(t *testing.T) {
 	for typ, want := range map[string]model.SessionEnd{

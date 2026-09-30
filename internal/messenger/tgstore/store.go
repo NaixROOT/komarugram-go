@@ -44,8 +44,12 @@ type Store struct {
 	me           model.Profile
 	dc           int
 	sessionEnded model.SessionEnd
-	search       searchState
-	freeze       model.Freeze
+	// connectionErr is what stopped the connection, and reconnect asks for
+	// it again: see FailConnection.
+	connectionErr error
+	reconnect     chan struct{}
+	search        searchState
+	freeze        model.Freeze
 	// freezeChecked is when a refused request last read the configuration
 	// again: see Middleware.
 	freezeChecked time.Time
@@ -64,7 +68,7 @@ func New(changed func()) *Store {
 	if changed == nil {
 		changed = func() {}
 	}
-	return &Store{changed: changed, history: newConversation()}
+	return &Store{changed: changed, history: newConversation(), reconnect: make(chan struct{}, 1)}
 }
 
 func (s *Store) Me() model.Profile {

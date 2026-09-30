@@ -106,6 +106,8 @@ type App struct {
 	settings     *settingsPage
 	// sessionEnded asks what to do once Telegram ended the session.
 	sessionEnded *sessionEndedDialog
+	// connectionFailed offers to connect again once the connection stopped.
+	connectionFailed *connectionFailedDialog
 	// frozen tells that Telegram froze the account.
 	frozen *frozenView
 
@@ -215,6 +217,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		}
 	}
 	a.sessionEnded = newSessionEndedDialog(leave)
+	a.connectionFailed = newConnectionFailedDialog()
 	a.frozen = newFrozenView(store)
 	a.profile.frozen = a.frozen
 	a.settings = newSettingsPage(w.Motion, services.MiniApps, services.Security, w.Invalidate, services.Accounts, currentAccount, themeMode(global.Theme), global.Language, a.setThemeMode, a.setLanguage)
@@ -624,6 +627,7 @@ func (a *App) Update(gtx layout.Context) {
 		return
 	}
 	a.sessionEnded.Update(gtx, a.store)
+	a.connectionFailed.Update(gtx, a.store)
 	a.frozen.Update(gtx)
 	folders := a.store.Folders()
 	a.overlay.Update(gtx)
@@ -984,6 +988,7 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	a.settings.chats.layoutDialog(overlayGtx, a.catalog())
 	a.frozen.Layout(overlayGtx, a.catalog())
 	a.sessionEnded.Layout(overlayGtx, a.catalog())
+	a.connectionFailed.Layout(overlayGtx, a.catalog())
 }
 
 const compactBarHeight = unit.Dp(52)

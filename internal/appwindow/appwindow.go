@@ -8,6 +8,7 @@ package appwindow
 
 import (
 	"image"
+	"komarugram/internal/alert"
 	"komarugram/internal/crash"
 	"komarugram/internal/diagnostics"
 	"log"
@@ -368,12 +369,20 @@ func (h *Host) Open(spec Spec) {
 		if opts.TopMost {
 			w.Option(app.TopMost(true))
 		}
-		if err := runSafely(w, opts, spec.Build, spec.Activated); err != nil {
+		err := runSafely(w, opts, spec.Build, spec.Activated)
+		if err != nil {
 			log.Println(err)
 			h.failed.Store(true)
 		}
 		if spec.Closed != nil {
 			spec.Closed()
+		}
+		// A panic has its own dialog. What else ends a window is the system
+		// refusing it, a GPU context mostly, and another window would fail
+		// the same way: the system's message box tells it, before the
+		// process ends with its last window.
+		if _, panicked := err.(*crash.Panic); err != nil && !panicked {
+			alert.Error("Ошибка приложения", "Не удалось показать окно «"+opts.Title+"»:\n\n"+err.Error())
 		}
 		h.mu.Lock()
 		h.releaseLaterLocked()

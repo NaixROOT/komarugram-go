@@ -36,6 +36,34 @@ func TestGuardReportsOncePerSite(t *testing.T) {
 	}
 }
 
+func TestTakeFatalKeepsReportOfDeadRun(t *testing.T) {
+	dir := t.TempDir()
+	if got := takeFatal(dir); got != "" {
+		t.Fatalf("report %q of a run that left none", got)
+	}
+	path := filepath.Join(dir, fatalName)
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := takeFatal(dir); got != "" {
+		t.Fatalf("report %q of a run that ended well", got)
+	}
+	if err := os.WriteFile(path, []byte("fatal error: demonstration"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kept := takeFatal(dir)
+	body, err := os.ReadFile(kept)
+	if err != nil || string(body) != "fatal error: demonstration" {
+		t.Fatalf("report not kept: %q, %v", body, err)
+	}
+	if matched, _ := filepath.Match("panic-*.txt", filepath.Base(kept)); !matched {
+		t.Fatalf("report %q is not among those pruned", kept)
+	}
+	if got := takeFatal(dir); got != "" {
+		t.Fatalf("report %q told twice", got)
+	}
+}
+
 func TestReporterNotifiesWithSavedReport(t *testing.T) {
 	// os.UserCacheDir reads LOCALAPPDATA on Windows, XDG_CACHE_HOME elsewhere.
 	cache := t.TempDir()

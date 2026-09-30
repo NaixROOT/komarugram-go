@@ -24,7 +24,9 @@ import (
 	"gioui.org/unit"
 	"github.com/gotd/td/tg"
 
+	"komarugram/internal/alert"
 	"komarugram/internal/appwindow"
+	"komarugram/internal/crash"
 	"komarugram/internal/diagnostics"
 	"komarugram/internal/messenger/account"
 	"komarugram/internal/messenger/localization"
@@ -66,8 +68,20 @@ func main() {
 	if *noIntegrations {
 		program.SetSearching(false)
 	}
+	// fail ends the process telling why: in the log and, as a program
+	// without a console shows no log, in a message box. -check is run from a
+	// console, and has only the log.
+	catalog := localization.For("")
+	fail := func(v ...any) {
+		text := fmt.Sprint(v...)
+		log.Print(text)
+		if !*check {
+			alert.Error(catalog.T("app.title"), catalog.T("fatal.start")+"\n\n"+text)
+		}
+		os.Exit(1)
+	}
 	if *profileExport < 0 || *profileExport > 0 && *profileExport < 100*time.Millisecond {
-		log.Fatal("-profile-export must be zero or at least 100ms")
+		fail("-profile-export must be zero or at least 100ms")
 	}
 	captures := []string{}
 	for _, kind := range strings.Split(*profileCapture, ",") {
@@ -79,23 +93,23 @@ func main() {
 		case "cpu", "heap", "allocs", "trace", "goroutine":
 			captures = append(captures, kind)
 		default:
-			log.Fatalf("unknown profile capture %q", kind)
+			fail(fmt.Sprintf("unknown profile capture %q", kind))
 		}
 	}
 	profiling := *profile || *profileExport > 0 || len(captures) > 0
 	if profiling && *check {
-		log.Fatal("-profile requires a window; cannot be combined with -check")
+		fail("-profile requires a window; cannot be combined with -check")
 	}
 	demoMode := *demo || *demoChats > 0 || *demoPanic
 	if demoMode && (*check || len(tdataPaths) > 0) {
-		log.Fatal("-demo runs without accounts; cannot be combined with -check or -tdata")
+		fail("-demo runs without accounts; cannot be combined with -check or -tdata")
 	}
 	if profiling {
 		r := diagnostics.Enable()
 		if *profileExport > 0 {
 			exporter, err := r.StartAutoExport(*profileDir, *profileExport)
 			if err != nil {
-				log.Fatal(err)
+				fail(err)
 			}
 			log.Printf("automatic profiler export: %s", exporter.Directory)
 		}
@@ -114,6 +128,7 @@ func main() {
 	}
 
 	if demoMode {
+		reportLastCrash(catalog)
 		runDemo(*demoChats, *profile, *profileDir, *demoPanic)
 		return
 	}
@@ -128,7 +143,7 @@ func main() {
 			}
 		})
 		if errors.Is(err, errRunning) && len(tdataPaths) > 0 {
-			log.Fatal("the messenger is already running; quit it from the tray to import tdata")
+			fail("the messenger is already running; quit it from the tray to import tdata")
 		}
 		if errors.Is(err, errRunning) {
 			log.Print(err)
@@ -138,43 +153,49 @@ func main() {
 			log.Printf("single instance: %v", err)
 		}
 	}
+	// The settings come first: they tell the language of what follows.
+	var sharedPreferences *preferences.Store
+	if !*check {
+		var err error
+		if sharedPreferences, err = preferences.Open(); err != nil {
+			fail("settings: ", err)
+		}
+		catalog = localization.For(sharedPreferences.Global().Language)
+		reportLastCrash(catalog)
+	}
 
 	protection, err := security.Open()
 	if err != nil {
-		log.Fatal(err)
+		fail(err)
 	}
 	manager, err := newManager(*proxy, protection)
 	if err != nil {
-		log.Fatal(err)
+		fail(err)
 	}
 	defer manager.Close()
 	var imports []*account.TData
 	if len(tdataPaths) > 0 {
 		paths, err := expandTDataPaths(tdataPaths)
 		if err != nil {
-			log.Fatal(err)
+			fail(err)
 		}
 		for _, path := range paths {
 			archive, err := os.ReadFile(path)
 			if err != nil {
-				log.Fatal(err)
+				fail(err)
 			}
 			imported, err := account.ReadTData(archive)
 			if err != nil {
-				log.Fatalf("%s: %v", filepath.Base(path), err)
+				fail(filepath.Base(path), ": ", err)
 			}
 			imports = append(imports, imported)
 		}
 	}
 	if *check {
 		if err := checkAccounts(manager, imports); err != nil {
-			log.Fatal(err)
+			fail(err)
 		}
 		return
-	}
-	sharedPreferences, err := preferences.Open()
-	if err != nil {
-		log.Fatal(err)
 	}
 	sharedMiniApps := miniApps(sharedPreferences)
 	process := newProcess(*profile, *profileDir, func() {
@@ -183,7 +204,6 @@ func main() {
 		}
 	})
 	accounts := newAccountWindows(process, windowOptions(sharedPreferences), manager, protection, sharedPreferences, sharedMiniApps, imports)
-	catalog := localization.For(sharedPreferences.Global().Language)
 	icon, err := tray.Start(tray.Options{
 		ID:       "komarugram-go",
 		Title:    catalog.T("app.title"),
@@ -213,6 +233,20 @@ func main() {
 	windows.Store(accounts)
 	process.Open(accounts.startSpec())
 	process.Main()
+}
+
+// reportLastCrash makes the runtime keep a report of what kills the process,
+// and tells of the one the previous run left: that run could show nothing.
+func reportLastCrash(catalog localization.Catalog) {
+	previous, err := crash.CaptureFatal()
+	if err != nil {
+		log.Printf("crash reports: %v", err)
+	}
+	if previous == "" {
+		return
+	}
+	log.Printf("the previous run crashed: %s", previous)
+	go alert.Error(catalog.T("app.title"), catalog.T("fatal.crashed")+"\n\n"+previous)
 }
 
 // runDemo shows demo data with settings kept in memory only: the demo
