@@ -63,9 +63,10 @@ func pitch(pcm []int16) float64 {
 	return float64(crossings) / 2 / (float64(len(pcm)) / audio.Rate)
 }
 
+// read reads n frames of src, as the mean of their channels.
 func read(t *testing.T, src audio.Source, n int) []int16 {
 	t.Helper()
-	out := make([]int16, n)
+	out := make([]audio.Frame, n)
 	got := 0
 	for got < n {
 		k, err := src.Read(out[got:])
@@ -77,7 +78,11 @@ func read(t *testing.T, src audio.Source, n int) []int16 {
 			t.Fatal(err)
 		}
 	}
-	return out[:got]
+	mono := make([]int16, got)
+	for i := range mono {
+		mono[i] = out[i].Mono()
+	}
+	return mono
 }
 
 func TestToneDecodes(t *testing.T) {
@@ -137,7 +142,7 @@ func TestBrokenFiles(t *testing.T) {
 	if err != nil {
 		return
 	}
-	pcm := make([]int16, 8192)
+	pcm := make([]audio.Frame, 8192)
 	for range 100 {
 		if _, err := d.Read(pcm); err != nil {
 			break

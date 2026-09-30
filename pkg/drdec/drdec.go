@@ -14,12 +14,12 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"time"
 
+	"komarugram/pkg/audio"
 	"komarugram/pkg/sandbox"
 
 	"github.com/tetratelabs/wazero"
@@ -131,7 +131,7 @@ func hostRead(ctx context.Context, m api.Module, offset int64, ptr, n int32) int
 	return int32(k)
 }
 
-// Decoder is one file in its own sandbox, read as mono samples at the
+// Decoder is one file in its own sandbox, read as stereo frames at the
 // file's own rate: see audio.Resample.
 type Decoder struct {
 	ctx       context.Context
@@ -140,14 +140,20 @@ type Decoder struct {
 	module    api.Module
 	functions map[string]api.Function
 	handle    uint64
-	channels  int
-	rate      int64
-	frames    int64
+	// format is the file's; table is set when an MP3 was read through to make
+	// a table of its frames, which a move then goes by; moves counts the moves
+	// asked of the module.
+	format   Format
+	table    bool
+	moves    int
+	channels int
+	rate     int64
+	frames   int64
 	// pos is the next frame Read puts out; ready are frames decoded and not
 	// put out yet.
 	pos   int64
-	ready []int16
-	mono  []int16
+	ready []audio.Frame
+	pcm   []audio.Frame
 }
 
 // Open decodes data, a file of format, all there. Reads go on under ctx.
@@ -170,7 +176,7 @@ func (r *Runtime) OpenAt(ctx context.Context, format Format, file io.ReaderAt, s
 	if err != nil {
 		return nil, fmt.Errorf("instantiate dr_libs: %w", err)
 	}
-	d := &Decoder{ctx: ctx, file: f, runtime: r, module: module, mono: make([]int16, chunk)}
+	d := &Decoder{ctx: ctx, file: f, runtime: r, module: module, pcm: make([]audio.Frame, chunk)}
 	if err := d.open(format, size, length); err != nil {
 		_ = module.Close(ctx)
 		return nil, err
@@ -190,6 +196,7 @@ func (d *Decoder) open(format Format, size int64, length time.Duration) error {
 	if d.handle == 0 {
 		return errors.New("drdec: not a file of its format")
 	}
+	d.format, d.table = format, exact != 0
 	channels, err := d.call("drw_channels", d.handle)
 	if err != nil {
 		return err
@@ -224,9 +231,36 @@ func (d *Decoder) Frames() int64 { return d.frames }
 // Position is the next sample Read puts out.
 func (d *Decoder) Position() int64 { return d.pos }
 
+// seekSpan is how much sound an MP3 without a table of its frames is moved
+// over in one call of the module: dr_libs goes forward by decoding, from the
+// start when it is moving back, at something like five hundred times the
+// speed of the sound, and a call that takes over DefaultLimits.Slow ends the
+// decoder. A move over an hour is made of moves over less than this.
+var seekSpan = 200 * time.Second
+
 // SeekSample moves to sample pos of the file.
 func (d *Decoder) SeekSample(pos int64) error {
 	pos = max(0, min(pos, d.frames))
+	if d.format == MP3 && !d.table {
+		from := d.pos
+		if pos < from {
+			if err := d.move(0); err != nil {
+				return err
+			}
+			from = 0
+		}
+		for span := max(1, int64(seekSpan)*d.rate/int64(time.Second)); pos-from > span; from += span {
+			if err := d.move(from + span); err != nil {
+				return err
+			}
+		}
+	}
+	return d.move(pos)
+}
+
+// move asks the module to move to sample pos.
+func (d *Decoder) move(pos int64) error {
+	d.moves++
 	ok, err := d.call("drw_seek", d.handle, uint64(pos))
 	if err != nil {
 		return err
@@ -238,9 +272,9 @@ func (d *Decoder) SeekSample(pos int64) error {
 	return nil
 }
 
-// Read fills out with the next samples, the channels mixed down, and
-// returns io.EOF at the end of the file.
-func (d *Decoder) Read(out []int16) (int, error) {
+// Read fills out with the next frames, folded to stereo, and returns
+// io.EOF at the end of the file.
+func (d *Decoder) Read(out []audio.Frame) (int, error) {
 	if len(d.ready) == 0 {
 		if err := d.decode(); err != nil {
 			return 0, err
@@ -273,14 +307,7 @@ func (d *Decoder) decode() error {
 	if !ok {
 		return errors.New("drdec: samples lie outside sandbox memory")
 	}
-	for i := range frames {
-		sum := 0
-		for c := range d.channels {
-			sum += int(int16(binary.LittleEndian.Uint16(raw[2*(i*d.channels+c):])))
-		}
-		d.mono[i] = int16(sum / d.channels)
-	}
-	d.ready = d.mono[:frames]
+	d.ready = audio.Downmix(d.pcm, raw, d.channels)
 	return nil
 }
 
