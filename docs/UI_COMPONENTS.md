@@ -236,8 +236,10 @@ The history is drawn as materialgram draws it:
   the same for font files, a row per role in one card of the appearance
   settings: a file is kept once `internal/messenger/fonts` loaded it, and
   the windows' themes are made anew (`defaults.FontsVersion`).
-  `emojiSettings` (`settings_emoji.go`) is the card of the emoji packs: a
-  row a pack with its state (to download, downloading, installed, in use,
+  `emojiSettings` (`settings_emoji.go`) is the card of the emoji packs, the
+  emoji sets of Telegram Desktop of the catalog built in (those of
+  Telegram's cloud are left out where there is no account to download them
+  through, as in the demo): a row a pack with its state (to download, downloading, installed, in use,
   outdated) and the buttons of that state; downloads run off the frame and
   report through a channel, as `programSetting`'s checks do. FFmpeg uses the same picker and validation;
   its path also applies to GIFs and animated avatars (with a companion

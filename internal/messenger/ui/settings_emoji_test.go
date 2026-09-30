@@ -318,3 +318,49 @@ func TestChosenEmojiPackReachesTheWindow(t *testing.T) {
 		t.Error("a picture after the pack was let go")
 	}
 }
+
+// TestEmojiSettingsOfferTheSetsBuiltIn checks what a client that was told
+// of no catalog offers: the emoji sets of Telegram Desktop, in its order,
+// and in the demo, which has no way to Telegram's cloud, only the one that
+// is downloaded from elsewhere.
+func TestEmojiSettingsOfferTheSetsBuiltIn(t *testing.T) {
+	t.Setenv(emojipacks.CatalogEnv, "")
+	shown := func(h *emojiSettingsHarness) string {
+		packs, _ := h.s.packs()
+		var ids []string
+		for _, p := range packs {
+			ids = append(ids, p.ID)
+		}
+		return strings.Join(ids, " ")
+	}
+	demo := newEmojiSettingsHarness(t, "")
+	demo.s.source = emojipacks.SourceFromEnv()
+	if !demo.s.available() {
+		t.Fatal("the settings are hidden without a catalog named")
+	}
+	demo.until("the catalog", func() bool { return len(demo.s.catalog) > 0 })
+	if got := shown(demo); got != "apple" {
+		t.Errorf("the demo offers %q, want the set that needs no account", got)
+	}
+
+	account := newEmojiSettingsHarness(t, "")
+	account.s.source = emojipacks.WithTelegram(emojipacks.SourceFromEnv(), func(context.Context, string, int, func(int64, int64)) ([]byte, error) {
+		return nil, context.Canceled
+	})
+	account.until("the catalog", func() bool { return len(account.s.catalog) > 0 })
+	if got := shown(account); got != "apple android twemoji joypixels" {
+		t.Errorf("with an account the settings offer %q", got)
+	}
+
+	// The window of the demo has the catalog, and no way to Telegram.
+	window := &appwindow.Window{Window: new(app.Window), Motion: motion.New(func() {})}
+	a := New(window, mockstore.New(time.Now(), 0), Services{Preferences: preferences.Memory(), MiniApps: miniappprefs.New(miniapp.Ephemeral)})
+	defer func() {
+		a.Close()
+		window.Motion.Close()
+	}()
+	view := a.settings.emojiView
+	if !view.available() || view.source == nil || emojipacks.HasTelegram(view.source) {
+		t.Errorf("the demo's window: available %v, source %v", view.available(), view.source)
+	}
+}

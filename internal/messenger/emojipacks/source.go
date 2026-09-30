@@ -3,7 +3,9 @@
 package emojipacks
 
 import (
+	"bytes"
 	"context"
+	_ "embed" // the catalog built in
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,21 +26,57 @@ type Source interface {
 }
 
 // CatalogEnv names the variable that points at a catalog, a directory or an
-// http(s) URL, over DefaultCatalog.
+// http(s) URL, in place of the one built in.
 const CatalogEnv = "KOMARUGRAM_EMOJI_PACKS"
 
-// DefaultCatalog is the catalog of a client that was not told of another:
-// empty until the project has one published.
-const DefaultCatalog = ""
-
-// SourceFromEnv returns the source of the catalog the environment or the
-// default names, nil for none.
+// SourceFromEnv returns the source of the catalog the environment names,
+// and the one built in without it.
 func SourceFromEnv() Source {
-	location := os.Getenv(CatalogEnv)
-	if location == "" {
-		location = DefaultCatalog
+	if location := os.Getenv(CatalogEnv); location != "" {
+		return NewSource(location)
 	}
-	return NewSource(location)
+	return Official()
+}
+
+// official.json is made by cmd/emoji-pack's "official".
+//
+//go:embed official.json
+var officialIndex []byte
+
+// Official returns the catalog built into the client: the emoji sets of
+// Telegram Desktop. It has no files of its own; every file of its packs is
+// at an address or in an archive of Telegram's cloud.
+func Official() Source { return officialSource{} }
+
+type officialSource struct{}
+
+func (officialSource) Open(_ context.Context, path string) (io.ReadCloser, error) {
+	if path != "index.json" {
+		return nil, fmt.Errorf("%s is not in the catalog built in", path)
+	}
+	return io.NopCloser(bytes.NewReader(officialIndex)), nil
+}
+
+func (officialSource) String() string { return "built in" }
+
+// downloads is the client of what is downloaded over HTTP.
+var downloads = &http.Client{Timeout: 10 * time.Minute}
+
+// openURL opens what is at an address.
+func openURL(ctx context.Context, address string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := downloads.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s: %s", address, resp.Status)
+	}
+	return resp.Body, nil
 }
 
 // NewSource returns the source of the catalog at location: an http(s) URL
@@ -48,7 +86,7 @@ func NewSource(location string) Source {
 	case location == "":
 		return nil
 	case strings.HasPrefix(location, "http://"), strings.HasPrefix(location, "https://"):
-		return &urlSource{base: strings.TrimRight(location, "/"), client: &http.Client{Timeout: 10 * time.Minute}}
+		return urlSource(strings.TrimRight(location, "/"))
 	}
 	return dirSource(location)
 }
@@ -61,32 +99,17 @@ func (d dirSource) Open(_ context.Context, path string) (io.ReadCloser, error) {
 
 func (d dirSource) String() string { return string(d) }
 
-type urlSource struct {
-	base   string
-	client *http.Client
-}
+type urlSource string
 
-func (u *urlSource) Open(ctx context.Context, path string) (io.ReadCloser, error) {
+func (u urlSource) Open(ctx context.Context, path string) (io.ReadCloser, error) {
 	var escaped []string
 	for _, part := range strings.Split(path, "/") {
 		escaped = append(escaped, url.PathEscape(part))
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.base+"/"+strings.Join(escaped, "/"), nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("%s: %s", path, resp.Status)
-	}
-	return resp.Body, nil
+	return openURL(ctx, string(u)+"/"+strings.Join(escaped, "/"))
 }
 
-func (u *urlSource) String() string { return u.base }
+func (u urlSource) String() string { return string(u) }
 
 // maxIndexSize bounds an index.json.
 const maxIndexSize = 4 << 20
@@ -146,6 +169,10 @@ type telegramSource struct {
 	Source
 	fetch TelegramFetcher
 }
+
+// HasTelegram reports whether src has a way to the archives of Telegram's
+// cloud.
+func HasTelegram(src Source) bool { return fetcherOf(src) != nil }
 
 // fetcherOf returns the way to Telegram's archives that src has, or nil.
 func fetcherOf(src Source) TelegramFetcher {

@@ -165,7 +165,11 @@ func (s *Store) Install(ctx context.Context, src Source, p Pack, progress func(d
 		if f.Archive {
 			continue
 		}
-		if err := fetch(ctx, src, p.ID+"/"+f.Name, filepath.Join(tmp, f.Name), f, tell); err != nil {
+		open := func() (io.ReadCloser, error) { return src.Open(ctx, p.ID+"/"+f.Name) }
+		if f.URL != "" {
+			open = func() (io.ReadCloser, error) { return openURL(ctx, f.URL) }
+		}
+		if err := fetch(ctx, open, filepath.Join(tmp, f.Name), f, tell); err != nil {
 			return fmt.Errorf("%s: %w", f.Name, err)
 		}
 	}
@@ -258,10 +262,10 @@ func unpackArchive(ctx context.Context, download TelegramFetcher, p Pack, dir st
 	return nil
 }
 
-// fetch copies a file of the catalog to path, and fails unless it is of the
-// size and the hash of f.
-func fetch(ctx context.Context, src Source, from, path string, f File, read func(n int64)) error {
-	r, err := src.Open(ctx, from)
+// fetch copies a file of a pack, as open gives it, to path, and fails unless
+// it is of the size and the hash of f.
+func fetch(ctx context.Context, open func() (io.ReadCloser, error), path string, f File, read func(n int64)) error {
+	r, err := open()
 	if err != nil {
 		return err
 	}

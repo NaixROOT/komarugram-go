@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"time"
 
@@ -23,7 +22,8 @@ import (
 
 // emojiSettings is the part of the appearance settings that chooses what
 // draws emoji: a pack of the catalog, downloaded once and kept beside the
-// settings, or none, which leaves them to the fonts. A pack can be
+// settings, or none, which leaves them to the fonts. The catalog is the one
+// built into the client, the emoji sets of Telegram Desktop. A pack can be
 // downloaded, chosen, downloaded again when the catalog has a newer one,
 // and deleted.
 type emojiSettings struct {
@@ -94,6 +94,13 @@ func (s *emojiSettings) available() bool {
 	return s.files != nil && s.setFiles != nil && s.store != nil && (s.source != nil || len(s.installed()) > 0)
 }
 
+// offered reports whether a pack of the catalog can be downloaded here: one
+// whose files are in Telegram's cloud cannot without a way there, as in
+// the demo.
+func (s *emojiSettings) offered(p emojipacks.Pack) bool {
+	return p.Telegram == nil || emojipacks.HasTelegram(s.source)
+}
+
 // installed are the packs installed, read again once a second and after
 // what these settings did to them.
 func (s *emojiSettings) installed() []emojipacks.Pack {
@@ -112,8 +119,8 @@ func (s *emojiSettings) row(id string) *emojiPackRow {
 	return row
 }
 
-// packs are the packs shown: those of the catalog, and the installed ones
-// the catalog does not have, by name.
+// packs are the packs shown: those of the catalog, in its order, and then
+// the installed ones the catalog does not have, by name.
 func (s *emojiSettings) packs() (shown []emojipacks.Pack, installed map[string]emojipacks.Pack) {
 	installed = map[string]emojipacks.Pack{}
 	for _, p := range s.installed() {
@@ -122,14 +129,16 @@ func (s *emojiSettings) packs() (shown []emojipacks.Pack, installed map[string]e
 	inCatalog := map[string]bool{}
 	for _, p := range s.catalog {
 		inCatalog[p.ID] = true
-		shown = append(shown, p)
-	}
-	for id, p := range installed {
-		if !inCatalog[id] {
+		if _, has := installed[p.ID]; has || s.offered(p) {
 			shown = append(shown, p)
 		}
 	}
-	sort.SliceStable(shown, func(i, j int) bool { return shown[i].Name < shown[j].Name })
+	// The installed ones are sorted by name already.
+	for _, p := range s.installed() {
+		if !inCatalog[p.ID] {
+			shown = append(shown, p)
+		}
+	}
 	return shown, installed
 }
 

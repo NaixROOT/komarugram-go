@@ -155,8 +155,7 @@ type settingsPage struct {
 	// fontsView points the client at font files; hidden without its
 	// functions.
 	fontsView *fontSettings
-	// emojiView chooses the emoji pack; hidden without a catalog and
-	// without packs installed.
+	// emojiView chooses the emoji pack; hidden without its functions.
 	emojiView *emojiSettings
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.

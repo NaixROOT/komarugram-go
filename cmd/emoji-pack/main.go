@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: Unlicense OR MIT
 
-// Command emoji-pack makes the catalog of emoji packs the client installs
-// from: a directory to publish as it is, such as a repository.
+// Command emoji-pack makes the catalogs of emoji packs the client installs
+// from: the one built into it, and a directory to publish as it is.
+//
+//	go run ./cmd/emoji-pack official -tdesktop COMMIT -lib-ui COMMIT -sets DIR
+//
+// writes internal/messenger/emojipacks/official.json, the catalog built in:
+// the emoji sets of Telegram Desktop, by where Telegram keeps their files.
+// The sprites of the set it is built with and the list that orders the
+// cells are downloaded from its repositories at the commits given, which
+// the catalog pins; the sets it downloads are read from DIR as
+// set-<post>.zip, where the opt-in TestLiveEmojiSets of cmd/messenger
+// leaves them. Nothing of them is kept: the catalog has their addresses,
+// sizes and hashes. To move to a newer version of the sets, run it with
+// the newer commits, and the newer posts in official.go.
+//
+// A catalog of a directory has the files of its packs:
 //
 //	go run ./cmd/emoji-pack -catalog DIR font -id noto -name "Noto Color Emoji" -license OFL-1.1 NotoColorEmoji.ttf
 //	go run ./cmd/emoji-pack -catalog DIR telegram -id twemoji -name Twemoji -list emoji.txt DIR-OF-THE-SET
@@ -15,11 +29,10 @@
 // of the version the set is of, which orders the cells. With -post the
 // sprites are not put into the catalog: the zip is the file of that post of
 // a Telegram channel, and the client downloads it from there through the
-// user's account. The zips of the sets that Telegram Desktop offers are
-// what the opt-in TestLiveEmojiSets of cmd/messenger downloads.
+// user's account.
 //
-// The client is pointed at the catalog by KOMARUGRAM_EMOJI_PACKS, a
-// directory or a URL.
+// The client is pointed at such a catalog, in place of the one built in, by
+// KOMARUGRAM_EMOJI_PACKS, a directory or a URL.
 package main
 
 import (
@@ -44,10 +57,13 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "official" {
+		return official(args[1:])
+	}
 	global := flag.NewFlagSet("emoji-pack", flag.ContinueOnError)
 	catalog := global.String("catalog", "", "the catalog's directory")
 	global.Usage = func() {
-		fmt.Fprintln(global.Output(), "usage: emoji-pack -catalog DIR font|telegram|list|remove ...")
+		fmt.Fprintln(global.Output(), "usage: emoji-pack official ... | emoji-pack -catalog DIR font|telegram|list|remove ...")
 		global.PrintDefaults()
 	}
 	if err := global.Parse(args); err != nil {

@@ -4,12 +4,20 @@
 // from a catalog, downloaded once and kept beside the settings. A pack is
 // an emoji font, or a set of sprites as Telegram Desktop's emoji sets are.
 //
-// A catalog is a directory, on disk or behind a URL:
+// The catalog of the client is the one built into it, official.json: the
+// emoji sets of Telegram Desktop, whose files stay where Telegram keeps them.
+// The sprites of the set it is built with are in its repository, those of
+// the sets it downloads in a channel of Telegram's cloud, and the list that
+// orders their cells in the repository of its lib_ui. The catalog pins the
+// commits and has the size and the hash of every file.
+//
+// A catalog can also be a directory, on disk or behind a URL, that has the
+// files of its packs:
 //
 //	index.json          the packs: Index
 //	<pack>/<file>       the files of a pack, as its entry lists them
 //
-// cmd/emoji-pack makes one.
+// cmd/emoji-pack makes both.
 package emojipacks
 
 import (
@@ -17,6 +25,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -86,6 +95,8 @@ type File struct {
 	// Archive marks a file that is in the pack's Telegram archive, under
 	// its name, and not in the catalog.
 	Archive bool `json:"archive,omitempty"`
+	// URL is where a file that is not in the catalog is downloaded from.
+	URL string `json:"url,omitempty"`
 }
 
 // Sprites is the layout of a sprite pack.
@@ -100,7 +111,10 @@ type Sprites struct {
 	// Order is the file that lists the emoji in the order of the cells,
 	// one cell a line: the emoji, and after spaces other sequences drawn
 	// the same. Sequences are without U+FE0F.
-	Order string `json:"order"`
+	Order string `json:"order,omitempty"`
+	// List is, in place of Order, the emoji list of Telegram Desktop's
+	// sources that the order of the cells follows from: TelegramOrder.
+	List string `json:"list,omitempty"`
 }
 
 // Size is the size of all the pack's files.
@@ -167,6 +181,9 @@ func (p Pack) Validate() error {
 		if _, err := hex.DecodeString(f.SHA256); err != nil {
 			return fmt.Errorf("pack %s: file %s: hash: %w", p.ID, f.Name, err)
 		}
+		if f.URL != "" && (f.Archive || !validURL(f.URL)) {
+			return fmt.Errorf("pack %s: file %s: its address %q", p.ID, f.Name, f.URL)
+		}
 	}
 	if p.Size() > MaxPackSize {
 		return fmt.Errorf("pack %s is over %d MB", p.ID, MaxPackSize>>20)
@@ -195,7 +212,10 @@ func (p Pack) Validate() error {
 		if s == nil || s.Cell <= 0 || s.Cell > 512 || s.Columns <= 0 || s.Columns > 256 || s.Rows <= 0 || s.Rows > 256 || len(s.Images) == 0 {
 			return fmt.Errorf("pack %s: its sprites are not described", p.ID)
 		}
-		for _, name := range append([]string{s.Order}, s.Images...) {
+		if (s.Order == "") == (s.List == "") {
+			return fmt.Errorf("pack %s: its sprites have an order or a list to take it from, one of them", p.ID)
+		}
+		for _, name := range append([]string{s.Order + s.List}, s.Images...) {
 			if !names[name] {
 				return fmt.Errorf("pack %s: %q is not among its files", p.ID, name)
 			}
@@ -216,6 +236,12 @@ func validID(id string) bool {
 		}
 	}
 	return true
+}
+
+// validURL reports whether address is one a file can be downloaded from.
+func validURL(address string) bool {
+	u, err := url.Parse(address)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
 // validUsername reports whether name can be a Telegram username.

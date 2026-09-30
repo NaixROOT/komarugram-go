@@ -1,0 +1,339 @@
+{
+	"version": 1,
+	"packs": [
+		{
+			"id": "apple",
+			"name": "Apple",
+			"kind": "sprites",
+			"license": "Apple",
+			"source": "Telegram Desktop",
+			"files": [
+				{
+					"name": "emoji.txt",
+					"size": 69266,
+					"sha256": "bb5fa4b87d0bb499dc1e1a7c2c87f2e8ad05b06e5cab79ac882825fcad1ecb62",
+					"url": "https://raw.githubusercontent.com/desktop-app/lib_ui/97636482c182726119201a6fe0d421d47096a3d6/emoji.txt"
+				},
+				{
+					"name": "emoji_1.webp",
+					"size": 1094868,
+					"sha256": "4fdc6288fa0bae49d33f5e22bd2c9c5fca0068a8d6a45eea4e6964c7e5e4b587",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_1.webp"
+				},
+				{
+					"name": "emoji_2.webp",
+					"size": 1374036,
+					"sha256": "514ac69f6ec47f1f76b29cc7d4ef6773a3947fb136137275ea2f5ce914bc506c",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_2.webp"
+				},
+				{
+					"name": "emoji_3.webp",
+					"size": 1344256,
+					"sha256": "5497f55a124f294dcac29afa67b01bee79a00e4f2a42d3122d4e708077212ab4",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_3.webp"
+				},
+				{
+					"name": "emoji_4.webp",
+					"size": 1184478,
+					"sha256": "afc6004cddb86b4a42f36b00b796233a13de672af70f272be30e632979026486",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_4.webp"
+				},
+				{
+					"name": "emoji_5.webp",
+					"size": 1489920,
+					"sha256": "30244f93022238009ccbbf25b4b4216279a8137fbac9e37444048eea72dda422",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_5.webp"
+				},
+				{
+					"name": "emoji_6.webp",
+					"size": 1459314,
+					"sha256": "5efccb2328e320c7c3e6f02f6b7f5dee7d11361a0ef5cccfad6a2776a9dc68ef",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_6.webp"
+				},
+				{
+					"name": "emoji_7.webp",
+					"size": 1163068,
+					"sha256": "cc59c1e9db9c72fcee9e7d200eb971f59e856558755289adca31c18433323a26",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_7.webp"
+				},
+				{
+					"name": "emoji_8.webp",
+					"size": 528740,
+					"sha256": "9b8217e33c41102fdec2ee5d97274f4a6b6a2b9bef949802a431ed2098bf1866",
+					"url": "https://raw.githubusercontent.com/telegramdesktop/tdesktop/d81a5ac270fdcb5315b49f813614caa71f85697f/Telegram/Resources/emoji/emoji_8.webp"
+				}
+			],
+			"sprites": {
+				"cell": 72,
+				"columns": 32,
+				"rows": 16,
+				"images": [
+					"emoji_1.webp",
+					"emoji_2.webp",
+					"emoji_3.webp",
+					"emoji_4.webp",
+					"emoji_5.webp",
+					"emoji_6.webp",
+					"emoji_7.webp",
+					"emoji_8.webp"
+				],
+				"list": "emoji.txt"
+			}
+		},
+		{
+			"id": "android",
+			"name": "Android",
+			"kind": "sprites",
+			"license": "Apache-2.0",
+			"source": "Telegram Desktop",
+			"files": [
+				{
+					"name": "emoji.txt",
+					"size": 69266,
+					"sha256": "bb5fa4b87d0bb499dc1e1a7c2c87f2e8ad05b06e5cab79ac882825fcad1ecb62",
+					"url": "https://raw.githubusercontent.com/desktop-app/lib_ui/97636482c182726119201a6fe0d421d47096a3d6/emoji.txt"
+				},
+				{
+					"name": "emoji_1.webp",
+					"size": 959140,
+					"sha256": "95bcd359bdd2389159f886ab3d0d5096d1083525b03514352431bed74a4707ab",
+					"archive": true
+				},
+				{
+					"name": "emoji_2.webp",
+					"size": 1087402,
+					"sha256": "9887caed363b3d2584d24949e36af758cb8c10347df6be364149371eb8767e8d",
+					"archive": true
+				},
+				{
+					"name": "emoji_3.webp",
+					"size": 1070438,
+					"sha256": "e37b0d29282adf9751a9a8d7ef80d2ffc7ddea997364d000fd484fcf94f753c2",
+					"archive": true
+				},
+				{
+					"name": "emoji_4.webp",
+					"size": 962808,
+					"sha256": "e4f8a85b6be8bf442540138375e4579a87650b1e14216cd97df93a8997acf24e",
+					"archive": true
+				},
+				{
+					"name": "emoji_5.webp",
+					"size": 1206442,
+					"sha256": "8297ebaa9389408a5321ecdfb7a3371cfd151b15616f8a8bd27855d5f310827a",
+					"archive": true
+				},
+				{
+					"name": "emoji_6.webp",
+					"size": 1173716,
+					"sha256": "cf1131d38504622d076ef5e32695aca90dc66f16215f9bc68c5264265a779974",
+					"archive": true
+				},
+				{
+					"name": "emoji_7.webp",
+					"size": 954728,
+					"sha256": "c42e4f6f734806bff5d64a800e72744330c5d2651e96d031d6876bc98b9c994e",
+					"archive": true
+				},
+				{
+					"name": "emoji_8.webp",
+					"size": 531484,
+					"sha256": "2fa0f152b85b6d9d7e42f555641713ba88552d4cf868abd60fac022a577b3e97",
+					"archive": true
+				}
+			],
+			"sprites": {
+				"cell": 72,
+				"columns": 32,
+				"rows": 16,
+				"images": [
+					"emoji_1.webp",
+					"emoji_2.webp",
+					"emoji_3.webp",
+					"emoji_4.webp",
+					"emoji_5.webp",
+					"emoji_6.webp",
+					"emoji_7.webp",
+					"emoji_8.webp"
+				],
+				"list": "emoji.txt"
+			},
+			"telegram": {
+				"channel": "tdhbcfiles",
+				"post": 3223,
+				"size": 7854643,
+				"sha256": "0ce28d69fb4412ab4488fbf602dea342efcceef3b59edc1df226f88c28fa327e"
+			}
+		},
+		{
+			"id": "twemoji",
+			"name": "Twemoji",
+			"kind": "sprites",
+			"license": "CC-BY-4.0",
+			"source": "Telegram Desktop",
+			"files": [
+				{
+					"name": "emoji.txt",
+					"size": 69266,
+					"sha256": "bb5fa4b87d0bb499dc1e1a7c2c87f2e8ad05b06e5cab79ac882825fcad1ecb62",
+					"url": "https://raw.githubusercontent.com/desktop-app/lib_ui/97636482c182726119201a6fe0d421d47096a3d6/emoji.txt"
+				},
+				{
+					"name": "emoji_1.webp",
+					"size": 602268,
+					"sha256": "17469de69c8e6bc64a8650b95de33d2146141d0e83fda04012122f2bd2536977",
+					"archive": true
+				},
+				{
+					"name": "emoji_2.webp",
+					"size": 904736,
+					"sha256": "080bc643ee3850653f4868153dbca2fad7d264459668a3659d478a8f2c77fe2d",
+					"archive": true
+				},
+				{
+					"name": "emoji_3.webp",
+					"size": 834378,
+					"sha256": "ba4226696466a32f5f1235a2dc7f847bcbe7c05faf4a03a0b0304cb17515996d",
+					"archive": true
+				},
+				{
+					"name": "emoji_4.webp",
+					"size": 1039672,
+					"sha256": "9ce53b3f988115c9b0bd00a749599a60469e4ecc6e12c999c85977a42a25582b",
+					"archive": true
+				},
+				{
+					"name": "emoji_5.webp",
+					"size": 842460,
+					"sha256": "8baa7a203e6e7701d99fb63ea6255f23bafd725f5e544ddd296dc12bd89ea87f",
+					"archive": true
+				},
+				{
+					"name": "emoji_6.webp",
+					"size": 946632,
+					"sha256": "99c393fe9e80917b87cd1cbcd708882b2def016ce43b3124ad0a04d9545f5825",
+					"archive": true
+				},
+				{
+					"name": "emoji_7.webp",
+					"size": 605842,
+					"sha256": "a43ac7ef1aa76a1893cbd7a53a3ce8eb3d4d108319bdf05d8d734eb8f8467505",
+					"archive": true
+				},
+				{
+					"name": "emoji_8.webp",
+					"size": 312570,
+					"sha256": "49c8558c9e770035d706fbaef92af59d36f280f8c329580142d42d899cf8f71f",
+					"archive": true
+				}
+			],
+			"sprites": {
+				"cell": 72,
+				"columns": 32,
+				"rows": 16,
+				"images": [
+					"emoji_1.webp",
+					"emoji_2.webp",
+					"emoji_3.webp",
+					"emoji_4.webp",
+					"emoji_5.webp",
+					"emoji_6.webp",
+					"emoji_7.webp",
+					"emoji_8.webp"
+				],
+				"list": "emoji.txt"
+			},
+			"telegram": {
+				"channel": "tdhbcfiles",
+				"post": 3224,
+				"size": 6072532,
+				"sha256": "95ffc4779bdf7e5eef12bb65594dd3eff2b5764be7009620c801533da0854540"
+			}
+		},
+		{
+			"id": "joypixels",
+			"name": "JoyPixels",
+			"kind": "sprites",
+			"license": "JoyPixels Free License",
+			"source": "Telegram Desktop",
+			"files": [
+				{
+					"name": "emoji.txt",
+					"size": 69266,
+					"sha256": "bb5fa4b87d0bb499dc1e1a7c2c87f2e8ad05b06e5cab79ac882825fcad1ecb62",
+					"url": "https://raw.githubusercontent.com/desktop-app/lib_ui/97636482c182726119201a6fe0d421d47096a3d6/emoji.txt"
+				},
+				{
+					"name": "emoji_1.webp",
+					"size": 956772,
+					"sha256": "b6556572692aa8bb176d81d7d30598e81782b0078b39a6f60e35201b0f104290",
+					"archive": true
+				},
+				{
+					"name": "emoji_2.webp",
+					"size": 1061294,
+					"sha256": "8ee0601613e119f924c0c75f9e547b33547957edf53f29a3f52e82388c46621e",
+					"archive": true
+				},
+				{
+					"name": "emoji_3.webp",
+					"size": 1059902,
+					"sha256": "65323f8d0f079a2e04d37816132895b8b938282e0943c316389ff578d7f018ea",
+					"archive": true
+				},
+				{
+					"name": "emoji_4.webp",
+					"size": 959340,
+					"sha256": "84321cf5d34eab72177fd87b2fa6c5f775aa2089e2388e0dbde8c7c9f030f66f",
+					"archive": true
+				},
+				{
+					"name": "emoji_5.webp",
+					"size": 1217666,
+					"sha256": "95b22f589df3303b757a576471544c8e5caf9221d6dc4a9ec96c8ff5bd0451e3",
+					"archive": true
+				},
+				{
+					"name": "emoji_6.webp",
+					"size": 1230976,
+					"sha256": "0254ed7ee34d800fda25c29e3c1bf0bbaff6f7352331dc701eefdd24030cf7e0",
+					"archive": true
+				},
+				{
+					"name": "emoji_7.webp",
+					"size": 901474,
+					"sha256": "4c2392c65e023a5e7bbb0905c9e7de68cc38c9434e065edd3544934b4e122a4a",
+					"archive": true
+				},
+				{
+					"name": "emoji_8.webp",
+					"size": 514768,
+					"sha256": "83710b128d027c5a9e806cde5b5942cc8d5e3484531de328da4b446f58207d96",
+					"archive": true
+				}
+			],
+			"sprites": {
+				"cell": 72,
+				"columns": 32,
+				"rows": 16,
+				"images": [
+					"emoji_1.webp",
+					"emoji_2.webp",
+					"emoji_3.webp",
+					"emoji_4.webp",
+					"emoji_5.webp",
+					"emoji_6.webp",
+					"emoji_7.webp",
+					"emoji_8.webp"
+				],
+				"list": "emoji.txt"
+			},
+			"telegram": {
+				"channel": "tdhbcfiles",
+				"post": 3225,
+				"size": 7805861,
+				"sha256": "3bab0d03a64838e0c6a6c6f3d9fea2551114d9c8ebd2c01ed29dab36bb61b4ec"
+			}
+		}
+	]
+}

@@ -250,16 +250,14 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.settings.emojiView.setFiles = a.settings.fontsView.setFiles
 	a.settings.emojiView.store = a.emojiPacks
 	// The packs whose files are in Telegram's cloud are downloaded through
-	// the window's account, which only reads the channel they are in.
-	a.settings.emojiView.source = emojipacks.WithTelegram(emojipacks.SourceFromEnv(), func(ctx context.Context, channel string, post int, progress func(done, total int64)) ([]byte, error) {
-		files, ok := store.(interface {
-			ChannelFile(ctx context.Context, username string, post int, progress func(done, total int64)) ([]byte, error)
-		})
-		if !ok {
-			return nil, emojipacks.ErrNeedsTelegram
-		}
-		return files.ChannelFile(ctx, channel, post, progress)
-	})
+	// the window's account, which only reads the channel they are in. The
+	// demo's store has no way there, and its settings do not offer them.
+	a.settings.emojiView.source = emojipacks.SourceFromEnv()
+	if files, ok := store.(interface {
+		ChannelFile(ctx context.Context, username string, post int, progress func(done, total int64)) ([]byte, error)
+	}); ok {
+		a.settings.emojiView.source = emojipacks.WithTelegram(a.settings.emojiView.source, files.ChannelFile)
+	}
 	a.settings.emojiView.applied = func() {
 		applyFonts(a.preferences.Global().Fonts, a.emojiPacks)
 		w.Invalidate()

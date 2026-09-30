@@ -90,33 +90,57 @@ func OpenSprites(dir string, p Pack) (*SpriteSet, error) {
 		s.rows = append(s.rows, rows)
 		cells += rows * s.layout.Columns
 	}
-	f, err := os.Open(filepath.Join(dir, s.layout.Order))
+	order, from, err := readOrder(dir, s.layout)
 	if err != nil {
 		return nil, err
+	}
+	for _, sequences := range order {
+		if len(sequences) == 0 {
+			return nil, fmt.Errorf("%s: line %d is empty", from, s.count+1)
+		}
+		for _, sequence := range sequences {
+			if err := s.add(sequence, s.count); err != nil {
+				return nil, fmt.Errorf("%s: emoji %d: %w", from, s.count+1, err)
+			}
+		}
+		s.count++
+	}
+	if s.count == 0 || s.count > cells {
+		return nil, fmt.Errorf("%d emoji are listed for %d cells", s.count, cells)
+	}
+	// An order worked out from a list is of one version of the set: that of
+	// another is caught by the emoji not ending in the last row.
+	if s.layout.List != "" && s.count <= cells-s.layout.Columns {
+		return nil, fmt.Errorf("%d emoji are listed for %d cells: the list is of another version of the set than the sprites", s.count, cells)
+	}
+	s.cells, _ = openCells(dir, s)
+	return s, nil
+}
+
+// readOrder returns the emoji of the cells of a set whose files are in dir,
+// each with the other sequences drawn the same, and the file they are from.
+func readOrder(dir string, layout Sprites) (order [][]string, from string, err error) {
+	if layout.List != "" {
+		list, err := os.ReadFile(filepath.Join(dir, layout.List))
+		if err != nil {
+			return nil, "", err
+		}
+		if order, err = TelegramOrder(string(list)); err != nil {
+			return nil, "", fmt.Errorf("%s: %w", layout.List, err)
+		}
+		return order, layout.List, nil
+	}
+	f, err := os.Open(filepath.Join(dir, layout.Order))
+	if err != nil {
+		return nil, "", err
 	}
 	defer f.Close()
 	lines := bufio.NewScanner(f)
 	lines.Buffer(nil, 1<<20)
 	for lines.Scan() {
-		sequences := strings.Fields(lines.Text())
-		if len(sequences) == 0 {
-			return nil, fmt.Errorf("%s: line %d is empty", s.layout.Order, s.count+1)
-		}
-		for _, sequence := range sequences {
-			if err := s.add(sequence, s.count); err != nil {
-				return nil, fmt.Errorf("%s: line %d: %w", s.layout.Order, s.count+1, err)
-			}
-		}
-		s.count++
+		order = append(order, strings.Fields(lines.Text()))
 	}
-	if err := lines.Err(); err != nil {
-		return nil, err
-	}
-	if s.count == 0 || s.count > cells {
-		return nil, fmt.Errorf("%d emoji are listed for %d cells", s.count, cells)
-	}
-	s.cells, _ = openCells(dir, s)
-	return s, nil
+	return order, layout.Order, lines.Err()
 }
 
 func edge(node int32, r rune) uint64 { return uint64(node)<<32 | uint64(uint32(r)) }
@@ -146,6 +170,15 @@ func (s *SpriteSet) add(sequence string, id int) error {
 	}
 	s.nodes[node] = int32(id)
 	return nil
+}
+
+// cellCount is how many cells the pictures have.
+func (s *SpriteSet) cellCount() int {
+	n := 0
+	for _, rows := range s.rows {
+		n += rows * s.layout.Columns
+	}
+	return n
 }
 
 // Count is how many emoji the set has.

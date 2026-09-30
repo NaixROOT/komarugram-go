@@ -94,10 +94,7 @@ func BuildTelegramSprites(catalog string, p Pack, images []string, order [][]str
 	if err != nil {
 		return Pack{}, err
 	}
-	cells := 0
-	for _, rows := range set.rows {
-		cells += rows * set.layout.Columns
-	}
+	cells := set.cellCount()
 	if set.count <= cells-set.layout.Columns {
 		RemoveFromCatalog(catalog, built.ID)
 		return Pack{}, fmt.Errorf("%d emoji are listed for %d cells: the list is of another version of the set than the sprites", set.count, cells)

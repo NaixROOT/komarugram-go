@@ -19,9 +19,11 @@ import (
 // channel it takes them from, into the directory the variable names, as
 // set-<post>.zip. It uses the existing account's exclusive lock and only
 // reads: the channel's name is resolved, three of its posts are asked for
-// and their files downloaded. cmd/emoji-pack makes packs of them. With
-// KOMARUGRAM_EMOJI_PACKS naming a catalog of such packs, they are then
-// installed from Telegram into the directory's "installed".
+// and their files downloaded. cmd/emoji-pack describes them in the catalog
+// built into the client. The packs of that catalog, or of the one that
+// KOMARUGRAM_EMOJI_PACKS names, are then installed the way the settings
+// install them, into the directory's "installed": those of Telegram's
+// cloud from the channel, the others from their addresses.
 func TestLiveEmojiSets(t *testing.T) {
 	dir := os.Getenv("KOMARUGRAM_TEST_LIVE_EMOJI_SETS")
 	if dir == "" {
@@ -71,21 +73,13 @@ func TestLiveEmojiSets(t *testing.T) {
 			}
 			t.Logf("post %d: %d bytes in %s", post, len(data), path)
 		}
-		// With a catalog, its packs whose sprites are in Telegram are
-		// installed the way the settings install them, into the directory.
 		src := emojipacks.WithTelegram(emojipacks.SourceFromEnv(), store.ChannelFile)
-		if src == nil {
-			return nil
-		}
 		packs, err := emojipacks.ReadIndex(ctx, src)
 		if err != nil {
 			return err
 		}
 		installed := emojipacks.Open(filepath.Join(dir, "installed"))
 		for _, p := range packs {
-			if p.Telegram == nil {
-				continue
-			}
 			start := time.Now()
 			if err := installed.Install(ctx, src, p, nil); err != nil {
 				return fmt.Errorf("pack %s: %w", p.ID, err)
@@ -97,7 +91,11 @@ func TestLiveEmojiSets(t *testing.T) {
 			if set.Image(0, 32) == nil {
 				return fmt.Errorf("pack %s: no picture of its first emoji", p.ID)
 			}
-			t.Logf("pack %s: %d emoji installed from @%s/%d in %v", p.ID, set.Count(), p.Telegram.Channel, p.Telegram.Post, time.Since(start))
+			from := "its addresses"
+			if p.Telegram != nil {
+				from = fmt.Sprintf("@%s/%d", p.Telegram.Channel, p.Telegram.Post)
+			}
+			t.Logf("pack %s: %d emoji installed from %s in %v", p.ID, set.Count(), from, time.Since(start))
 		}
 		return nil
 	})
