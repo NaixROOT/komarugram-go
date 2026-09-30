@@ -42,3 +42,21 @@ func init() {
 		english[key+"#one"], english[key] = texts.oneE, texts.other
 	}
 }
+
+// Texts of the areas files dragged over a chat are dropped on, as Telegram
+// Desktop's.
+func init() {
+	for key, texts := range map[string][3]string{
+		"drop.files_here":     {"lng_drag_files_here", "Перетащите файлы сюда", "Drop files here"},
+		"drop.images_here":    {"lng_drag_images_here", "Перетащите изображения сюда", "Drop images here"},
+		"drop.photos_here":    {"lng_drag_photos_here", "Перетащите фото сюда", "Drop photos here"},
+		"drop.media_here":     {"lng_drag_media_here", "Перетащите фото и видео", "Drop photos and videos"},
+		"drop.quick":          {"lng_drag_to_send_quick", "для быстрой отправки", "to send them in a quick way"},
+		"drop.no_compression": {"lng_drag_to_send_no_compression", "чтобы отправить без сжатия", "to send them without compression"},
+		"drop.as_files":       {"lng_drag_to_send_files", "чтобы отправить как файлы", "to send them as documents"},
+		"drop.as_media":       {"lng_drag_to_send_media", "чтобы отправить как медиафайлы", "to send them as media files"},
+	} {
+		TelegramKeys[key] = texts[0]
+		russian[key], english[key] = texts[1], texts[2]
+	}
+}

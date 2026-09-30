@@ -13,9 +13,9 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, name string, data []byte) string {
@@ -235,7 +235,7 @@ func names(g []Group) string {
 		for _, f := range group.Files {
 			n = append(n, f.Name)
 		}
-		parts = append(parts, strings.Join(n, "")+":"+[]string{"-", "media", "files"}[group.Album])
+		parts = append(parts, strings.Join(n, "")+":"+[]string{"-", "media", "files", "music"}[group.Album])
 	}
 	return strings.Join(parts, " ")
 }
@@ -243,7 +243,7 @@ func names(g []Group) string {
 // The grouping is Telegram Desktop's: neighbours of one album type go
 // together, ten at most; a file that would be alone is not in an album.
 func TestDivide(t *testing.T) {
-	photo, video, file, anim := KindPhoto, KindVideo, KindFile, KindAnimation
+	photo, video, file, anim, music := KindPhoto, KindVideo, KindFile, KindAnimation, KindMusic
 	group := Way{Group: true}
 	for _, c := range []struct {
 		name  string
@@ -263,6 +263,9 @@ func TestDivide(t *testing.T) {
 		{"one", files(photo), group, "a:-"},
 		{"none", nil, group, ""},
 		{"eleven", files(photo, photo, photo, photo, photo, photo, photo, photo, photo, photo, photo), group, "abcdefghij:media k:-"},
+		{"music", files(music, music, file, music), group, "ab:music c:- d:-"},
+		{"music is music as documents", files(music, music), Way{Group: true, Documents: true}, "ab:music"},
+		{"music not grouped", files(music, music), Way{}, "a:- b:-"},
 		{"twelve", files(photo, photo, photo, photo, photo, photo, photo, photo, photo, photo, photo, photo), group, "abcdefghij:media kl:media"},
 	} {
 		if got := names(Divide(c.files, c.way)); got != c.want {
@@ -298,7 +301,8 @@ func TestOptionsOfTheBox(t *testing.T) {
 	if !HasGroupOption(photos) || HasGroupOption(photos[:1]) || HasGroupOption(files(KindFile, KindAnimation)) || HasGroupOption(files(KindAnimation, KindAnimation)) {
 		t.Error("group option")
 	}
-	if !HasGroupOption(files(KindFile, KindPhoto)) || !HasGroupOption(files(KindVideo, KindPhoto)) || HasGroupOption(files(KindFile, KindVideo)) {
+	if !HasGroupOption(files(KindFile, KindPhoto)) || !HasGroupOption(files(KindVideo, KindPhoto)) || HasGroupOption(files(KindFile, KindVideo)) ||
+		!HasGroupOption(files(KindMusic, KindMusic)) || HasGroupOption(files(KindMusic, KindFile)) || HasGroupOption(files(KindPhoto, KindMusic)) {
 		t.Error("group option with mixed files")
 	}
 	if !HasDocumentsOption(photos) || HasDocumentsOption(files(KindFile, KindAnimation)) {
@@ -324,7 +328,98 @@ func TestOptionsOfTheBox(t *testing.T) {
 			t.Errorf("%v %+v: %d, want %d", c.files, c.way, got, c.want)
 		}
 	}
-	if !reflect.DeepEqual([]string{Size(0), Size(1023), Size(1024), Size(1536), Size(5 << 20), Size(3 << 30)}, []string{"0 B", "1023 B", "1.0 KB", "1.5 KB", "5.0 MB", "3.0 GB"}) {
-		t.Error("sizes")
+	// As Telegram Desktop writes them: tenths cut, megabytes at most.
+	sizes := []int64{0, 9, 1023, 1024, 1536, 1<<20 - 1, 5 << 20, 5<<20 + 1<<20*99/100, 3 << 30}
+	want := []string{"0 B", "9 B", "1023 B", "1.0 KB", "1.5 KB", "1023.9 KB", "5.0 MB", "5.9 MB", "3072.0 MB"}
+	for i, n := range sizes {
+		if got := Size(n); got != want[i] {
+			t.Errorf("Size(%d) = %q, want %q", n, got, want[i])
+		}
+	}
+	if got := SizeIn(1536, "Б", "КБ", "МБ"); got != "1.5 КБ" {
+		t.Errorf("in Russian: %q", got)
+	}
+}
+
+// mp3 is a file of n silent frames of MPEG-1 layer III at 44.1 kHz, after
+// an ID3v2.3 tag of frames.
+func mp3(n int, frames ...[]byte) []byte {
+	body := bytes.Join(frames, nil)
+	size := len(body)
+	out := append([]byte{'I', 'D', '3', 3, 0, 0, byte(size >> 21 & 0x7f), byte(size >> 14 & 0x7f), byte(size >> 7 & 0x7f), byte(size & 0x7f)}, body...)
+	frame := make([]byte, 417)
+	copy(frame, []byte{0xff, 0xfb, 0x90, 0x64})
+	return append(out, bytes.Repeat(frame, n)...)
+}
+
+func id3Frame(id string, data []byte) []byte {
+	return append(append([]byte(id), binary.BigEndian.AppendUint32(nil, uint32(len(data)))...), append([]byte{0, 0}, data...)...)
+}
+
+// Audio files that say how long they play are music, with what their tags
+// say; the others go as files.
+func TestInspectFindsMusic(t *testing.T) {
+	cover := pngBytes(t, gradient(600, 500))
+	apic := append([]byte("\x00image/png\x00\x03\x00"), cover...)
+	f, err := Inspect(writeFile(t, "song.MP3", mp3(100, id3Frame("TIT2", []byte("\x03Песня")), id3Frame("TPE1", []byte("\x00Band")), id3Frame("APIC", apic))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Kind != KindMusic || f.MIME != "audio/mpeg" || f.Title != "Песня" || f.Performer != "Band" || !bytes.Equal(f.Cover, cover) || f.Duration.Round(time.Millisecond) != 2612*time.Millisecond {
+		t.Fatalf("kind %d, %s, %q by %q, %v, cover of %d bytes", f.Kind, f.MIME, f.Title, f.Performer, f.Duration, len(f.Cover))
+	}
+	thumb, err := DocumentThumbnail(f.Cover)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := jpeg.DecodeConfig(bytes.NewReader(thumb)); err != nil || cfg.Width != 320 || cfg.Height != 266 {
+		t.Fatalf("thumbnail %+v, %v", cfg, err)
+	}
+	if f, err := Inspect(writeFile(t, "broken.mp3", []byte("no frames here"))); err != nil || f.Kind != KindFile {
+		t.Fatalf("a broken MP3: %+v, %v", f, err)
+	}
+	if f, err := Inspect(writeFile(t, "sound.flac", []byte("no FLAC"))); err != nil || f.Kind != KindFile || f.MIME != "audio/flac" {
+		t.Fatalf("a broken FLAC: %+v, %v", f, err)
+	}
+}
+
+// Dragged files offer the areas Telegram Desktop's do.
+func TestDropStateOf(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, data []byte) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var g bytes.Buffer
+	if err := gif.Encode(&g, gradient(4, 4), nil); err != nil {
+		t.Fatal(err)
+	}
+	photo := write("a.png", pngBytes(t, gradient(30, 20)))
+	jpg := write("b.jpg", jpegBytes(t, gradient(16, 9)))
+	video := write("c.mp4", []byte("not really a video"))
+	anim := write("d.gif", g.Bytes())
+	text := write("e.txt", []byte("text"))
+	broken := write("f.png", []byte("a png that is not one"))
+	for _, c := range []struct {
+		name  string
+		paths []string
+		want  DropState
+	}{
+		{"nothing", nil, DropNone},
+		{"pictures", []string{photo, jpg}, DropPhotos},
+		{"a picture and a video", []string{photo, video}, DropMedia},
+		{"a gif is media, not a photo", []string{anim}, DropMedia},
+		{"a picture that does not decode", []string{broken}, DropMedia},
+		{"a text among pictures", []string{photo, text}, DropFiles},
+		{"a folder", []string{dir}, DropNone},
+		{"a folder among files", []string{text, dir}, DropNone},
+		{"a file that is gone", []string{filepath.Join(dir, "gone.txt")}, DropNone},
+	} {
+		if got := DropStateOf(c.paths); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
 	}
 }

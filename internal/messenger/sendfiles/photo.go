@@ -91,6 +91,40 @@ func Thumbnail(path string, side int) (*image.RGBA, error) {
 	return toRGBA(orient(fit(img, side), turn)), nil
 }
 
+// thumbSide and thumbQuality are Telegram Desktop's, for the thumbnail a
+// document is sent with.
+const (
+	thumbSide    = 320
+	thumbQuality = 87
+)
+
+// CoverThumbnail decodes the picture of music, data, and scales it down to
+// fit a square of side pixels.
+func CoverThumbnail(data []byte, side int) (*image.RGBA, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if b := img.Bounds(); !ValidDimensions(b.Dx(), b.Dy()) {
+		return nil, errors.New("the picture has no shape a thumbnail takes")
+	}
+	return toRGBA(fit(img, side)), nil
+}
+
+// DocumentThumbnail makes the picture of music, data, the thumbnail it is
+// sent with: at most 320 pixels a side, as JPEG.
+func DocumentThumbnail(data []byte) ([]byte, error) {
+	img, err := CoverThumbnail(data, thumbSide)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, flatten(img), &jpeg.Options{Quality: thumbQuality}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 // VideoThumbnail asks ffmpeg for the first picture of the video at path,
 // scaled to fit a square of side pixels.
 func VideoThumbnail(ctx context.Context, ffmpeg, path string, side int) (*image.RGBA, error) {

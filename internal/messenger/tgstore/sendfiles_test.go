@@ -5,6 +5,7 @@ package tgstore
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/color"
@@ -188,5 +189,81 @@ func TestSendFilesTellsWhichFileFailed(t *testing.T) {
 	}
 	if err := (model.OutgoingMessage{RandomID: 1, Files: &model.OutgoingFiles{}}).Validate(); err == nil {
 		t.Fatal("no files validated")
+	}
+}
+
+// song writes an MP3 of n silent frames, 1152 samples each at 44.1 kHz,
+// whose ID3v2.3 tag names it and holds a cover when cover is set.
+func song(t *testing.T, dir, name, title string, n int, cover []byte) string {
+	t.Helper()
+	frame := func(id string, data []byte) []byte {
+		return append(append([]byte(id), binary.BigEndian.AppendUint32(nil, uint32(len(data)))...), append([]byte{0, 0}, data...)...)
+	}
+	body := append(frame("TIT2", append([]byte{3}, title...)), frame("TPE1", []byte("\x03Исполнитель"))...)
+	if cover != nil {
+		body = append(body, frame("APIC", append([]byte("\x00image/png\x00\x03\x00"), cover...))...)
+	}
+	size := len(body)
+	data := append([]byte{'I', 'D', '3', 3, 0, 0, byte(size >> 21 & 0x7f), byte(size >> 14 & 0x7f), byte(size >> 7 & 0x7f), byte(size & 0x7f)}, body...)
+	audio := make([]byte, 417)
+	copy(audio, []byte{0xff, 0xfb, 0x90, 0x64})
+	data = append(data, bytes.Repeat(audio, n)...)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Music goes as a track, as Telegram Desktop sends it: its tags and length
+// in an audio attribute, its cover as the thumbnail; even with "send as
+// documents", and tracks grouped go in an album of their own.
+func TestSendMusicAsTracks(t *testing.T) {
+	s, server := filesStore(t)
+	dir := t.TempDir()
+	cover, err := os.ReadFile(picture(t, dir, "cover.png", 500, 500))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1915 frames are 50.02 s: whole seconds are 50.
+	one := song(t, dir, "one.mp3", "Первая", 1915, cover)
+	err = s.Send(context.Background(), 5, model.OutgoingMessage{RandomID: 70, Text: "Послушай", Files: &model.OutgoingFiles{Paths: []string{one}, Documents: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(server.singles) != 1 {
+		t.Fatalf("%d singles", len(server.singles))
+	}
+	doc, ok := server.singles[0].Media.(*tg.InputMediaUploadedDocument)
+	if !ok || doc.ForceFile || doc.MimeType != "audio/mpeg" || doc.Thumb == nil || server.singles[0].Message != "Послушай" {
+		t.Fatalf("the track: %+v", server.singles[0].Media)
+	}
+	if name := doc.Attributes[0].(*tg.DocumentAttributeFilename).FileName; name != "one.mp3" {
+		t.Fatalf("named %q", name)
+	}
+	audio, ok := doc.Attributes[1].(*tg.DocumentAttributeAudio)
+	if !ok || audio.Voice || audio.Title != "Первая" || audio.Performer != "Исполнитель" || audio.Duration != 50 {
+		t.Fatalf("audio %+v", doc.Attributes[1])
+	}
+
+	two := song(t, dir, "two.mp3", "Вторая", 100, nil)
+	err = s.Send(context.Background(), 5, model.OutgoingMessage{RandomID: 80, Files: &model.OutgoingFiles{Paths: []string{one, two, picture(t, dir, "a.png", 30, 20)}, Group: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(server.albums) != 1 || len(server.albums[0].MultiMedia) != 2 || len(server.singles) != 2 {
+		t.Fatalf("%d albums, %d singles", len(server.albums), len(server.singles))
+	}
+	for i, media := range server.uploaded {
+		doc, ok := media.(*tg.InputMediaUploadedDocument)
+		if !ok || len(doc.Attributes) != 2 {
+			t.Fatalf("track %d uploaded as %+v", i, media)
+		}
+		if _, ok := doc.Attributes[1].(*tg.DocumentAttributeAudio); !ok {
+			t.Fatalf("track %d without an audio attribute", i)
+		}
+	}
+	if doc := server.uploaded[1].(*tg.InputMediaUploadedDocument); doc.Thumb != nil {
+		t.Fatal("a track without a cover sent with a thumbnail")
 	}
 }

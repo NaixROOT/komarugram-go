@@ -16,6 +16,7 @@ import (
 	"golang.org/x/image/font/gofont/gomono"
 
 	"komarugram/internal/messenger/fonts"
+	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/preferences"
 )
 
@@ -54,5 +55,25 @@ func TestFontOfTheSettingsReachesTheTheme(t *testing.T) {
 	}
 	if fonts.Revision() != 1 {
 		t.Errorf("revision after a reset: %d", fonts.Revision())
+	}
+}
+
+// Sizes of fonts and emoji packs are written as the files of the history,
+// in the units of the language: a small font is not "0.0 МБ".
+func TestSizesOfTheSettings(t *testing.T) {
+	ru, en := localization.For("ru"), localization.For("en")
+	for _, c := range []struct {
+		l    localization.Catalog
+		size int64
+		want string
+	}{
+		{ru, 9, "9 Б"},
+		{ru, 40 << 10, "40.0 КБ"},
+		{ru, 12<<20 + 1<<20*99/100, "12.9 МБ"},
+		{en, 3 << 20, "3.0 MB"},
+	} {
+		if got := sizeText(c.l, c.size); got != c.want {
+			t.Errorf("%d: %q, want %q", c.size, got, c.want)
+		}
 	}
 }

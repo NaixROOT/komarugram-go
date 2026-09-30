@@ -94,6 +94,8 @@ type App struct {
 	// shows over its channel while it is set.
 	comments *chatPage
 	thread   *commentsView
+	// drop is a drag of files over the window.
+	drop fileDrop
 	// mini runs the Mini Apps of bots; nil when the store cannot ask for
 	// them.
 	mini *webApps
@@ -979,6 +981,9 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 			return layout.Dimensions{Size: gtx.Constraints.Max}
 		})
 	}
+	// The page is where files dragged over the window are dropped, when it
+	// is a chat that takes them.
+	a.drop.page, a.drop.area, a.drop.metric = nil, image.Rect(x, pageTop, size.X, size.Y), gtx.Metric
 	column(x, pageTop, size.X-x, size.Y-pageTop, func(gtx layout.Context) layout.Dimensions {
 		switch a.section.kind {
 		case sectionProfile:
@@ -987,12 +992,18 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 			return a.settings.Layout(gtx, a.themeMode(), a.window.Appearance.Scheme(), a.dark(), a.catalog())
 		}
 		if a.thread != nil {
+			if a.comments.takesFiles() {
+				a.drop.page = a.comments
+			}
 			return a.layoutComments(gtx, a.catalog())
 		}
 		if c, ok := a.selectedChat(); ok && c.Forum && a.forum != nil {
 			return a.layoutForum(gtx, c, a.catalog())
 		}
 		if c, ok := a.selectedChat(); ok {
+			if a.history.takesFiles() {
+				a.drop.page = a.history
+			}
 			return layoutChatPage(gtx, c, a.catalog(), a.layoutAvatar, a.badges, func(gtx layout.Context) layout.Dimensions {
 				if a.history != nil {
 					return a.history.Layout(gtx, c, a.catalog(), a.window.Motion.AnimationsEnabled())
@@ -1007,6 +1018,7 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	if a.section.showsChats() {
 		a.splitter.Layout(gtx, x, size.Y)
 	}
+	a.drop.layout(gtx, a.catalog())
 	a.overlay.Layout(gtx)
 	if a.info != nil {
 		a.info.Layout(overlayGtx, a.catalog(), a.window.Motion.AnimationsEnabled())

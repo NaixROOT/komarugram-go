@@ -145,9 +145,14 @@ func baseName(path string) string {
 }
 
 // boxThumbnail reads the picture a file shows in the box: a photo or a GIF
-// as it is, a video as its first frame when there is an FFmpeg to say it.
+// as it is, a video as its first frame when there is an FFmpeg to say it,
+// music as its cover.
 func boxThumbnail(ctx context.Context, ffmpeg string, f sendfiles.File) *image.RGBA {
 	switch f.Kind {
+	case sendfiles.KindMusic:
+		if thumb, err := sendfiles.CoverThumbnail(f.Cover, boxThumbSide); err == nil {
+			return thumb
+		}
 	case sendfiles.KindPhoto, sendfiles.KindAnimation:
 		if thumb, err := sendfiles.Thumbnail(f.Path, boxThumbSide); err == nil {
 			return thumb
@@ -626,8 +631,11 @@ func (c *messageComposer) layoutFileRow(gtx layout.Context, p *chatPage, f *boxF
 			}
 			fillRect(gtx, sc.Primary.Color, size)
 			icon := iconFileRow
-			if f.Kind == sendfiles.KindVideo {
+			switch f.Kind {
+			case sendfiles.KindVideo:
 				icon = iconPlayFile
+			case sendfiles.KindMusic:
+				icon = iconAudiotrack
 			}
 			inner := side * 5 / 9
 			offset(gtx, image.Pt((side-inner)/2, (side-inner)/2), func(gtx layout.Context) layout.Dimensions {
@@ -640,7 +648,7 @@ func (c *messageComposer) layoutFileRow(gtx layout.Context, p *chatPage, f *boxF
 			gtx.Constraints.Min.Y = 0
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return label(gtx, f.Name, token.TypestyleBodyLarge, sc.Surface.OnColor, 1)
+					return label(gtx, songName(f.File), token.TypestyleBodyLarge, sc.Surface.OnColor, 1)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					details := l.T("files.loading")
@@ -658,6 +666,21 @@ func (c *messageComposer) layoutFileRow(gtx layout.Context, p *chatPage, f *boxF
 			})
 		}),
 	)
+}
+
+// songName is how a row names a file, music as Telegram Desktop names it:
+// "Performer – Title", its title alone, or its file's name when its tags
+// say neither.
+func songName(f sendfiles.File) string {
+	switch {
+	case f.Kind != sendfiles.KindMusic || f.Title == "" && f.Performer == "":
+		return f.Name
+	case f.Performer == "":
+		return f.Title
+	case f.Title == "":
+		return f.Performer + " – Unknown Track"
+	}
+	return f.Performer + " – " + f.Title
 }
 
 // quietRemove is the button of a row that takes its file out: a cross

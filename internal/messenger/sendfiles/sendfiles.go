@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Unlicense OR MIT
 
 // Package sendfiles decides how files chosen to be sent go out, as Telegram
-// Desktop's box for sending files does: which of them are photos, videos or
-// plain files, which are grouped in an album, where the caption goes, and
-// how a photo is made ready. It knows nothing of Telegram's protocol.
+// Desktop's box for sending files does: which of them are photos, videos,
+// music or plain files, which are grouped in an album, where the caption
+// goes, and how a photo is made ready. It knows nothing of Telegram's
+// protocol.
 package sendfiles
 
 import (
@@ -16,6 +17,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"komarugram/pkg/audiotag"
 )
 
 // MaxAlbum is how many items an album holds.
@@ -33,6 +37,9 @@ const (
 	KindVideo
 	// KindAnimation is a GIF, which is sent on its own: no album holds it.
 	KindAnimation
+	// KindMusic is an audio file that says how long it plays, sent as a
+	// track whatever the way; an album of music holds music alone.
+	KindMusic
 )
 
 // Errors of Inspect, which tell why a file cannot be sent at all.
@@ -52,6 +59,11 @@ type File struct {
 	// Width and Height are an image's size as it is shown, with the turn its
 	// file asks for; 0 for what is not an image.
 	Width, Height int
+	// Duration, Title and Performer are music's, as its tags say, and Cover
+	// the picture they hold, as that picture's file.
+	Duration         time.Duration
+	Title, Performer string
+	Cover            []byte
 }
 
 // Way is how the files are sent, as the checkboxes of the box set it.
@@ -84,6 +96,9 @@ var videoExtensions = map[string]string{
 func MIMEOf(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	if t, ok := videoExtensions[ext]; ok {
+		return t
+	}
+	if t := audiotag.MIME(path); t != "" {
 		return t
 	}
 	if t := mime.TypeByExtension(ext); t != "" {
@@ -124,6 +139,12 @@ func Inspect(path string) (File, error) {
 		if w, h, ok := imageSize(path); ok && ValidDimensions(w, h) {
 			f.Kind, f.Width, f.Height = KindPhoto, w, h
 		}
+	case audiotag.MIME(path) != "":
+		// As in Telegram Desktop, music is what says how long it plays;
+		// the rest goes as a file.
+		if song, err := audiotag.Read(path); err == nil {
+			f.Kind, f.Duration, f.Title, f.Performer, f.Cover = KindMusic, song.Duration, song.Title, song.Performer, song.Cover
+		}
 	}
 	return f, nil
 }
@@ -163,6 +184,8 @@ const (
 	PhotoVideoAlbum
 	// FileAlbum holds documents, photos and videos sent as documents too.
 	FileAlbum
+	// MusicAlbum holds music.
+	MusicAlbum
 )
 
 // albumOf is the album f goes in under way.
@@ -178,6 +201,10 @@ func albumOf(f File, way Way) AlbumType {
 	case KindFile:
 		if way.Group {
 			return FileAlbum
+		}
+	case KindMusic:
+		if way.Group {
+			return MusicAlbum
 		}
 	}
 	return NoAlbum
@@ -309,17 +336,76 @@ func TitleOf(files []File, way Way) Title {
 	return TitleImages
 }
 
-// Size is a file's size as a person reads it.
-func Size(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
+// Size is a file's size as Telegram Desktop writes it (FormatSizeText):
+// bytes, then kilobytes and megabytes of 1024, the tenths cut rather than
+// rounded, so that a size never reads as more than it is, nor as zero.
+func Size(n int64) string { return SizeIn(n, "B", "KB", "MB") }
+
+// SizeIn is Size with the units of a language: bytes, kilobytes and
+// megabytes.
+func SizeIn(n int64, b, kb, mb string) string {
+	switch {
+	case n >= 1<<20:
+		tenths := n * 10 / (1 << 20)
+		return fmt.Sprintf("%d.%d %s", tenths/10, tenths%10, mb)
+	case n >= 1<<10:
+		tenths := n * 10 / (1 << 10)
+		return fmt.Sprintf("%d.%d %s", tenths/10, tenths%10, kb)
 	}
-	value, suffix := float64(n), []string{"KB", "MB", "GB", "TB"}
-	i := -1
-	for value >= unit && i < len(suffix)-1 {
-		value /= unit
-		i++
+	return fmt.Sprintf("%d %s", n, b)
+}
+
+// DropState is what files dragged over a chat can be dropped as, as
+// Telegram Desktop tells it: the areas shown for them.
+type DropState int
+
+const (
+	// DropNone is a drag that cannot be sent: nothing, or a folder.
+	DropNone DropState = iota
+	// DropFiles go as documents, one area.
+	DropFiles
+	// DropPhotos are pictures: as documents, without compression, or as
+	// photos.
+	DropPhotos
+	// DropMedia are photos and videos: as documents, or as media.
+	DropMedia
+)
+
+// maxDropPicture is the largest picture Telegram Desktop offers to send
+// as a photo when it is dropped.
+const maxDropPicture = 64 << 20
+
+// DropStateOf says what the files at paths can be dropped as. Every file
+// is looked at, as Telegram Desktop does, but only what it is named and
+// the header of a picture.
+func DropStateOf(paths []string) DropState {
+	if len(paths) == 0 {
+		return DropNone
 	}
-	return fmt.Sprintf("%.1f %s", value, suffix[i])
+	pictures, media := true, true
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return DropNone
+		}
+		mime := MIMEOf(path)
+		if pictures && (info.Size() > maxDropPicture || mime == "image/gif" || !strings.HasPrefix(mime, "image/")) {
+			pictures = false
+		}
+		if pictures {
+			if _, _, ok := imageSize(path); !ok {
+				pictures = false
+			}
+		}
+		if !strings.HasPrefix(mime, "image/") && !strings.HasPrefix(mime, "video/") {
+			media = false
+		}
+	}
+	switch {
+	case pictures:
+		return DropPhotos
+	case media:
+		return DropMedia
+	}
+	return DropFiles
 }
