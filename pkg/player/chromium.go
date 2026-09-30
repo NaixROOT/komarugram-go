@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -140,19 +141,30 @@ func openChromium(ctx context.Context, source string, extra []string) (*chromium
 		return nil, err
 	}
 	fragment := url.Values{"src": {source}, "title": {path.Base(source)}}.Encode()
-	page, err := miniapp.OpenPage(ctx, address+"#"+fragment, miniapp.Page{
+	page := miniapp.Page{
 		Width: 960, Height: 600,
 		// The window opens because the user asked for the video: it plays
 		// without waiting for a click in it.
-		Args: append([]string{"--autoplay-policy=no-user-gesture-required"}, extra...),
-	})
+		Args: []string{"--autoplay-policy=no-user-gesture-required"},
+	}
+	// The size SizeArgs gave is the window's first one, which OpenPage
+	// passes on itself.
+	for _, arg := range extra {
+		var width, height int
+		if n, _ := fmt.Sscanf(arg, "--window-size=%d,%d", &width, &height); n == 2 {
+			page.Width, page.Height = width, height
+			continue
+		}
+		page.Args = append(page.Args, arg)
+	}
+	bridge, err := miniapp.OpenPage(ctx, address+"#"+fragment, page)
 	if err != nil {
 		_ = server.Close()
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &chromium{
-		page:   page,
+		page:   bridge,
 		server: server,
 		cancel: cancel,
 		done:   make(chan struct{}),
@@ -239,7 +251,10 @@ func (p *chromium) fit(ctx context.Context) {
 	if json.Unmarshal([]byte(answer), &bounds) != nil || bounds.Width <= 0 || bounds.Height <= 0 {
 		return
 	}
-	_ = p.page.SetWindowBounds(ctx, bounds.Left, bounds.Top, bounds.Width, bounds.Height)
+	if err := p.page.SetWindowBounds(ctx, bounds.Left, bounds.Top, bounds.Width, bounds.Height); err != nil {
+		// The window keeps the size it opened at, which SizeArgs chose.
+		log.Printf("chromium player: fit the window to the video: %v", err)
+	}
 }
 
 // mediaError is the error of a video element: its MediaError code and the

@@ -457,20 +457,25 @@ func (b *Bridge) SetWindowBounds(ctx context.Context, left, top, width, height i
 	if err := json.Unmarshal(result, &window); err != nil {
 		return err
 	}
-	result, err = b.call(ctx, "Browser.setWindowBounds", map[string]any{
-		"windowId": window.WindowID,
-		"bounds": map[string]any{
-			"left": left, "top": top, "width": width, "height": height,
-			"windowState": "normal",
-		},
-	})
-	if err == nil {
-		err = replyError(result)
+	// The size and the place are asked for apart, the size first: a window
+	// that may not place itself should still be given its size.
+	set := func(bounds map[string]any) error {
+		result, err := b.call(ctx, "Browser.setWindowBounds", map[string]any{
+			"windowId": window.WindowID,
+			"bounds":   bounds,
+		})
+		if err == nil {
+			err = replyError(result)
+		}
+		if err != nil {
+			return fmt.Errorf("Browser.setWindowBounds: %w", err)
+		}
+		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("Browser.setWindowBounds: %w", err)
+	if err := set(map[string]any{"width": width, "height": height, "windowState": "normal"}); err != nil {
+		return err
 	}
-	return nil
+	return set(map[string]any{"left": left, "top": top})
 }
 
 // replyError is the error the browser answered a call with, as read turns

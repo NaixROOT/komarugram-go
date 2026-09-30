@@ -13,6 +13,7 @@ package player
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -162,6 +163,25 @@ func (k Kind) PrivateArgs() []string {
 		}
 	}
 	return nil
+}
+
+// SizeArgs are the arguments that open the player's window for a video of
+// width by height, as the sender's client reported them; nil for a size not
+// known. mpv and VLC size their windows to the video themselves. The
+// browser's window is sized to the video once the video tells its size,
+// but on Wayland a window may not resize itself: there it keeps the size
+// it opened at, which is the one given here, as large as the video but no
+// larger than 1280 by 800 and no narrower than 400, for the controls.
+func (k Kind) SizeArgs(width, height int) []string {
+	if k != Chromium || width <= 0 || height <= 0 {
+		return nil
+	}
+	scale := min(1, 1280/float64(width), 800/float64(height))
+	if float64(width)*scale < 400 {
+		scale = min(400/float64(width), 800/float64(height))
+	}
+	return []string{fmt.Sprintf("--window-size=%d,%d",
+		int(math.Round(float64(width)*scale)), int(math.Round(float64(height)*scale)))}
 }
 
 // Open starts the player at path — "" for the one found — on source, which

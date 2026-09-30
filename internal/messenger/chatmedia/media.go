@@ -1027,7 +1027,11 @@ func (m *Manager) Play(msg model.Message, kind player.Kind, path string, report 
 			return
 		}
 		defer stream.Close()
-		p, err := player.Open(m.ctx, kind, path, stream.URL(), kind.PrivateArgs()...)
+		args := kind.PrivateArgs()
+		if msg.Media != nil {
+			args = append(args, kind.SizeArgs(msg.Media.Width, msg.Media.Height)...)
+		}
+		p, err := player.Open(m.ctx, kind, path, stream.URL(), args...)
 		if err != nil {
 			report(err)
 			return

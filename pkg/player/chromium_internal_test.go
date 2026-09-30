@@ -3,6 +3,7 @@
 package player
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math"
@@ -63,4 +64,56 @@ func TestChromiumFit(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("the window never took the shape of the video: %+v", size)
+}
+
+// TestChromiumSizeArgs checks the size the browser's window opens at.
+func TestChromiumSizeArgs(t *testing.T) {
+	for _, c := range []struct {
+		kind          Kind
+		width, height int
+		want          string
+	}{
+		{Chromium, 640, 360, "--window-size=640,360"},
+		{Chromium, 1920, 1080, "--window-size=1280,720"},
+		{Chromium, 720, 1280, "--window-size=450,800"},
+		{Chromium, 240, 240, "--window-size=400,400"},
+		{Chromium, 200, 1000, "--window-size=160,800"},
+		{Chromium, 0, 0, ""},
+		{VLC, 640, 360, ""},
+	} {
+		got := ""
+		if args := c.kind.SizeArgs(c.width, c.height); len(args) > 0 {
+			got = args[0]
+		}
+		if got != c.want {
+			t.Errorf("%s %dx%d: got %q, want %q", c.kind, c.width, c.height, got, c.want)
+		}
+	}
+}
+
+// TestChromiumOpensAtSize checks that the window opens at the size
+// SizeArgs gave, which is all it gets where it may not resize itself, as on
+// Wayland: here the video never tells its size.
+func TestChromiumOpensAtSize(t *testing.T) {
+	if !miniapp.Available() {
+		t.Skip("no Chromium-based browser")
+	}
+	stream, err := Serve("video", bytes.NewReader(make([]byte, 64<<10)), 64<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	extra := append([]string{"--headless=new", "--mute-audio"}, Chromium.SizeArgs(720, 1280)...)
+	p, err := openChromium(context.Background(), stream.URL(), extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	answer, err := p.page.Eval(context.Background(), `outerWidth + 'x' + outerHeight`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer != "450x800" {
+		t.Errorf("the window opened at %s, want 450x800", answer)
+	}
 }
