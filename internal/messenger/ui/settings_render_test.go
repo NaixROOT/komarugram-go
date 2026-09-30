@@ -22,6 +22,7 @@ import (
 	"gioui.org/unit"
 
 	"komarugram/internal/messenger/localization"
+	"komarugram/internal/messenger/mockstore"
 	"komarugram/internal/messenger/model"
 	"komarugram/internal/messenger/preferences"
 	"komarugram/internal/miniappprefs"
@@ -40,7 +41,8 @@ func (staticAccounts) Subscribe(func()) func()    { return func() {} }
 
 // TestRenderSettingsAccounts draws the main settings page with a list of
 // saved accounts and saves a screenshot, for looking at it. SETTINGS_SECTION=appearance,
-// privacy or integrations draws that section instead:
+// chats, privacy or integrations draws that section instead; wallpapers,
+// the chats' section under the gallery of wallpapers:
 //
 //	SETTINGS_PNG=/tmp/settings.png go test ./internal/messenger/ui -run RenderSettingsAccounts
 func TestRenderSettingsAccounts(t *testing.T) {
@@ -68,12 +70,47 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	size := image.Pt(900, 700)
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance
+	}
+	var chats *preferences.Store
+	if section := os.Getenv("SETTINGS_SECTION"); section == "chats" || section == "wallpapers" {
+		t.Chdir("../../..")
+		p.section = settingsChats
+		chats = preferences.Memory()
+		if err := chats.SetChats(preferences.ChatLook{Day: preferences.ChatMode{Theme: "day", Accent: 0xffd46c99}}); err != nil {
+			t.Fatal(err)
+		}
+		store := mockstore.New(time.Now(), 0)
+		c := p.chats
+		c.chats = func() preferences.ChatLook { return chats.Global().Chats }
+		c.setChats = chats.SetChats
+		c.dark = func() bool { return false }
+		c.store = chats
+		c.wallpapers = store
+		c.media = store
+		c.images = &images
+		c.thumbs = newWallpaperThumbs(store, func() {})
+		defer c.thumbs.Close()
 		p.confirmations = func() (bool, bool) { return true, false }
 		p.setConfirmations = func(bool, bool) {}
 		look := preferences.Look{BubbleRadius: 8, AvatarCorners: 10, Seconds: true}
 		p.lookView.look = func() preferences.Look { return look }
 		p.lookView.setLook = func(l preferences.Look) { look = l }
-		size.Y = 1800
+		size.Y = 1900
+		if section == "wallpapers" {
+			size.Y = 900
+			c.gallery.open()
+		}
+		// The thumbnails are rendered in the background.
+		ops := new(op.Ops)
+		for range 60 {
+			ops.Reset()
+			gtx := layout.Context{Ops: ops, Now: time.Now(), Constraints: layout.Exact(size), Metric: unit.Metric{PxPerDp: 1.25, PxPerSp: 1.25}, Values: map[string]any{}}
+			wdk.InitMaterialThemeInContext(gtx, defaults.NewTheme(gtx, schemes.SchemeBaselineLight()))
+			p.Update(gtx, themeAuto, "ru")
+			p.Layout(gtx, themeAuto, appearance.Light, false, localization.For("ru"))
+			c.layoutDialog(gtx, localization.For("ru"))
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 	if os.Getenv("SETTINGS_SECTION") == "privacy" {
 		p.section = settingsPrivacy
@@ -132,6 +169,9 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	exp.Background(gtx)
 	p.Update(gtx, themeAuto, "ru")
 	p.Layout(gtx, themeAuto, appearance.Light, false, localization.For("ru"))
+	if chats != nil {
+		p.chats.layoutDialog(gtx, localization.For("ru"))
+	}
 	images.EndFrame()
 	if err := win.Frame(ops); err != nil {
 		t.Fatal(err)

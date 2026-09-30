@@ -4,230 +4,376 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"hash/crc32"
 	"image"
-	"io"
-	"os"
-	"path/filepath"
+	"math"
+	"reflect"
 	"time"
+	"unsafe"
 
 	"komarugram/internal/crash"
 	"komarugram/internal/messenger/chattheme"
-	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/preferences"
 
 	"gio-mw/token"
 	"gio-mw/wdk"
-	"gio-mw/widget/scroll"
 
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 	"gioui.org/widget"
 )
 
+// themeResult is a chat's look, worked out off the frame.
 type themeResult struct {
+	generation uint64
 	appearance model.ChatAppearance
 	style      *model.ChatThemeStyle
+	// background is nil when the wallpaper is the one drawn already, key.
+	background *chattheme.Background
+	key        string
 	image      *image.RGBA
+	size       image.Point
 	err        error
 }
+
+// renderResult is the wallpaper rendered at the size the history took.
+type renderResult struct {
+	generation uint64
+	image      *image.RGBA
+	size       image.Point
+}
+
 type themeChoicesResult struct {
 	themes []model.ChatTheme
 	err    error
 }
+
+// chatThemeController is how the chats of a window look: the chat's own
+// theme, else the look the settings give every chat, and the wallpaper
+// behind the history, rendered at its size off the frame.
 type chatThemeController struct {
-	loader                                         loadingIndicator
-	saving                                         bool
-	revision                                       uint64
-	source                                         model.ChatThemeSource
-	media                                          model.ConversationStore
-	images                                         *imageOps
-	invalidate                                     func()
-	chat                                           int64
-	dark                                           bool
-	appearance                                     model.ChatAppearance
-	style                                          *model.ChatThemeStyle
-	background                                     *image.RGBA
-	bubble                                         *image.RGBA
-	phase                                          int64
-	result                                         chan themeResult
-	cancel                                         context.CancelFunc
-	choicesResult                                  chan themeChoicesResult
-	choicesCancel                                  context.CancelFunc
-	choices                                        []model.ChatTheme
-	clicks                                         []*surface
-	selected                                       *model.ChatTheme
-	local                                          map[int64]model.ChatTheme
-	list                                           scroll.List
-	apply, localButton, reset, importButton, retry surface
-	path                                           *textField
-	loading                                        bool
-	problem                                        error
+	source     model.ChatThemeSource
+	media      model.ConversationStore
+	images     *imageOps
+	invalidate func()
+	// look is the look of every chat in a theme of the application, and
+	// loadWallpaper reads a picture it names; without them the chats have
+	// the application's colors.
+	look          func(dark bool) preferences.ChatMode
+	loadWallpaper func(name string) ([]byte, error)
+
+	chat     int64
+	dark     bool
+	revision uint64
+	mode     preferences.ChatMode
+	// appearance is the chat's own theme and wallpaper; style, what its
+	// messages are drawn in, nil for the application's colors.
+	appearance model.ChatAppearance
+	style      *model.ChatThemeStyle
+	// background is the wallpaper, key what it was made of, and image it
+	// rendered at size.
+	background *chattheme.Background
+	key        string
+	image      *image.RGBA
+	size       image.Point
+	// want is the size the history took last.
+	want image.Point
+	// generation tells the results of a load from the ones of loads
+	// before it.
+	generation uint64
+	result     chan themeResult
+	cancel     context.CancelFunc
+	loading    bool
+	rendering  chan renderResult
+	problem    error
 	// told is the problem handed to be told last: see newProblem.
 	told error
+	// selected is the theme previewed on the chat's page; saving, while it
+	// is applied.
+	selected *model.ChatTheme
+	saving   bool
+	// local keeps the themes set only here for a store that cannot.
+	local map[int64]model.ChatTheme
+	// bubble is the gradient of outgoing bubbles at phase.
+	bubble *image.RGBA
+	phase  int64
+	// contexts are the themed values of the contexts of the frame drawn
+	// at contextsAt, made once for each map of values rather than for each
+	// message. A map of another frame may have the address of one gone.
+	contexts   map[contextKey]map[string]any
+	contextsAt time.Time
+	page       chatThemePage
 }
 
+type contextKey struct {
+	values unsafe.Pointer
+	kind   int
+}
+
+const (
+	historyValues = iota
+	incomingValues
+	outgoingValues
+)
+
 func newChatThemeController(source model.ConversationStore, images *imageOps, invalidate func()) *chatThemeController {
-	t := &chatThemeController{media: source, images: images, invalidate: invalidate, local: map[int64]model.ChatTheme{}, path: newTextField(0, "")}
+	t := &chatThemeController{media: source, images: images, invalidate: invalidate, local: map[int64]model.ChatTheme{}}
 	t.source, _ = source.(model.ChatThemeSource)
-	t.list.Axis = layout.Vertical
+	t.page.init(t)
 	return t
 }
+
 func (t *chatThemeController) Close() {
 	if t.cancel != nil {
 		t.cancel()
 	}
-	if t.choicesCancel != nil {
-		t.choicesCancel()
-	}
+	t.page.close()
 }
+
+// Release drops the wallpaper of a hidden window; it is made again when
+// the window shows.
+func (t *chatThemeController) Release() {
+	t.image, t.background, t.key = nil, nil, ""
+	t.bubble = nil
+	t.contexts = nil
+	t.reload()
+	t.page.release()
+}
+
+// modeFor is the settings' look of the chats in the application's theme.
+func (t *chatThemeController) modeFor(dark bool) preferences.ChatMode {
+	if t.look == nil {
+		return preferences.ChatMode{}
+	}
+	return t.look(dark)
+}
+
+// Update takes the looks worked out and starts working one out when the
+// chat, the theme or the settings changed.
 func (t *chatThemeController) Update(chat int64, dark bool) {
 	revision := uint64(0)
 	if source, ok := t.media.(interface{ ChatThemeRevision(int64) uint64 }); ok {
 		revision = source.ChatThemeRevision(chat)
 	}
-	if chat != t.chat || dark != t.dark || revision != t.revision && t.selected == nil {
-		t.revision = revision
-		t.chat = chat
-		t.dark = dark
+	mode := t.modeFor(dark)
+	if chat != t.chat || dark != t.dark {
+		t.chat, t.dark = chat, dark
 		t.selected = nil
-		t.appearance = model.ChatAppearance{}
-		t.style = nil
-		t.background = nil
-		t.bubble = nil
-		t.load()
+		t.revision, t.mode = revision, mode
+		t.reload()
+	} else if t.selected == nil && (revision != t.revision || !sameChatMode(mode, t.mode)) {
+		t.revision, t.mode = revision, mode
+		t.reload()
 	}
+	t.drain()
+}
+
+func sameChatMode(a, b preferences.ChatMode) bool {
+	return reflect.DeepEqual(a, b)
+}
+
+func (t *chatThemeController) drain() {
 	if t.result != nil {
 		select {
 		case r := <-t.result:
+			t.result = nil
 			t.loading = false
+			if r.generation != t.generation {
+				break
+			}
 			if r.err == nil && t.saving {
 				t.selected = nil
 			}
 			t.saving = false
-			t.result = nil
 			t.problem = r.err
-			if r.err == nil || r.style != nil || r.image != nil {
-				t.appearance = r.appearance
-				t.style = r.style
-				t.background = r.image
-				t.bubble = nil
+			t.appearance, t.style = r.appearance, r.style
+			t.bubble = nil
+			t.contexts = nil
+			if r.key != t.key {
+				t.key, t.background = r.key, r.background
+				t.image, t.size = r.image, r.size
 			}
 		default:
 		}
 	}
-	if t.choicesResult != nil {
+	if t.rendering != nil {
 		select {
-		case r := <-t.choicesResult:
-			t.choicesResult = nil
-			t.problem = r.err
-			if r.err == nil {
-				t.choices = r.themes
-				t.clicks = make([]*surface, len(t.choices))
-				for i := range t.clicks {
-					t.clicks[i] = new(surface)
-				}
+		case r := <-t.rendering:
+			t.rendering = nil
+			if r.generation == t.generation {
+				t.image, t.size = r.image, r.size
 			}
 		default:
 		}
 	}
 }
+
+// reload works the chat's look out again.
+func (t *chatThemeController) reload() {
+	chat := t.chat
+	if a, ok := t.local[chat]; ok && t.selected == nil {
+		t.job(func(context.Context) (model.ChatAppearance, error) {
+			return model.ChatAppearance{Theme: a, Local: true}, nil
+		})
+		return
+	}
+	if t.selected != nil {
+		theme := *t.selected
+		t.job(func(context.Context) (model.ChatAppearance, error) { return model.ChatAppearance{Theme: theme}, nil })
+		return
+	}
+	if t.source == nil {
+		t.job(func(context.Context) (model.ChatAppearance, error) { return model.ChatAppearance{}, nil })
+		return
+	}
+	t.job(func(ctx context.Context) (model.ChatAppearance, error) { return t.source.ChatAppearance(ctx, chat) })
+}
+
+// job works out a look from the appearance fn gives: the chat's theme or
+// the settings', and the wallpaper, rendered at the size last drawn.
 func (t *chatThemeController) job(fn func(context.Context) (model.ChatAppearance, error)) {
 	if t.cancel != nil {
 		t.cancel()
 	}
+	t.generation++
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.cancel = cancel
 	ch := make(chan themeResult, 1)
 	t.result = ch
 	t.loading = true
 	t.problem = nil
-	dark, chat := t.dark, t.chat
+	generation, dark, mode, key, size := t.generation, t.dark, t.mode, t.key, t.want
+	if size == (image.Point{}) {
+		size = image.Pt(720, 900)
+	}
+	load := t.loadWallpaper
 	go func() {
 		defer cancel()
 		defer crash.Recover("chat theme", func(e *crash.Panic) {
 			select {
-			case ch <- themeResult{err: e}:
+			case ch <- themeResult{generation: generation, err: e}:
 				t.invalidate()
 			default:
 			}
 		})
+		// A chat whose theme cannot be had is drawn as the settings say.
 		a, err := fn(ctx)
-		r := themeResult{appearance: a, err: err}
-		if err == nil {
-			style := a.Theme.Light
-			if dark {
-				style = a.Theme.Dark
-			}
-			if style == nil {
-				if dark {
-					style = a.Theme.Light
-				} else {
-					style = a.Theme.Dark
-				}
-			}
-			r.style = style
-			w := a.Wallpaper
-			if w == nil && style != nil {
-				w = style.Wallpaper
-			}
-			if w != nil {
-				data := w.Image
-				if w.Media != nil {
-					data, err = t.media.Media(ctx, model.Message{Key: model.MessageKey{ChatID: chat}, Kind: model.MessagePhoto, Media: w.Media})
-				}
-				var im image.Image
-				if err == nil && len(data) > 0 {
-					im, err = chattheme.Decode(data)
-				}
-				r.image = chattheme.Wallpaper(w, im)
-				// Keep the color fill if an image fails, but expose the error in appearance settings.
-				r.err = err
-			}
+		if err != nil {
+			a = model.ChatAppearance{}
+		}
+		r := themeResult{generation: generation, appearance: a, err: err}
+		var w *model.ChatWallpaper
+		r.style, w = resolveLook(a, dark, mode)
+		var file string
+		if w == nil && mode.Wallpaper != nil {
+			w, file = settingsWallpaper(mode.Wallpaper, dark)
+		}
+		r.key = wallpaperKey(w, file)
+		if w != nil && r.key != key {
+			var data []byte
+			data, err = wallpaperData(ctx, t.media, w, file, load, false)
+			var perr error
+			r.background, perr = chattheme.Prepare(w, data)
+			// Keep the colors if the picture fails, but tell why.
+			r.err = errors.Join(r.err, err, perr)
+			r.image, r.size = r.background.Render(size), size
 		}
 		ch <- r
 		t.invalidate()
 	}()
 }
-func (t *chatThemeController) load() {
-	chat := t.chat
-	if a, ok := t.local[chat]; ok {
-		t.job(func(context.Context) (model.ChatAppearance, error) { return model.ChatAppearance{Theme: a}, nil })
+
+// resolveLook is what a chat is drawn in: its theme's variant for dark,
+// else the settings' preset, and the wallpaper the chat or its theme has;
+// nil for the settings' wallpaper.
+func resolveLook(a model.ChatAppearance, dark bool, mode preferences.ChatMode) (*model.ChatThemeStyle, *model.ChatWallpaper) {
+	style := a.Theme.Light
+	if dark || style == nil {
+		if a.Theme.Dark != nil {
+			style = a.Theme.Dark
+		}
+	}
+	if style == nil && a.Theme.Light != nil {
+		style = a.Theme.Light
+	}
+	own := style != nil
+	if !own {
+		style = chattheme.Style(chattheme.Preset(mode.Theme), mode.Accent)
+	}
+	w := a.Wallpaper
+	if w == nil && own && style.Wallpaper != nil {
+		w = style.Wallpaper
+	}
+	if w == nil && !own && mode.Wallpaper == nil && style != nil {
+		w = style.Wallpaper
+	}
+	return style, w
+}
+
+// settingsWallpaper is the wallpaper of the settings, with the name of its
+// picture.
+func settingsWallpaper(p *preferences.Wallpaper, dark bool) (*model.ChatWallpaper, string) {
+	return &model.ChatWallpaper{ID: p.ID, Colors: p.Colors, Rotation: p.Rotation, Intensity: p.Intensity, Blur: p.Blur, Pattern: p.Pattern, Tile: p.Tile, Dark: p.Dark || dark}, p.File
+}
+
+// wallpaperKey tells wallpapers apart, so that one drawn already is kept.
+func wallpaperKey(w *model.ChatWallpaper, file string) string {
+	if w == nil {
+		return ""
+	}
+	c := *w
+	sum := crc32.ChecksumIEEE(c.Image)
+	c.Image = nil
+	b, _ := json.Marshal(struct {
+		W     model.ChatWallpaper
+		Image uint32
+		N     int
+		File  string
+	}{c, sum, len(w.Image), file})
+	return string(b)
+}
+
+// LoadChoices asks for the themes offered, for the chat's page.
+func (t *chatThemeController) LoadChoices() { t.page.loadChoices() }
+
+func (t *chatThemeController) choose(theme model.ChatTheme) {
+	t.selected = &theme
+	t.reload()
+}
+
+// Background draws the wallpaper over the history, rendering it again off
+// the frame when the history's size changed.
+func (t *chatThemeController) Background(gtx layout.Context) {
+	if t.background == nil {
 		return
 	}
-	if t.source != nil {
-		t.job(func(ctx context.Context) (model.ChatAppearance, error) { return t.source.ChatAppearance(ctx, chat) })
+	size := gtx.Constraints.Max
+	t.want = size
+	if size.X > 0 && size.Y > 0 && size != t.size && t.rendering == nil && !t.loading {
+		t.render(size)
+	}
+	if t.image != nil {
+		widget.Image{Src: t.images.Op(t.image), Fit: widget.Cover, Position: layout.Center}.Layout(gtx)
 	}
 }
-func (t *chatThemeController) LoadChoices() {
-	if t.choicesResult != nil {
-		return
-	}
-	if t.source == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	t.choicesCancel = cancel
-	ch := make(chan themeChoicesResult, 1)
-	t.choicesResult = ch
+
+func (t *chatThemeController) render(size image.Point) {
+	ch := make(chan renderResult, 1)
+	t.rendering = ch
+	b, generation := t.background, t.generation
 	go func() {
-		defer cancel()
-		defer crash.Recover("chat themes", func(e *crash.Panic) { ch <- themeChoicesResult{err: e}; t.invalidate() })
-		themes, err := t.source.ChatThemes(ctx)
-		ch <- themeChoicesResult{themes, err}
+		defer crash.Recover("wallpaper", func(*crash.Panic) { ch <- renderResult{generation: generation, size: size}; t.invalidate() })
+		ch <- renderResult{generation: generation, image: b.Render(size), size: size}
 		t.invalidate()
 	}()
 }
-func (t *chatThemeController) choose(theme model.ChatTheme) {
-	t.selected = &theme
-	t.job(func(context.Context) (model.ChatAppearance, error) { return model.ChatAppearance{Theme: theme}, nil })
-}
-func (t *chatThemeController) Background(gtx layout.Context) {
-	if t.background != nil {
-		widget.Image{Src: t.images.Op(t.background), Fit: widget.Cover}.Layout(gtx)
-	}
-}
+
+// Bubble fills a bubble in the theme's colors, the outgoing ones in their
+// gradient, which the theme may animate.
 func (t *chatThemeController) Bubble(gtx layout.Context, outgoing, animate bool, shape bubbleShape) {
 	if t.style == nil {
 		return
@@ -241,6 +387,10 @@ func (t *chatThemeController) Bubble(gtx layout.Context, outgoing, animate bool,
 	if len(colors) == 0 {
 		return
 	}
+	if len(colors) == 1 {
+		paint.FillShape(gtx.Ops, chattheme.RGB(colors[0]), shape.rrect(size).Op(gtx.Ops))
+		return
+	}
 	phase := int64(0)
 	if t.style.Animated && animate && len(colors) > 2 {
 		phase = gtx.Now.UnixMilli() / 100
@@ -248,172 +398,161 @@ func (t *chatThemeController) Bubble(gtx layout.Context, outgoing, animate bool,
 	}
 	if t.bubble == nil || t.phase != phase {
 		t.phase = phase
-		t.bubble = chattheme.Gradient(colors, 64, 96, 0, float64(phase)/20)
+		t.bubble = chattheme.Gradient(colors, 48, 64, 0, float64(phase)/20)
 	}
 	defer shape.rrect(size).Push(gtx.Ops).Pop()
 	gtx.Constraints = layout.Exact(size)
 	widget.Image{Src: t.images.Op(t.bubble), Fit: widget.Fill}.Layout(gtx)
 }
-func (t *chatThemeController) messageContext(gtx layout.Context, outgoing bool) layout.Context {
-	if t.style == nil {
+
+// themed returns gtx with its theme's scheme changed by edit, making the
+// values once for each map of values of the frame.
+func (t *chatThemeController) themed(gtx layout.Context, kind int, edit func(*token.Scheme)) layout.Context {
+	if !gtx.Now.Equal(t.contextsAt) {
+		t.contexts, t.contextsAt = nil, gtx.Now
+	}
+	key := contextKey{reflect.ValueOf(gtx.Values).UnsafePointer(), kind}
+	if values, ok := t.contexts[key]; ok {
+		gtx.Values = values
 		return gtx
 	}
 	theme := *wdk.GetMaterialTheme(gtx)
 	sc := *theme.Scheme
 	theme.Scheme = &sc
-	fg := t.style.Text
-	accent := t.style.Accent
-	if outgoing {
-		fg = t.style.OutText
-		accent = t.style.OutAccent
-	}
-	sc.Surface.OnColor = token.NewMatColorFromHexRGBA(fg)
-	sc.SurfaceVariant.OnColor = sc.Surface.OnColor.SetOpacity(.7)
-	sc.Primary.Color = token.NewMatColorFromHexRGB(accent & 0xffffff)
+	edit(&sc)
 	values := make(map[string]any, len(gtx.Values))
 	for k, v := range gtx.Values {
 		values[k] = v
 	}
 	values[wdk.ThemeNamespace] = &theme
+	if t.contexts == nil {
+		t.contexts = map[contextKey]map[string]any{}
+	}
+	t.contexts[key] = values
 	gtx.Values = values
 	return gtx
 }
-func (t *chatThemeController) LayoutChoices(gtx layout.Context, l localization.Catalog) layout.Dimensions {
-	t.Update(t.chat, t.dark)
-	if !t.saving && t.reset.Clicked(gtx) {
-		t.choose(model.ChatTheme{})
-	}
-	for i, c := range t.clicks {
-		if !t.saving && c.Clicked(gtx) {
-			t.choose(t.choices[i])
-		}
-	}
-	if t.retry.Clicked(gtx) {
-		t.load()
-		t.LoadChoices()
-	}
-	if !t.saving && t.importButton.Clicked(gtx) {
-		path := t.path.Text()
-		t.job(func(ctx context.Context) (model.ChatAppearance, error) {
-			f, err := os.Open(path)
-			if err != nil {
-				return model.ChatAppearance{}, err
-			}
-			defer f.Close()
-			data, err := io.ReadAll(io.LimitReader(f, chattheme.MaxBytes+1))
-			if err != nil {
-				return model.ChatAppearance{}, err
-			}
-			theme, err := chattheme.ImportDesktop(data)
-			theme.Title = filepath.Base(path)
-			return model.ChatAppearance{Theme: theme}, err
-		})
-		t.selected = &model.ChatTheme{Title: "import"}
-	}
-	if !t.loading && t.problem == nil && t.selected != nil && t.localButton.Clicked(gtx) {
-		theme := t.appearance.Theme
-		chat := t.chat
-		t.saving = true
-		if _, persistent := t.media.(model.LocalChatThemeSource); !persistent {
-			t.local[chat] = theme
-		}
-		t.job(func(ctx context.Context) (model.ChatAppearance, error) {
-			if source, ok := t.media.(model.LocalChatThemeSource); ok {
-				if err := source.SetLocalChatTheme(ctx, chat, &theme); err != nil {
-					return model.ChatAppearance{}, err
-				}
-			}
-			return model.ChatAppearance{Theme: theme}, nil
-		})
-	}
-	if !t.loading && t.problem == nil && t.selected != nil && t.apply.Clicked(gtx) && t.source != nil {
-		theme := t.appearance.Theme
-		chat := t.chat
-		t.saving = true
-		t.job(func(ctx context.Context) (model.ChatAppearance, error) {
-			if err := t.source.SetChatTheme(ctx, chat, theme.ID); err != nil {
-				return model.ChatAppearance{}, err
-			}
-			return t.source.ChatAppearance(ctx, chat)
-		})
-	}
-	if t.loading || t.choicesResult != nil {
-		return t.loader.page(gtx, l)
-	}
-	return t.list.Layout(gtx, len(t.choices)+5, func(gtx layout.Context, i int) layout.Dimensions {
-		return layout.UniformInset(12).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			switch i {
-			case 0:
-				if t.problem != nil {
-					return textButton(gtx, &t.retry, l.T("history.retry"))
-				}
 
-				return label(gtx, t.appearance.Theme.Title, token.TypestyleTitleMedium, scheme(gtx).Surface.OnColor, 2)
-			case 1:
-				size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(130))
-				gtx.Constraints = layout.Exact(size)
-				fillRect(gtx, scheme(gtx).SurfaceContainerLow, size)
-				t.Background(gtx)
-				for i := 0; i < 2; i++ {
-					b := gtx
-					b.Constraints = layout.Exact(image.Pt(max(1, size.X*2/3), gtx.Dp(42)))
-					x := gtx.Dp(8)
-					if i == 1 {
-						x = max(0, size.X-b.Constraints.Max.X-x)
-					}
-					offset(b, image.Pt(x, gtx.Dp(unit.Dp(12+i*58))), func(gtx layout.Context) layout.Dimensions {
-						if t.style != nil {
-							t.Bubble(gtx, i == 1, false, shapeOf(gtx, 0, i == 1))
-						} else {
-							fillRounded(gtx, scheme(gtx).Surface.Color, gtx.Constraints.Max, gtx.Dp(14))
-						}
-						return layout.UniformInset(10).Layout(t.messageContext(gtx, i == 1), func(gtx layout.Context) layout.Dimensions {
-							return label(gtx, l.T("chat_theme.preview"), token.TypestyleBodyMedium, scheme(gtx).Surface.OnColor, 1)
-						})
-					})
-				}
-				return layout.Dimensions{Size: size}
-			case 2:
-				return textButton(gtx, &t.reset, l.T("chat_theme.default"))
-			case 3:
-				if t.selected == nil {
-					return layout.Dimensions{}
-				}
-				if t.loading || t.problem != nil {
-					gtx = gtx.Disabled()
-				}
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return textButton(gtx, &t.localButton, l.T("chat_theme.local"))
-				}), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if t.source == nil || t.appearance.Theme.ID == "" && t.appearance.Theme.Light != nil {
-						return layout.Dimensions{}
-					}
-					return textButton(gtx, &t.apply, l.T("chat_theme.apply"))
-				}))
-			case 4:
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return t.path.Layout(gtx, l.T("chat_theme.path"), false) }), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return textButton(gtx, &t.importButton, l.T("chat_theme.import"))
-				}))
-			default:
-				return textButton(gtx, t.clicks[i-5], t.choices[i-5].Title)
-			}
-		})
+// historyContext is gtx for what lies on the wallpaper: dates, service
+// messages and the times of stickers, on plates of the wallpaper's hue
+// that read on it.
+func (t *chatThemeController) historyContext(gtx layout.Context) layout.Context {
+	if t.background == nil {
+		return gtx
+	}
+	dark := t.dark
+	if t.style != nil {
+		dark = t.style.Dark
+	}
+	plate := serviceColor(t.background.Average(), dark)
+	return t.themed(gtx, historyValues, func(sc *token.Scheme) {
+		sc.SecondaryContainer.Color = plate
+		sc.SecondaryContainer.OnColor = token.NewMatColorFromHexRGB(0xffffff)
+		sc.InverseSurface.Color = plate.SetOpacity(1)
+		sc.InverseSurface.OnColor = token.NewMatColorFromHexRGB(0xffffff)
 	})
 }
 
+// serviceColor is the plate of what lies on a wallpaper of average color:
+// its hue, dark enough for white text, as Telegram's service messages.
+func serviceColor(average uint32, dark bool) token.MatColor {
+	c := chattheme.RGB(average)
+	r, g, b := float64(c.R)/255, float64(c.G)/255, float64(c.B)/255
+	hi, lo := math.Max(r, math.Max(g, b)), math.Min(r, math.Min(g, b))
+	l := (hi + lo) / 2
+	s := 0.
+	if hi != lo {
+		s = (hi - lo) / (1 - math.Abs(2*l-1))
+	}
+	h := 0.
+	switch {
+	case hi == lo:
+	case hi == r:
+		h = math.Mod((g-b)/(hi-lo)+6, 6)
+	case hi == g:
+		h = (b-r)/(hi-lo) + 2
+	default:
+		h = (r-g)/(hi-lo) + 4
+	}
+	light, alpha := .3, .55
+	if dark {
+		light, alpha = .18, .8
+	}
+	s = math.Min(s, .6)
+	ch := (1 - math.Abs(2*light-1)) * s
+	x := ch * (1 - math.Abs(math.Mod(h, 2)-1))
+	m := light - ch/2
+	var rr, gg, bb float64
+	switch int(h) {
+	case 0:
+		rr, gg = ch, x
+	case 1:
+		rr, gg = x, ch
+	case 2:
+		gg, bb = ch, x
+	case 3:
+		gg, bb = x, ch
+	case 4:
+		rr, bb = x, ch
+	default:
+		rr, bb = ch, x
+	}
+	v := uint32((rr+m)*255+.5)<<24 | uint32((gg+m)*255+.5)<<16 | uint32((bb+m)*255+.5)<<8 | uint32(alpha*255+.5)
+	return token.NewMatColorFromHexRGBA(v)
+}
+
+// messageContext is gtx for a message's bubble: its text, time and links
+// in the theme's colors.
+func (t *chatThemeController) messageContext(gtx layout.Context, outgoing bool) layout.Context {
+	s := t.style
+	if s == nil {
+		return gtx
+	}
+	kind := incomingValues
+	if outgoing {
+		kind = outgoingValues
+	}
+	return t.themed(gtx, kind, func(sc *token.Scheme) {
+		fg, accent, date := s.Text, s.Accent, s.InDate
+		if outgoing {
+			fg, accent, date = s.OutText, s.OutAccent, s.OutDate
+		}
+		sc.Surface.OnColor = token.NewMatColorFromHexRGBA(fg)
+		sc.SurfaceVariant.OnColor = sc.Surface.OnColor.SetOpacity(.65)
+		if date != 0 {
+			sc.SurfaceVariant.OnColor = token.NewMatColorFromHexRGBA(date)
+		}
+		sc.Primary.Color = token.NewMatColorFromHexRGB(accent & 0xffffff)
+	})
+}
+
+// DiscardPreview goes back from a theme previewed to the chat's own.
 func (t *chatThemeController) DiscardPreview() {
 	if t.selected != nil && !t.saving {
 		t.selected = nil
-		t.load()
+		t.reload()
 	}
 }
 
 // newProblem returns the problem that came since it was last asked, for
 // the page that shows the themes to tell in its toast; nil if none.
 func (t *chatThemeController) newProblem() error {
+	if p := t.page.problem; p != nil && p != t.told {
+		t.told = p
+		return p
+	}
 	if t.problem == t.told {
 		return nil
 	}
 	t.told = t.problem
 	return t.problem
+}
+
+// Backdrop draws the wallpaper as the history has it, for a view of the
+// chat of another size, which renders nothing: a dialog over the history
+// would make the two sizes render in turn.
+func (t *chatThemeController) Backdrop(gtx layout.Context) {
+	if t.image != nil {
+		widget.Image{Src: t.images.Op(t.image), Fit: widget.Cover, Position: layout.Center}.Layout(gtx)
+	}
 }

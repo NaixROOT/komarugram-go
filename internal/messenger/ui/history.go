@@ -80,6 +80,9 @@ type chatPage struct {
 	highlight      model.MessageID
 	highlightUntil time.Time
 	infoAsked      bool
+	// themeAsked is set when the menu asks for the chat's theme, which
+	// themeShown keeps for the info opened.
+	themeAsked, themeShown bool
 	// filter hides messages, as the settings ask; filtered counts what it
 	// hid in the open chat, and showFiltered are the chats that show it.
 	filter       *messageFilter
@@ -516,6 +519,10 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	body := gtx
 	body.Constraints = layout.Exact(image.Pt(size.X, max(0, size.Y-top-bottom)))
+	if p.appearance != nil {
+		// Dates and service messages lie on the wallpaper.
+		body = p.appearance.historyContext(body)
+	}
 	offset(body, image.Pt(0, top), func(gtx layout.Context) layout.Dimensions {
 		if len(p.messages) == 0 {
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

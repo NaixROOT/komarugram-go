@@ -6,6 +6,7 @@ import (
 	"context"
 	"komarugram/internal/messenger/model"
 	"testing"
+	"time"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram"
@@ -103,5 +104,102 @@ func TestStoriesStayOutsideHistoryAndKeepReferences(t *testing.T) {
 	}
 	if _, ok := s.history.refs[p.Messages[0].Media.ID]; !ok {
 		t.Fatal("story download missing")
+	}
+}
+
+func TestWallpaperGalleryKeepsThumbnailsAndWorksOffline(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	settings := tg.WallPaperSettings{}
+	settings.SetBackgroundColor(0xdbddbb)
+	settings.SetSecondBackgroundColor(0x6ba587)
+	settings.SetIntensity(50)
+	colors := tg.WallPaperSettings{}
+	colors.SetBackgroundColor(0x112233)
+	doc := &tg.Document{ID: 5, AccessHash: 6, MimeType: "application/x-tgwallpattern", Size: 100, Thumbs: []tg.PhotoSizeClass{&tg.PhotoSize{Type: "m", W: 320, H: 640, Size: 20}}}
+	calls := 0
+	s.history.api = tg.NewClient(telegram.InvokeFunc(func(ctx context.Context, in bin.Encoder, out bin.Decoder) error {
+		if _, ok := in.(*tg.AccountGetWallPapersRequest); !ok {
+			t.Fatalf("unexpected %T", in)
+		}
+		calls++
+		out.(*tg.AccountWallPapersBox).WallPapers = &tg.AccountWallPapers{Wallpapers: []tg.WallPaperClass{
+			&tg.WallPaper{ID: 1, AccessHash: 2, Pattern: true, Document: doc, Settings: settings},
+			&tg.WallPaperNoFile{ID: 3, Dark: true, Settings: colors},
+			// Nothing to show: left out.
+			&tg.WallPaperNoFile{ID: 4},
+		}}
+		return nil
+	}))
+	papers, err := s.ChatWallpapers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(papers) != 2 || papers[0].ID != 1 || !papers[0].Pattern || papers[0].Intensity != 50 || len(papers[0].Colors) != 2 || papers[1].ID != 3 || !papers[1].Dark {
+		t.Fatal(papers)
+	}
+	thumb := papers[0].Media.Thumbnail
+	if thumb == nil {
+		t.Fatal("no thumbnail")
+	}
+	if ref, ok := s.history.refs[thumb.ID]; !ok || ref.Thumb != "m" || ref.WallpaperID != 1 {
+		t.Fatal("thumbnail cannot be fetched", ref, ok)
+	}
+	if _, err := s.ChatWallpapers(ctx); err != nil || calls != 1 {
+		t.Fatal("gallery not kept", calls, err)
+	}
+	s.themes.wallpapers = nil
+	s.history.api = nil
+	offline, err := s.ChatWallpapers(ctx)
+	if err != nil || len(offline) != 2 {
+		t.Fatal("offline gallery", offline, err)
+	}
+}
+
+func TestCachedAppearanceComesAtOnceAndIsCheckedInBackground(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	s.history.peers[42] = peerRecord{ID: 42, Hash: 7, Kind: "user"}
+	emoji := make(chan string, 4)
+	s.history.api = tg.NewClient(telegram.InvokeFunc(func(ctx context.Context, in bin.Encoder, out bin.Decoder) error {
+		switch in.(type) {
+		case *tg.UsersGetFullUserRequest:
+			out.(*tg.UsersUserFull).FullUser = tg.UserFull{Theme: &tg.ChatTheme{Emoticon: <-emoji}}
+		case *tg.AccountGetChatThemesRequest:
+			out.(*tg.AccountThemesBox).Themes = &tg.AccountThemes{Themes: []tg.Theme{
+				{Emoticon: "🌿", Settings: []tg.ThemeSettings{{BaseTheme: &tg.BaseThemeDay{}}}},
+				{Emoticon: "🌷", Settings: []tg.ThemeSettings{{BaseTheme: &tg.BaseThemeDay{}}}},
+			}}
+		default:
+			t.Fatalf("unexpected %T", in)
+		}
+		return nil
+	}))
+	emoji <- "🌿"
+	if a, err := s.ChatAppearance(ctx, 42); err != nil || a.Theme.ID != "🌿" {
+		t.Fatal(a, err)
+	}
+	// Another session: the cached theme comes without waiting for Telegram,
+	// which has another one by now.
+	s.appearances = nil
+	if a, err := s.ChatAppearance(ctx, 42); err != nil || a.Theme.ID != "🌿" {
+		t.Fatal(a, err)
+	}
+	emoji <- "🌷"
+	deadline := time.Now().Add(5 * time.Second)
+	for s.ChatThemeRevision(42) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the change was not told")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if a, err := s.ChatAppearance(ctx, 42); err != nil || a.Theme.ID != "🌷" {
+		t.Fatal("background check not cached", a, err)
+	}
+	// An update that changed the theme is waited for.
+	s.invalidateChatTheme(42)
+	emoji <- "🌿"
+	if a, err := s.ChatAppearance(ctx, 42); err != nil || a.Theme.ID != "🌿" {
+		t.Fatal("update not asked for", a, err)
 	}
 }

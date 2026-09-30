@@ -258,6 +258,19 @@ The history is drawn as materialgram draws it:
   history (`servicePill`), worded in the UI's language by
   `localization.Catalog.Service` from `model.ServiceAction`. A pin's plate
   quotes the message and shows it on a click; a call is a bubble.
+- **Themes and wallpapers** (`chat_theme.go`, `chat_theme_page.go`,
+  `settings_chats.go`, `wallpaper_thumbs.go`; how they are chosen:
+  `docs/CHAT_APPEARANCE_AND_MEDIA.md`). `chatThemeController`, one a window,
+  is what the open chat is drawn in: `Background` draws its wallpaper,
+  rendered off the frame at the history's size, `Backdrop` the same for a
+  view of another size, `historyContext` gives the plates of dates and
+  service messages the wallpaper's hue, and `messageContext` a bubble's
+  colors; both make their values once a frame, not once a message.
+  `themeScene` draws a chat as a theme will make it look (a date and a
+  message each way), `themePreview` a theme small, as the cards of themes,
+  and `wallpaperThumbs` renders wallpapers small in the background for
+  cards and galleries. `actionRow` is a row of a dialog that does
+  something, an icon and its words in the primary color.
 - **Header actions** (`chat_menu.go`, `chat_search.go`): the search and
   menu buttons at the end of a chat's header. The search is a field over
   the header (`model.ChatSearcher`) with a counter and buttons to the older
@@ -309,6 +322,10 @@ new piece sits next to its neighbours.
   `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
   an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
   off).
+  `SETTINGS_SECTION=chats` with `SETTINGS_PNG` shows Chat Settings: the
+  themes, the wallpaper, the composer and the look of messages;
+  `wallpapers`, the gallery of wallpapers over it. `SHARED_PNG` saves the
+  page of a chat's theme (`-themes`) and the chat in the theme (`-chat`).
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the

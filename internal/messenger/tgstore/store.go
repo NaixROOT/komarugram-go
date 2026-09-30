@@ -38,12 +38,14 @@ type Store struct {
 	history *conversation
 
 	themeRevisions map[int64]uint64
-	mu             sync.RWMutex
-	me             model.Profile
-	dc             int
-	sessionEnded   model.SessionEnd
-	search         searchState
-	freeze         model.Freeze
+	// appearances are the states of the chats' cached appearances.
+	appearances  map[int64]uint8
+	mu           sync.RWMutex
+	me           model.Profile
+	dc           int
+	sessionEnded model.SessionEnd
+	search       searchState
+	freeze       model.Freeze
 	// freezeChecked is when a refused request last read the configuration
 	// again: see Middleware.
 	freezeChecked time.Time
