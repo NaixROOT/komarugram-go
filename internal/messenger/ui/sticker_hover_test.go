@@ -92,7 +92,7 @@ func (h *stickerHover) frame() image.Image {
 	case "pack", "readonly-pack":
 		p.stickers.grid(gtx, p)
 	default:
-		p.composer.pickerLayout(gtx, localization.For("ru"), p, false)
+		p.composer.pickerLayout(gtx, localization.For("ru"), p, false, image.Point{})
 	}
 	p.media.EndFrame()
 	p.images.EndFrame()

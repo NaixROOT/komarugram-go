@@ -52,7 +52,7 @@ func (c *messageComposer) replyHeight(gtx layout.Context, chat int64, classic bo
 }
 
 // replyLayout draws the reply strip of chat over bar, the composer's bar.
-func (c *messageComposer) replyLayout(gtx layout.Context, chat int64, bar image.Rectangle, classic bool, backdrop *op.CallOp, l localization.Catalog, p *chatPage) {
+func (c *messageComposer) replyLayout(gtx layout.Context, chat int64, bar image.Rectangle, classic bool, backdrop *blurBackdrop, l localization.Catalog, p *chatPage) {
 	d := c.draft(chat)
 	if d.reply == nil {
 		return
@@ -79,12 +79,7 @@ func (c *messageComposer) replyLayout(gtx layout.Context, chat int64, bar image.
 			radius = 0
 		}
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
-		fill := sc.SurfaceContainerHigh
-		if backdrop != nil {
-			layoutBackdrop(gtx, size, rect.Min, *backdrop)
-			fill = fill.SetOpacity(composerBlurOpacity)
-		}
-		fillRounded(gtx, fill, size, radius)
+		overlayFill(gtx, backdrop, size, rect.Min, sc.SurfaceContainerHigh, radius)
 		if classic {
 			fillRect(gtx, sc.OutlineVariant, image.Pt(size.X, gtx.Dp(1)))
 		}

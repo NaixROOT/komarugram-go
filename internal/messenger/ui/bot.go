@@ -127,7 +127,7 @@ func (p *chatPage) keyboardHeight(gtx layout.Context, classic bool, page image.P
 
 // layoutKeyboard draws the reply keyboard in rect, over the composer's bar,
 // and sends the text of the key pressed.
-func (p *chatPage) layoutKeyboard(gtx layout.Context, chat int64, rect image.Rectangle, classic bool, backdrop *op.CallOp, l localization.Catalog) {
+func (p *chatPage) layoutKeyboard(gtx layout.Context, chat int64, rect image.Rectangle, classic bool, backdrop *blurBackdrop, l localization.Catalog) {
 	b := &p.bot
 	k := b.keyboard
 	if k == nil || rect.Empty() {
@@ -149,12 +149,7 @@ func (p *chatPage) layoutKeyboard(gtx layout.Context, chat int64, rect image.Rec
 			radius = 0
 		}
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
-		fill := sc.SurfaceContainerHigh
-		if backdrop != nil {
-			layoutBackdrop(gtx, size, rect.Min, *backdrop)
-			fill = fill.SetOpacity(composerBlurOpacity)
-		}
-		fillRounded(gtx, fill, size, radius)
+		overlayFill(gtx, backdrop, size, rect.Min, sc.SurfaceContainerHigh, radius)
 		if classic {
 			fillRect(gtx, sc.OutlineVariant, image.Pt(size.X, gtx.Dp(1)))
 		}
@@ -227,7 +222,7 @@ func (p *chatPage) layoutKey(gtx layout.Context, chat int64, s *surface, btn mod
 
 // layoutStart draws the Start button of an empty chat with a bot in rect,
 // the composer's bar, and sends /start when it is pressed.
-func (p *chatPage) layoutStart(gtx layout.Context, chat int64, rect image.Rectangle, classic bool, backdrop *op.CallOp, l localization.Catalog) {
+func (p *chatPage) layoutStart(gtx layout.Context, chat int64, rect image.Rectangle, classic bool, backdrop *blurBackdrop, l localization.Catalog) {
 	b := &p.bot
 	if b.start.Clicked(gtx) && p.composer != nil {
 		p.composer.submit(chat, model.OutgoingMessage{Text: "/start"})
@@ -240,12 +235,7 @@ func (p *chatPage) layoutStart(gtx layout.Context, chat int64, rect image.Rectan
 			radius = 0
 		}
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
-		fill := sc.SurfaceContainerHigh
-		if backdrop != nil {
-			layoutBackdrop(gtx, size, rect.Min, *backdrop)
-			fill = fill.SetOpacity(composerBlurOpacity)
-		}
-		fillRounded(gtx, fill, size, radius)
+		overlayFill(gtx, backdrop, size, rect.Min, sc.SurfaceContainerHigh, radius)
 		if classic {
 			fillRect(gtx, sc.OutlineVariant, image.Pt(size.X, gtx.Dp(1)))
 		}
@@ -374,7 +364,7 @@ func (p *chatPage) layoutCommands(gtx layout.Context, chat int64, size image.Poi
 		radius := gtx.Dp(12)
 		menu := gtx.Constraints.Max
 		defer clip.UniformRRect(image.Rectangle{Max: menu}, radius).Push(gtx.Ops).Pop()
-		fillRounded(gtx, sc.SurfaceContainerHigh, menu, radius)
+		overlayFill(gtx, p.menuBackdrop(), menu, rect.Min, sc.SurfaceContainerHigh, radius)
 		for i, cmd := range matches {
 			top := gtx.Dp(4) + i*row
 			inRect(gtx, image.Rect(0, top, menu.X, top+row), func(gtx layout.Context) layout.Dimensions {

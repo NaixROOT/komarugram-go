@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -48,16 +49,23 @@ func TestIsSnap(t *testing.T) {
 	if err := os.WriteFile(launcher, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(dir, "vlc")
-	if err := os.Symlink(launcher, link); err != nil {
-		t.Fatal(err)
-	}
-	for path, want := range map[string]bool{
+	cases := map[string]bool{
 		"/snap/bin/vlc":             true,
 		"/snap/vlc/current/bin/vlc": true,
-		link:                        true,
 		"/usr/bin/vlc":              false,
-	} {
+	}
+	link := filepath.Join(dir, "vlc")
+	switch err := os.Symlink(launcher, link); {
+	case err == nil:
+		cases[link] = true
+	case runtime.GOOS == "windows":
+		// Windows makes symlinks only in Developer Mode or for an
+		// administrator; snaps are Linux's.
+		t.Logf("no symlink: %v", err)
+	default:
+		t.Fatal(err)
+	}
+	for path, want := range cases {
 		if got := isSnap(path); got != want {
 			t.Errorf("isSnap(%q) = %t, want %t", path, got, want)
 		}

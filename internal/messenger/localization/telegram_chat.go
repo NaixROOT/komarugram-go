@@ -8,13 +8,13 @@ import (
 
 func init() {
 	mappings := map[string]string{
-		"chat_theme.preview": "lng_theme_preview_title", "chat_theme.import": "lng_theme_editor_menu_import", "viewer.position": "lng_mediaview_n_of_amount", "page.choose_chat": "lng_bot_choose_chat",
+		"chat_theme.import": "lng_theme_editor_menu_import", "viewer.position": "lng_mediaview_n_of_amount", "page.choose_chat": "lng_bot_choose_chat",
 		"history.select_forward": "lng_selected_forward", "history.select_delete": "lng_selected_delete", "history.reply": "lng_context_reply_msg", "history.forward": "lng_settings_forwards_privacy", "history.link": "lng_open_link", "shared.more": "lng_stories_show_more",
 		"history.selection_count": "lng_media_selected_message",
 		"status.bot":              "lng_status_bot", "status.recently": "lng_status_recently", "status.members": "lng_chat_status_members", "status.online": "lng_chat_status_online", "status.members_online": "lng_chat_status_members_online", "status.subscribers": "lng_chat_status_subscribers",
 		"shared.photos": "lng_media_type_photos", "shared.videos": "lng_media_type_videos", "shared.files": "lng_media_type_files", "shared.music": "lng_media_type_songs", "shared.voice": "lng_media_type_audios", "shared.links": "lng_media_type_links", "shared.gifs": "lng_media_type_gifs", "shared.polls": "lng_media_type_polls", "shared.saved": "lng_saved_messages", "shared.stories": "lng_media_type_posts", "shared.gifts": "lng_media_type_gifts", "shared.groups": "lng_profile_common_groups_section",
 		"history.loading": "lng_profile_loading", "history.retry": "lng_bot_download_retry", "history.cancel": "lng_cancel", "viewer.close": "lng_close", "settings.back": "lng_go_back", "file.open": "lng_markdown_preview_open_file", "poll.closed": "lng_polls_closed", "poll.open": "lng_polls_public", "poll.quiz": "lng_polls_public_quiz",
-		"chat_theme.title": "lng_chat_theme_title", "chat_theme.default": "lng_filters_tabs_default", "chat_theme.apply": "lng_chat_theme_apply", "chat_theme.reset": "lng_shortcuts_reset", "history.file": "lng_in_dlg_file", "history.gif": "lng_media_type_gifs",
+		"chat_theme.title": "lng_chat_theme_change", "chat_theme.default": "lng_filters_tabs_default", "chat_theme.apply": "lng_chat_theme_apply", "history.file": "lng_in_dlg_file", "history.gif": "lng_media_type_gifs",
 		"gift.from": "lng_gift_link_label_from", "gift.date": "lng_gift_link_label_date", "gift.value": "lng_gift_link_label_value", "gift.model": "lng_gift_unique_model", "gift.symbol": "lng_gift_unique_symbol", "gift.backdrop": "lng_gift_unique_backdrop", "gift.quantity": "lng_gift_unique_availability_label", "gift.hidden_sender": "lng_gift_from_hidden", "gift.title": "lng_gift_link_label_gift", "gift.number": "lng_gift_unique_number", "gift.terms": "lng_credits_box_out_about", "gift.terms_link": "lng_credits_summary_options_about_link",
 		"gift.stars": "lng_gift_stars_title", "gift.issued": "lng_gift_unique_availability", "poll.count": "lng_polls_votes_count",
 	}

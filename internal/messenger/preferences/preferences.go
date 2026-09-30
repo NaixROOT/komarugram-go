@@ -6,6 +6,8 @@
 package preferences
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,6 +72,15 @@ type Global struct {
 	// ComposerBlur blurs the history behind the floating composer, while
 	// animations are on.
 	ComposerBlur bool `json:"composer_blur"`
+	// Overlays is how the panels drawn over the messenger look: the
+	// floating composer, the context menus and the toasts.
+	Overlays Overlays `json:"overlays"`
+	// WindowTransparency lets the desktop show through the main window
+	// surfaces on Wayland, in percent. Text and media stay opaque.
+	WindowTransparency int `json:"window_transparency,omitempty"`
+	// WindowBlur asks the Wayland compositor to blur behind translucent
+	// main window surfaces; transparency can also be used on its own.
+	WindowBlur bool `json:"window_blur"`
 	// Player is the external player videos open in; empty until the user
 	// chooses one, which is asked only when more than one is installed.
 	Player player.Kind `json:"player,omitempty"`
@@ -104,7 +115,71 @@ type Global struct {
 	// in the composer is sent, as AyuGram's confirmations.
 	ConfirmSticker bool `json:"confirm_sticker,omitempty"`
 	ConfirmGIF     bool `json:"confirm_gif,omitempty"`
+	// Chats is how every chat is drawn, unless the chat has a theme of its
+	// own, as Telegram Desktop's chat settings.
+	Chats ChatLook `json:"chats"`
 }
+
+// ChatLook is how every chat is drawn: one look for the light theme and
+// one for the dark, as Telegram Desktop keeps a theme for the day and one
+// for the night.
+type ChatLook struct {
+	Day   ChatMode `json:"day"`
+	Night ChatMode `json:"night"`
+}
+
+// ChatMode is the look of the chats in one of the application's themes.
+type ChatMode struct {
+	// Theme is one of ChatPresets: "" for the application's own colors.
+	Theme string `json:"theme,omitempty"`
+	// Accent is the accent chosen, 0xffRRGGBB, so that black is one; zero
+	// keeps the theme's.
+	Accent uint32 `json:"accent,omitempty"`
+	// Wallpaper is the wallpaper chosen; nil for the theme's.
+	Wallpaper *Wallpaper `json:"wallpaper,omitempty"`
+}
+
+// ChatPresets are the themes of chats, as chattheme's presets.
+var ChatPresets = []string{"", "classic", "day", "tinted", "night"}
+
+// Wallpaper is Telegram's wallPaperSettings with the picture, if any, kept
+// by SaveWallpaper.
+type Wallpaper struct {
+	// ID is Telegram's, to tell it among the ones offered.
+	ID int64 `json:"id,omitempty"`
+	// File is the picture's name in the store's wallpapers; empty for a
+	// wallpaper of colors alone.
+	File      string   `json:"file,omitempty"`
+	Colors    []uint32 `json:"colors,omitempty"`
+	Rotation  int      `json:"rotation,omitempty"`
+	Intensity int      `json:"intensity,omitempty"`
+	Blur      bool     `json:"blur,omitempty"`
+	Pattern   bool     `json:"pattern,omitempty"`
+	Tile      bool     `json:"tile,omitempty"`
+	Dark      bool     `json:"dark,omitempty"`
+}
+
+// Overlays are the preferences of the panels the messenger draws over its
+// content. An overlay that blurs what is behind it lets some of it show
+// through, as much as Transparency says; one that does not is opaque. The
+// composer's own switch is ComposerBlur. Blur costs power, so it is off
+// while animations are.
+type Overlays struct {
+	// Transparency is how much of the blurred content shows through the
+	// overlays that blur it, in percent, from 0 to TransparencyMax.
+	Transparency int `json:"transparency"`
+	// MenusBlur blurs behind the context menus, and ToastsBlur behind the
+	// toasts.
+	MenusBlur  bool `json:"menus_blur"`
+	ToastsBlur bool `json:"toasts_blur"`
+}
+
+// TransparencyMax is the most transparent an overlay can be made: past it
+// the text on the overlay could not be read.
+const TransparencyMax = 70
+
+// Opacity is how opaque the overlays that blur are, from 0.3 to 1.
+func (o Overlays) Opacity() float32 { return 1 - float32(o.Transparency)/100 }
 
 // Look is how messages and avatars are drawn.
 type Look struct {
@@ -195,6 +270,8 @@ type Store struct {
 	accounts    map[string]json.RawMessage
 	subscribers map[uint64]func()
 	nextID      uint64
+	// wallpapers are the pictures SaveWallpaper keeps in a store in memory.
+	wallpapers map[string][]byte
 }
 
 func defaults() Global {
@@ -205,6 +282,8 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
+		WindowBlur:     true,
+		Overlays:       Overlays{Transparency: 30, MenusBlur: true, ToastsBlur: true},
 		Ghost:          Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true},
 		Keep:           Keep{Deleted: true, Edits: true},
 		Look:           Look{BubbleRadius: BubbleRadiusMax, AvatarCorners: AvatarRound},
@@ -286,8 +365,27 @@ func validate(g Global) error {
 	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
 		return errors.New("invalid external player")
 	}
+	if g.Overlays.Transparency < 0 || g.Overlays.Transparency > TransparencyMax {
+		return errors.New("invalid overlay transparency")
+	}
+	if g.WindowTransparency < 0 || g.WindowTransparency > TransparencyMax {
+		return errors.New("invalid window transparency")
+	}
 	if g.AutoLockMinutes < 0 || g.AutoLockMinutes > 120 {
 		return errors.New("invalid automatic lock delay")
+	}
+	for _, m := range []ChatMode{g.Chats.Day, g.Chats.Night} {
+		if !slices.Contains(ChatPresets, m.Theme) {
+			return errors.New("invalid chat theme")
+		}
+		if w := m.Wallpaper; w != nil {
+			if w.File != "" && !validWallpaperName(w.File) {
+				return errors.New("invalid wallpaper file")
+			}
+			if len(w.Colors) > 4 || w.Intensity < -100 || w.Intensity > 100 || w.Rotation < 0 || w.Rotation >= 360 {
+				return errors.New("invalid wallpaper")
+			}
+		}
 	}
 	return nil
 }
@@ -381,6 +479,127 @@ func (s *Store) SetLook(l Look) error {
 	return s.change(func(global *Global) { global.Look = l })
 }
 
+// SetChats changes how every chat is drawn, and removes the wallpapers'
+// pictures it no longer uses.
+func (s *Store) SetChats(c ChatLook) error {
+	for _, w := range []**Wallpaper{&c.Day.Wallpaper, &c.Night.Wallpaper} {
+		if *w != nil {
+			copy := **w
+			copy.Colors = slices.Clone(copy.Colors)
+			*w = &copy
+		}
+	}
+	if err := s.change(func(g *Global) { g.Chats = c }); err != nil {
+		return err
+	}
+	return s.pruneWallpapers(c)
+}
+
+// wallpaperDir is where the wallpapers' pictures are, beside the settings;
+// empty for a store in memory.
+func (s *Store) wallpaperDir() string {
+	if s.path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(s.path), "wallpapers")
+}
+
+func validWallpaperName(name string) bool {
+	if len(name) != 64 {
+		return false
+	}
+	for _, c := range name {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// SaveWallpaper keeps a wallpaper's picture for every window and account,
+// and returns its name for Wallpaper.File. The name is the picture's hash,
+// so the same picture is kept once.
+func (s *Store) SaveWallpaper(data []byte) (string, error) {
+	sum := sha256.Sum256(data)
+	name := hex.EncodeToString(sum[:])
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir := s.wallpaperDir()
+	if dir == "" {
+		if s.wallpapers == nil {
+			s.wallpapers = map[string][]byte{}
+		}
+		s.wallpapers[name] = slices.Clone(data)
+		return name, nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name)
+	if _, err := os.Stat(path); err == nil {
+		return name, nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return "", err
+	}
+	return name, os.Rename(tmp, path)
+}
+
+// LoadWallpaper returns a picture SaveWallpaper kept.
+func (s *Store) LoadWallpaper(name string) ([]byte, error) {
+	if !validWallpaperName(name) {
+		return nil, errors.New("invalid wallpaper file")
+	}
+	s.mu.Lock()
+	dir := s.wallpaperDir()
+	data, ok := s.wallpapers[name]
+	s.mu.Unlock()
+	if dir == "" {
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return data, nil
+	}
+	return os.ReadFile(filepath.Join(dir, name))
+}
+
+// pruneWallpapers removes the pictures c does not use.
+func (s *Store) pruneWallpapers(c ChatLook) error {
+	used := map[string]bool{}
+	for _, m := range []ChatMode{c.Day, c.Night} {
+		if m.Wallpaper != nil && m.Wallpaper.File != "" {
+			used[m.Wallpaper.File] = true
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir := s.wallpaperDir()
+	if dir == "" {
+		for name := range s.wallpapers {
+			if !used[name] {
+				delete(s.wallpapers, name)
+			}
+		}
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if validWallpaperName(e.Name()) && !used[e.Name()] {
+			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // SetConfirmations chooses whether stickers and GIFs are sent only once
 // confirmed.
 func (s *Store) SetConfirmations(sticker, gif bool) error {
@@ -395,6 +614,28 @@ func (s *Store) SetComposer(value ComposerStyle) error {
 // SetComposerBlur switches the blur behind the floating composer.
 func (s *Store) SetComposerBlur(on bool) error {
 	return s.change(func(g *Global) { g.ComposerBlur = on })
+}
+
+// SetOverlays changes how the overlays look for all windows.
+func (s *Store) SetOverlays(o Overlays) error {
+	if o.Transparency < 0 || o.Transparency > TransparencyMax {
+		return errors.New("invalid overlay transparency")
+	}
+	return s.change(func(g *Global) { g.Overlays = o })
+}
+
+// SetWindowBlur changes the compositor blur independently of transparency.
+func (s *Store) SetWindowBlur(on bool) error {
+	return s.change(func(g *Global) { g.WindowBlur = on })
+}
+
+// SetWindowTransparency changes the Wayland window surfaces independently
+// of the overlays. Zero keeps the surfaces opaque.
+func (s *Store) SetWindowTransparency(value int) error {
+	if value < 0 || value > TransparencyMax {
+		return errors.New("invalid window transparency")
+	}
+	return s.change(func(g *Global) { g.WindowTransparency = value })
 }
 
 // SetPlayer chooses the external player for videos.

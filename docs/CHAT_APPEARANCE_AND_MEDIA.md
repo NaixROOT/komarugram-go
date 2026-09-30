@@ -45,19 +45,53 @@ navigation and scroll state.
 
 ## Appearance
 
-The appearance page loads Telegram chat themes and the peer's selected
-wallpaper, supports light/dark variants, outgoing bubble gradients, image
-wallpapers, PNG/TGV patterns, intensity/inversion and blurred wallpapers.
-It also imports the chat subset of `.tdesktop-theme` ZIP archives and plain
-palettes, including aliases and bundled normal/tiled wallpapers. Imported
-palettes do not replace the application's complete UI theme.
+A chat is drawn in the first of: the theme set for it only here, its own
+Telegram theme and wallpaper, and the look of every chat from the settings.
 
-A preview can be applied locally to the account/chat or, for Telegram themes,
-explicitly applied to chat participants through `messages.setChatTheme`.
-Local overrides and remote appearances are stored in the account cache.
-Freeform gradient interpolation is implemented independently; it is not a
-pixel-exact reproduction of Telegram's shaders. Device-tilt motion has no
-input on this desktop UI.
+**Every chat** (Settings → Chat Settings, `settings_chats.go`), as Telegram
+Desktop's Chat Settings: the application's own Material colors, or Classic,
+Day, Tinted and Night, with an accent of the theme's eight; and a wallpaper
+from Telegram's gallery (`account.getWallPapers`, cached offline) or a
+file, previewed over a chat, a picture with "Blurred", before it is
+applied. The light and the dark application theme each keep their own
+theme and wallpaper (`preferences.ChatLook`), as Telegram Desktop keeps a
+day and a night theme; choosing a dark theme turns the application dark.
+The presets' chat colors are the ones of Telegram Desktop's embedded
+palettes (`chattheme/presets.go`); an accent turns the colors near the
+theme's own accent to its hue, grays kept, as Telegram Desktop colors a
+theme. Classic's wallpaper is its four colors over a pattern of doodles
+drawn for this client (`chattheme/pattern.go`): Telegram Desktop's bundled
+pattern is not used. A wallpaper's picture is kept once, by its hash, in
+`wallpapers` beside the settings, and removed when no look uses it; it is
+not encrypted, as the settings are not.
+
+**One chat** (the chat's information → Change colors, also in the menu of
+the chat's header), as Telegram Desktop's theme chooser: the chat as it
+will look, the themes as cards of their wallpaper and bubbles, and "No
+theme". A card previews the theme on the chat at once; it is applied for
+all in the chat (`messages.setChatTheme`, Telegram's themes and none) or
+only here (the account cache), which "Remove my theme" undoes. A Telegram
+Desktop theme (`.tdesktop-theme` archive or palette) imports its chat
+colors and wallpaper, only here.
+
+Telegram's chat themes are drawn as Telegram Desktop draws cloud themes:
+the preset of their base theme turned to their accent, with their message
+colors. A chat's appearance comes from the cache at once and is asked for
+again in the background once a session (`tgstore.ChatAppearance`); a
+service message that changed it is waited for.
+
+The wallpaper is decoded once (`chattheme.Prepare`) and rendered off the
+frame at the size the history takes (`Background.Render`, up to 2048 px a
+side): colors, a freeform gradient of up to four colors, a picture cut to
+cover or tiled, or a pattern (PNG or TGV) over the colors, darkening them
+as a soft light, or, for dark wallpapers, showing them through the pattern
+only. SVG patterns are rasterized within each path's bounds
+(`chattheme/scanner.go`); rasterx's scanner covers the whole image for
+every path. Dates, service messages and the times of stickers lie on
+plates of the wallpaper's average hue. A hidden window drops its wallpaper.
+The freeform gradient is implemented independently after Telegram's
+published behavior; it is not a pixel-exact reproduction of its shaders.
+Device-tilt motion has no input on this desktop UI.
 
 Format references: [Telegram themes](https://core.telegram.org/api/themes),
 [wallpapers](https://core.telegram.org/api/wallpapers), and the bundled

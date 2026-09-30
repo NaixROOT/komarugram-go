@@ -606,15 +606,16 @@ func flatEditor(gtx layout.Context, e *widget.Editor, hint string) layout.Dimens
 }
 
 const (
-	// composerBlurRadius is how much the history behind the floating
-	// composer is blurred.
+	// composerBlurRadius is how much the content behind an overlay is
+	// blurred.
 	composerBlurRadius = unit.Dp(16)
-	// composerBlurOpacity is the opacity of the composer over the blur.
+	// composerBlurOpacity is the opacity of an overlay over the blur while
+	// the preferences do not say.
 	composerBlurOpacity = token.OpacityLevel(0.7)
 )
 
 // layoutBackdrop fills the current clip, of size, with backdrop blurred:
-// the history, whose origin is at -origin.
+// the recording of what is behind it, whose origin is at -origin.
 func layoutBackdrop(gtx layout.Context, size, origin image.Point, backdrop op.CallOp) {
 	radius := gtx.Dp(composerBlurRadius)
 	defer paint.PushBlur(gtx.Ops, float32(radius)).Pop()
@@ -642,7 +643,7 @@ func floatingComposerCover(gtx layout.Context, size image.Point) int {
 
 // Layout draws the composer over the chat page p. A floating composer shows
 // backdrop, the history behind it, blurred; nil draws it opaque.
-func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.Catalog, p *chatPage, animate bool, backdrop *op.CallOp) layout.Dimensions {
+func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.Catalog, p *chatPage, animate bool, backdrop *blurBackdrop) layout.Dimensions {
 	c.update(gtx, chat, l)
 	size := gtx.Constraints.Max
 	pad := min(gtx.Dp(16), size.X/8)
@@ -665,12 +666,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 				radius = 0
 			}
 			defer clip.UniformRRect(image.Rectangle{Max: s}, radius).Push(gtx.Ops).Pop()
-			fill := sc.SurfaceContainerHigh
-			if backdrop != nil {
-				layoutBackdrop(gtx, s, rect.Min, *backdrop)
-				fill = fill.SetOpacity(composerBlurOpacity)
-			}
-			fillRounded(gtx, fill, s, radius)
+			overlayFill(gtx, backdrop, s, rect.Min, sc.SurfaceContainerHigh, radius)
 			if classic {
 				fillRect(gtx, sc.OutlineVariant, image.Pt(s.X, gtx.Dp(1)))
 			}
@@ -712,12 +708,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		}
 		// Keep pointer input inside the composer from reaching the history.
 		defer clip.UniformRRect(image.Rectangle{Max: s}, radius).Push(gtx.Ops).Pop()
-		fill := sc.SurfaceContainerHigh
-		if backdrop != nil {
-			layoutBackdrop(gtx, s, rect.Min, *backdrop)
-			fill = fill.SetOpacity(composerBlurOpacity)
-		}
-		fillRounded(gtx, fill, s, radius)
+		overlayFill(gtx, backdrop, s, rect.Min, sc.SurfaceContainerHigh, radius)
 		if classic {
 			fillRect(gtx, sc.OutlineVariant, image.Pt(s.X, gtx.Dp(1)))
 		}
@@ -815,7 +806,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		drawn := false
 		c.pickerMenu.Layout(gtx, c.pickerOpen, area, menuFromBottomRight, gtx.Dp(16), func(gtx layout.Context) layout.Dimensions {
 			drawn = true
-			return c.pickerLayout(gtx, l, p, animate)
+			return c.pickerLayout(gtx, l, p, animate, area.Min)
 		})
 		// The picker closed: its stickers keep their first frames only.
 		if c.pickerDrawn && !drawn {
@@ -835,7 +826,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			menuSize := gtx.Constraints.Max
 			sc := scheme(gtx)
 			defer clip.UniformRRect(image.Rectangle{Max: menuSize}, gtx.Dp(12)).Push(gtx.Ops).Pop()
-			fillRounded(gtx, sc.SurfaceContainerHigh, menuSize, gtx.Dp(12))
+			overlayFill(gtx, p.menuBackdrop(), menuSize, area.Min, sc.SurfaceContainerHigh, gtx.Dp(12))
 			// Without this clip the menu's input region covers the surrounding chat
 			// and prevents the outside-click handler from closing the menu.
 			event.Op(gtx.Ops, &c.attachmentActions)

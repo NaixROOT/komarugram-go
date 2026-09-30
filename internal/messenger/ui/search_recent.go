@@ -174,7 +174,7 @@ func (r *recentSearch) layoutHeading(gtx layout.Context, l localization.Catalog)
 
 // layoutMenu draws the menu of the chat right-clicked, in the results area
 // of size.
-func (r *recentSearch) layoutMenu(gtx layout.Context, l localization.Catalog) {
+func (r *recentSearch) layoutMenu(gtx layout.Context, bd *blurBackdrop, l localization.Catalog) {
 	size := gtx.Constraints.Max
 	if r.open {
 		// Clicks around the menu close it, and take nothing else.
@@ -207,7 +207,7 @@ func (r *recentSearch) layoutMenu(gtx layout.Context, l localization.Catalog) {
 		sc := scheme(gtx)
 		menuSize := gtx.Constraints.Max
 		defer clip.UniformRRect(image.Rectangle{Max: menuSize}, radius).Push(gtx.Ops).Pop()
-		fillRounded(gtx, sc.SurfaceContainerHigh, menuSize, radius)
+		overlayFill(gtx, bd, menuSize, r.rect.Min, sc.SurfaceContainerHigh, radius)
 		// The menu takes its own clicks from the dismissing area under it.
 		event.Op(gtx.Ops, &r.menu)
 		y := gtx.Dp(menuPadding)

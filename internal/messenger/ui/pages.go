@@ -10,6 +10,7 @@ import (
 	"gio-mw/widget/scroll"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 
 	"komarugram/internal/messenger/localization"
@@ -53,10 +54,11 @@ type chatHead struct {
 func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog, drawAvatar avatarLayout, badges badgesLayout, head *chatHead, body layout.Widget, selection *chatPage) layout.Dimensions {
 	sc := scheme(gtx)
 	size := gtx.Constraints.Max
-	fillRect(gtx, sc.SurfaceContainerLow, size)
-
 	header := image.Pt(size.X, gtx.Dp(chatHeaderSize))
-	fillRect(gtx, sc.Surface.Color, header)
+	// Record the ordinary header, but replay it only when search or selection
+	// does not replace it. Stacking translucent headers would hide the desktop.
+	headerRecording := op.Record(gtx.Ops)
+	fillWindowSurface(gtx, sc.Surface.Color, header)
 	pad := gtx.Dp(16)
 	imagePx := gtx.Dp(chatHeaderImage)
 	title, status := c.Title, chatStatus(c, l)
@@ -123,24 +125,27 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 			})
 		})
 	}
+	headerCall := headerRecording.Stop()
 	bodyGtx := gtx
 	bodyGtx.Constraints = layout.Exact(image.Pt(size.X, max(size.Y-header.Y, 0)))
 	offset(bodyGtx, image.Pt(0, header.Y), func(gtx layout.Context) layout.Dimensions {
+		fillRect(gtx, sc.SurfaceContainerLow, gtx.Constraints.Max)
 		return body(gtx)
 	})
-	if selection != nil && head == nil && selection.chat == c.ID && selection.chatSearch.open {
-		headerGtx := gtx
-		headerGtx.Constraints = layout.Exact(header)
+	headerGtx := gtx
+	headerGtx.Constraints = layout.Exact(header)
+	active := selection != nil && selection.chat == c.ID
+	if active && head == nil && selection.chatSearch.open {
 		selection.chatSearchUpdate(headerGtx)
-		if selection.chatSearch.open {
-			selection.layoutChatSearch(headerGtx, header, l)
-		}
 	}
-	if selection != nil && selection.chat == c.ID && selection.selectionCount() > 0 {
-		headerGtx := gtx
-		headerGtx.Constraints = layout.Exact(header)
-		fillRect(headerGtx, sc.Surface.Color, header)
+	switch {
+	case active && selection.selectionCount() > 0:
+		fillWindowSurface(headerGtx, sc.Surface.Color, header)
 		selection.selectionHeader(headerGtx, l)
+	case active && head == nil && selection.chatSearch.open:
+		selection.layoutChatSearch(headerGtx, header, l)
+	default:
+		headerCall.Add(gtx.Ops)
 	}
 	if selection != nil && head == nil && selection.chat == c.ID {
 		selection.layoutChatMenu(gtx, l)

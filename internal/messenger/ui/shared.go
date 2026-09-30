@@ -325,12 +325,7 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 		}
 	}
 	if p.themesButton.click.Clicked(gtx) {
-		p.stop()
-		p.themePage = true
-		p.list.Position = layout.Position{}
-		if p.themes != nil {
-			p.themes.LoadChoices()
-		}
+		p.OpenTheme()
 	}
 	if p.retry.Clicked(gtx) {
 		p.load(p.section == "")
@@ -404,6 +399,18 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 		p.renderer.linkDialog(overlayGtx, l)
 	}
 }
+
+// OpenTheme shows the page of the chat's theme.
+func (p *chatInfo) OpenTheme() {
+	if p.themes == nil {
+		return
+	}
+	p.stop()
+	p.themePage = true
+	p.list.Position = layout.Position{}
+	p.themes.LoadChoices()
+}
+
 func (p *chatInfo) goBack() {
 	if p.themes != nil {
 		p.themes.DiscardPreview()
@@ -538,7 +545,8 @@ func (p *chatInfo) layoutMedia(gtx layout.Context, l localization.Catalog, anima
 	if p.section == model.SharedPolls || p.section == model.SharedSaved {
 		p.renderer.appearance = p.themes
 		if p.themes != nil {
-			p.themes.Background(gtx)
+			p.themes.Backdrop(gtx)
+			gtx = p.themes.historyContext(gtx)
 		}
 	}
 	if p.section == model.SharedGifts {

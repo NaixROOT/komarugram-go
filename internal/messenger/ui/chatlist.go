@@ -55,6 +55,27 @@ type chatList struct {
 	items []searchItem
 	// menu is the menu of a chat right-clicked.
 	menu chatRowMenu
+	// overlays says how the menus and the toast are drawn; nil draws them
+	// opaque. bd is the recording of the rows behind them in the frame drawn
+	// last, nil when nothing blurs it.
+	overlays func() overlayPrefs
+	bd       *blurBackdrop
+}
+
+// overlayPrefs is how the list's overlays are drawn.
+func (l *chatList) overlayPrefs() overlayPrefs {
+	if l.overlays == nil {
+		return overlayPrefs{opacity: float32(composerBlurOpacity)}
+	}
+	return l.overlays()
+}
+
+// menuBackdrop is what the list's menus blur, nil for opaque ones.
+func (l *chatList) menuBackdrop() *blurBackdrop {
+	if l.overlayPrefs().menus {
+		return l.bd
+	}
+	return nil
 }
 
 // chatPick is a chat picked in the list: a chat of the list or found by a
@@ -179,7 +200,7 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 	defer end()
 	sc := scheme(gtx)
 	size := gtx.Constraints.Max
-	fillRect(gtx, sc.Surface.Color, size)
+	fillWindowSurface(gtx, sc.Surface.Color, size)
 
 	// Only search has a header; otherwise the chats take the full height
 	// under a small gap.
@@ -208,6 +229,7 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 		if text := l.panel.failure(catalog); text != "" {
 			l.toast.Show(text)
 		}
+		l.toast.bd = nil
 		l.toast.Layout(gtx, area)
 		return layout.Dimensions{Size: size}
 	}
@@ -217,7 +239,12 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 	l.menu.update(gtx, sec, chats, l.shown, &l.toast, catalog)
 	listGtx := gtx
 	listGtx.Constraints = layout.Exact(image.Pt(size.X, max(size.Y-headerHeight, 0)))
-	offset(listGtx, image.Pt(0, headerHeight), func(gtx layout.Context) layout.Dimensions {
+	// The rows are recorded to be drawn again, blurred, behind whatever
+	// overlay blurs them.
+	overlays := l.overlayPrefs()
+	recording := overlays.menus || overlays.toasts
+	l.bd = nil
+	rows := func(gtx layout.Context) layout.Dimensions {
 		if len(visible) == 0 {
 			return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.UniformInset(unit.Dp(24)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -234,14 +261,31 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 			l.menu.rowOp(gtx, c.ID, dims.Size)
 			return dims
 		})
+	}
+	offset(listGtx, image.Pt(0, headerHeight), func(gtx layout.Context) layout.Dimensions {
+		if !recording {
+			return rows(gtx)
+		}
+		record := op.Record(gtx.Ops)
+		dims := rows(gtx)
+		call := record.Stop()
+		call.Add(gtx.Ops)
+		l.bd = newBackdrop(call, overlays.opacity)
+		return dims
 	})
 	// Over the rows, which would keep the press from anything under them.
 	menuGtx := listGtx
 	offset(menuGtx, image.Pt(0, headerHeight), func(gtx layout.Context) layout.Dimensions {
 		l.menu.areaOp(gtx)
-		l.menu.layout(gtx, catalog)
+		l.menu.layout(gtx, l.menuBackdrop(), catalog)
 		return layout.Dimensions{}
 	})
+	l.toast.bd = nil
+	if overlays.toasts {
+		// The toast is drawn in the list's coordinates, the rows recorded
+		// in those of the rows.
+		l.toast.bd = l.bd.shifted(image.Pt(0, headerHeight))
+	}
 	l.toast.Layout(gtx, image.Rect(0, headerHeight, size.X, size.Y))
 	return layout.Dimensions{Size: size}
 }
@@ -265,6 +309,12 @@ func (l *chatList) layoutResults(gtx layout.Context, selected int64, catalog loc
 	l.shown = l.shown[:0]
 	now := time.Now()
 	recent := &l.panel.recent
+	overlays := l.overlayPrefs()
+	l.bd = nil
+	var record op.MacroOp
+	if overlays.menus {
+		record = op.Record(gtx.Ops)
+	}
 	dims := l.list.Layout(gtx, len(l.items), func(gtx layout.Context, i int) layout.Dimensions {
 		it := l.items[i]
 		switch {
@@ -284,9 +334,14 @@ func (l *chatList) layoutResults(gtx layout.Context, selected int64, catalog loc
 		return l.panel.layoutStatus(gtx, catalog)
 	})
 	l.panel.moreNear(l.list.Position, len(l.items))
+	if overlays.menus {
+		call := record.Stop()
+		call.Add(gtx.Ops)
+		l.bd = newBackdrop(call, overlays.opacity)
+	}
 	// Over the rows, which would keep the press from anything under them.
 	recent.areaOp(gtx)
-	recent.layoutMenu(gtx, catalog)
+	recent.layoutMenu(gtx, l.menuBackdrop(), catalog)
 	return dims
 }
 

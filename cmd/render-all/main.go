@@ -38,10 +38,11 @@ func renders() []render {
 		all = append(all, render{"composer-" + view, "TestRenderComposer", []string{"COMPOSER_VIEW=" + view, "COMPOSER_PNG={out}/composer-" + view + ".png"}})
 	}
 	all = append(all, render{"composer-motion", "TestRenderComposerMotion", []string{"COMPOSER_MOTION_PNG={out}/composer-motion"}})
-	for _, section := range []string{"main", "appearance", "privacy", "premium", "integrations"} {
+	for _, section := range []string{"main", "appearance", "chats", "wallpapers", "privacy", "premium", "integrations"} {
 		all = append(all, render{"settings-" + section, "TestRenderSettingsAccounts", []string{"SETTINGS_SECTION=" + section, "SETTINGS_PNG={out}/settings-" + section + ".png"}})
 	}
 	return append(all,
+		render{"window-surfaces", "TestWindowSurfacePixels", []string{"WINDOW_SURFACES_PNG_DIR={out}"}},
 		render{"accounts", "TestRenderAccountScreens", []string{"ACCOUNTS_PNG_DIR={out}"}},
 		render{"session-ended", "TestRenderSessionEnded", []string{"SESSION_PNG_DIR={out}"}},
 		render{"sessions", "TestRenderSessions", []string{"SESSIONS_PNG={out}/sessions.png"}},

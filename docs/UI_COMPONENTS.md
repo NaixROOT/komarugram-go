@@ -123,6 +123,35 @@ The history is drawn as materialgram draws it:
   history reserves room for the composer, and `composer.Layout` draws it.
   An empty chat with a bot draws `layoutStart` in the bar's place. Typing
   `/` lists commands over the composer (`layoutCommands`).
+- **Overlays and blur** (`overlay.go`): the floating composer, the context menus
+  (including the composer picker) and the toasts may blur what is behind them
+  and let it show through
+  (`preferences.Overlays`: one transparency for all, a switch each for menus and
+  toasts, and `ComposerBlur` for the composer; all off while animations are).
+  How it is done, as the composer did it first: the owner of the content records
+  it while drawing (`chatPage.layoutHistory`, `chatList.Layout`) into a
+  `blurBackdrop` and draws the recording as usual; an overlay calls
+  `overlayFill`/`overlayPlate` with it and its own origin in the coordinates
+  the recording was made in (`shifted` for overlays drawn in others, as the
+  page header's menu), which draws the recording again under a blur and the
+  fill over it at the chosen opacity. An overlay whose owner gives none is
+  opaque. A toast is never less than 80% opaque (`toastMinOpacity`): its
+  light text is only readable on its dark plate. A new overlay: take `p.menuBackdrop()` / `p.toastBackdrop()` (or the
+  list's), fill with `overlayFill`. Not covered: forms, dialogs' toasts, the photo viewer,
+  and the toast of the search results.
+- **Main window surfaces** (`window_surface.go`): on Wayland the sidebar, chat
+  list (including the compact folder bar) and chat header let the desktop show
+  through at `preferences.Global.WindowTransparency`. The compositor supplies
+  blur through the same `Transparent` / `BlurBehind` window options as the photo
+  viewer. `fillWindowSurface` changes only the fill alpha; text, avatars and
+  history stay opaque. Other backends retain opaque surfaces. Never paint an
+  opaque root behind translucent panels, or stack replacement headers over
+  each other. Search and selection replace the ordinary header. The separate
+  slider is in Appearance → Transparency and blur; zero disables compositor
+  blur and keeps the window opaque. `WindowBlur`, a separate checkbox in the
+  same card, can turn compositor blur off without changing transparency; it
+  does not depend on animation settings. `TestWindowSurfacePixels` checks actual
+  frame alpha, with `WINDOW_SURFACES_PNG_DIR` saving the frames.
 - **Mini Apps** (`webapp.go`, `internal/messenger/miniapps`): the window's
   `webApps` owns a `miniapps.Runner`, which asks the store for the link, opens
   it with `pkg/miniapp` and answers the app's events on its own goroutines;
@@ -258,6 +287,19 @@ The history is drawn as materialgram draws it:
   history (`servicePill`), worded in the UI's language by
   `localization.Catalog.Service` from `model.ServiceAction`. A pin's plate
   quotes the message and shows it on a click; a call is a bubble.
+- **Themes and wallpapers** (`chat_theme.go`, `chat_theme_page.go`,
+  `settings_chats.go`, `wallpaper_thumbs.go`; how they are chosen:
+  `docs/CHAT_APPEARANCE_AND_MEDIA.md`). `chatThemeController`, one a window,
+  is what the open chat is drawn in: `Background` draws its wallpaper,
+  rendered off the frame at the history's size, `Backdrop` the same for a
+  view of another size, `historyContext` gives the plates of dates and
+  service messages the wallpaper's hue, and `messageContext` a bubble's
+  colors; both make their values once a frame, not once a message.
+  `themeScene` draws a chat as a theme will make it look (a date and a
+  message each way), `themePreview` a theme small, as the cards of themes,
+  and `wallpaperThumbs` renders wallpapers small in the background for
+  cards and galleries. `actionRow` is a row of a dialog that does
+  something, an icon and its words in the primary color.
 - **Header actions** (`chat_menu.go`, `chat_search.go`): the search and
   menu buttons at the end of a chat's header. The search is a field over
   the header (`model.ChatSearcher`) with a counter and buttons to the older
@@ -309,6 +351,10 @@ new piece sits next to its neighbours.
   `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
   an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
   off).
+  `SETTINGS_SECTION=chats` with `SETTINGS_PNG` shows Chat Settings: the
+  themes, the wallpaper, the composer and the look of messages;
+  `wallpapers`, the gallery of wallpapers over it. `SHARED_PNG` saves the
+  page of a chat's theme (`-themes`) and the chat in the theme (`-chat`).
   `SETTINGS_SECTION=integrations` with `SETTINGS_PNG` shows the choice of the
   external player; `PLAYER_PNG`, the dialog that asks for it. `MENU_PNG` also
   saves the menu with reactions (`-reactions*.png`); `COMMENTS_PNG`, the

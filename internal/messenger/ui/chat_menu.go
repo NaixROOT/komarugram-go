@@ -27,6 +27,8 @@ type chatMenuAction int
 const (
 	chatMenuSearch chatMenuAction = iota
 	chatMenuInfo
+	// chatMenuTheme is Telegram Desktop's Change Colors: the chat's theme.
+	chatMenuTheme
 	chatMenuBeginning
 	chatMenuFiltered
 	chatMenuActions
@@ -55,6 +57,9 @@ func (p *chatPage) chatMenuActions() []chatMenuAction {
 		out = append(out, chatMenuSearch)
 	}
 	out = append(out, chatMenuInfo)
+	if p.appearance != nil && p.appearance.source != nil && p.threadRoot == 0 {
+		out = append(out, chatMenuTheme)
+	}
 	if _, ok := p.source.(model.MessageRevealer); ok && p.threadRoot == 0 {
 		out = append(out, chatMenuBeginning)
 	}
@@ -76,6 +81,8 @@ func (p *chatPage) chatMenuLabel(a chatMenuAction, l localization.Catalog) strin
 			return l.T("chat_menu.channel")
 		}
 		return l.T("chat_menu.profile")
+	case chatMenuTheme:
+		return l.T("chat_theme.title")
 	case chatMenuBeginning:
 		return l.T("chat_menu.beginning")
 	case chatMenuFiltered:
@@ -95,6 +102,8 @@ func chatMenuIcon(a chatMenuAction) wdk.IconWidget {
 		return iconInfo
 	case chatMenuFiltered:
 		return iconFilter
+	case chatMenuTheme:
+		return iconPalette
 	}
 	return iconToTop
 }
@@ -184,6 +193,8 @@ func (p *chatPage) chatMenuUpdate(gtx layout.Context) {
 			p.openChatSearch(gtx)
 		case chatMenuInfo:
 			p.infoAsked = true
+		case chatMenuTheme:
+			p.infoAsked, p.themeAsked = true, true
 		case chatMenuBeginning:
 			// The chat's first message, or the history around where it was.
 			p.jumpTo(1)
@@ -203,6 +214,7 @@ func (p *chatPage) chatMenuUpdate(gtx layout.Context) {
 func (p *chatPage) takeInfoAsked() bool {
 	asked := p.infoAsked
 	p.infoAsked = false
+	p.themeShown, p.themeAsked = p.themeAsked, false
 	return asked
 }
 
@@ -224,7 +236,9 @@ func (p *chatPage) layoutChatMenu(gtx layout.Context, l localization.Catalog) {
 		sc := scheme(gtx)
 		size := gtx.Constraints.Max
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
-		fillRounded(gtx, sc.SurfaceContainerHigh, size, radius)
+		// The menu is drawn over the whole page, the history recorded is of
+		// its body under the header.
+		overlayFill(gtx, p.menuBackdrop().shifted(image.Pt(0, gtx.Dp(chatHeaderSize))), size, m.rect.Min, sc.SurfaceContainerHigh, radius)
 		// Clicks on the menu itself do not close it.
 		event.Op(gtx.Ops, &m.menu)
 		y := gtx.Dp(menuPadding)
