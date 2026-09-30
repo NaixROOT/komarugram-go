@@ -139,6 +139,19 @@ The history is drawn as materialgram draws it:
   light text is only readable on its dark plate. A new overlay: take `p.menuBackdrop()` / `p.toastBackdrop()` (or the
   list's), fill with `overlayFill`. Not covered: forms, dialogs' toasts, the photo viewer,
   and the toast of the search results.
+- **Main window surfaces** (`window_surface.go`): on Wayland the sidebar, chat
+  list (including the compact folder bar) and chat header let the desktop show
+  through at `preferences.Global.WindowTransparency`. The compositor supplies
+  blur through the same `Transparent` / `BlurBehind` window options as the photo
+  viewer. `fillWindowSurface` changes only the fill alpha; text, avatars and
+  history stay opaque. Other backends retain opaque surfaces. Never paint an
+  opaque root behind translucent panels, or stack replacement headers over
+  each other. Search and selection replace the ordinary header. The separate
+  slider is in Appearance → Transparency and blur; zero disables compositor
+  blur and keeps the window opaque. `WindowBlur`, a separate checkbox in the
+  same card, can turn compositor blur off without changing transparency; it
+  does not depend on animation settings. `TestWindowSurfacePixels` checks actual
+  frame alpha, with `WINDOW_SURFACES_PNG_DIR` saving the frames.
 - **Menu of a chat in the list** (`chatlist_menu.go`): a right click on a row
   opens it at the pointer, as a `contextMenu` in the header menu's style. The
   rows and the list take the presses as `search_recent.go`'s do (`PassOp` areas

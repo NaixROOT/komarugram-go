@@ -255,7 +255,7 @@ func (s *chatSearch) counter(l localization.Catalog) string {
 func (p *chatPage) layoutChatSearch(gtx layout.Context, size image.Point, l localization.Catalog) {
 	s := &p.chatSearch
 	sc := scheme(gtx)
-	fillRect(gtx, sc.Surface.Color, size)
+	fillWindowSurface(gtx, sc.Surface.Color, size)
 	button := gtx.Dp(40)
 	pad := gtx.Dp(8)
 	right := size.X - pad

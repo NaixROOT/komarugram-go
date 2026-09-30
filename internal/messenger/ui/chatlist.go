@@ -200,7 +200,7 @@ func (l *chatList) Layout(gtx layout.Context, sec section, folders []model.Folde
 	defer end()
 	sc := scheme(gtx)
 	size := gtx.Constraints.Max
-	fillRect(gtx, sc.Surface.Color, size)
+	fillWindowSurface(gtx, sc.Surface.Color, size)
 
 	// Only search has a header; otherwise the chats take the full height
 	// under a small gap.

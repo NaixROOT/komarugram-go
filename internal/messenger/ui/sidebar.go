@@ -113,7 +113,7 @@ func sidebarNeededHeight(folders int) unit.Dp {
 func (s *sidebar) Layout(gtx layout.Context, current section, folders []model.Folder, chats []model.Chat, dark bool, l localization.Catalog) layout.Dimensions {
 	sc := scheme(gtx)
 	size := image.Pt(gtx.Dp(sidebarWidth), gtx.Constraints.Max.Y)
-	fillRect(gtx, sc.SurfaceContainer, size)
+	fillWindowSurface(gtx, sc.SurfaceContainer, size)
 
 	unread := func(match func(model.Chat) bool) int { return unreadChats(chats, match) }
 	button := func(b *navButton, icon wdk.IconWidget, txt string, active bool, badge int) layout.Widget {

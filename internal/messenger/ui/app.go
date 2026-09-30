@@ -12,7 +12,6 @@ import (
 
 	"gio-mw/defaults"
 	"gio-mw/defaults/schemes"
-	"gio-mw/exp"
 	"gio-mw/exp/powersave"
 	"gio-mw/token"
 	"gio-mw/widget/button"
@@ -42,6 +41,8 @@ type App struct {
 	images imageOps
 	window *appwindow.Window
 	store  model.Store
+
+	windowEffectsSet, windowBlurWanted bool
 
 	preferences *preferences.Store
 	// ownUsers are the users of the accounts signed in here, which Local
@@ -271,6 +272,22 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		if err := services.Preferences.SetComposerBlur(on); err != nil {
 			log.Printf("save settings: %v", err)
 		}
+	}
+	a.settings.windowBlur = func() bool { return a.preferences.Global().WindowBlur }
+	a.settings.setWindowBlur = func(on bool) {
+		if err := services.Preferences.SetWindowBlur(on); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.windowTransparency = func() int { return a.preferences.Global().WindowTransparency }
+	a.settings.setWindowTransparency = func(value int) {
+		if err := services.Preferences.SetWindowTransparency(value); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.windowTransparencyAvailable = func() bool {
+		transparent, _ := w.Translucency()
+		return transparent
 	}
 	a.settings.overlays = func() preferences.Overlays { return a.preferences.Global().Overlays }
 	a.settings.setOverlays = func(o preferences.Overlays) {
@@ -517,6 +534,7 @@ func (a *App) Theme(gtx layout.Context) *token.Theme {
 
 // Update implements appwindow.Content.
 func (a *App) Update(gtx layout.Context) {
+	a.updateWindowEffects()
 	if a.windowLocked != nil && a.windowLocked.Load() &&
 		(a.security == nil || a.security.manager == nil || !a.security.manager.Enabled()) {
 		a.windowLocked.Store(false)
@@ -674,6 +692,13 @@ func (a *App) open(pick chatPick) {
 
 // Layout implements appwindow.Content.
 func (a *App) Layout(gtx layout.Context) {
+	transparent, _ := a.window.Translucency()
+	a.layoutWindow(gtx, transparent)
+}
+
+// layoutWindow paints the main window using the transparency granted by the backend.
+func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
+	withWindowSurfaceOpacity(gtx, a.preferences.Global().WindowTransparency, transparent)
 	withLook(gtx, a.preferences.Global().Look)
 	if trace := diagnostics.From(gtx.Values); trace != nil && trace.Recorder.Due(trace.Window, "cache-gauges", time.Second) {
 		defer func() {
@@ -725,19 +750,27 @@ func (a *App) Layout(gtx layout.Context) {
 		a.closeComments()
 	}
 
-	exp.Background(gtx)
+	// Each main surface paints its own background; an opaque root would
+	// hide the desktop behind every translucent surface.
+	opaqueBackground := func() { fillRect(gtx, scheme(gtx).Background.Color, gtx.Constraints.Max) }
+	if !transparent || a.preferences.Global().WindowTransparency == 0 {
+		opaqueBackground()
+	}
 	if a.security != nil && a.security.manager != nil {
 		state := a.security.manager.State()
 		if state.Enabled && !state.Unlocked {
+			opaqueBackground()
 			a.security.UnlockLayout(gtx, a.catalog())
 			return
 		}
 	}
 	if a.windowLocked != nil && a.windowLocked.Load() {
+		opaqueBackground()
 		a.visualLock.Layout(gtx, a.catalog())
 		return
 	}
 	if a.signingIn() {
+		opaqueBackground()
 		a.signIn.Layout(gtx, a.catalog(), a.private())
 		return
 	}
@@ -820,7 +853,7 @@ func (a *App) Layout(gtx layout.Context) {
 		// Without the chat list, the menu button gets a bar over the page.
 		pageTop = gtx.Dp(compactBarHeight)
 		column(x, 0, size.X-x, pageTop, func(gtx layout.Context) layout.Dimensions {
-			fillRect(gtx, sc.SurfaceContainerLow, gtx.Constraints.Max)
+			fillWindowSurface(gtx, sc.SurfaceContainerLow, gtx.Constraints.Max)
 			a.layoutMenuButton(gtx)
 			return layout.Dimensions{Size: gtx.Constraints.Max}
 		})
@@ -894,7 +927,7 @@ func (a *App) layoutMenuButton(gtx layout.Context) int {
 func (a *App) layoutCompactBar(gtx layout.Context, folders []model.Folder, chats []model.Chat, narrow bool) layout.Dimensions {
 	sc := scheme(gtx)
 	size := gtx.Constraints.Max
-	fillRect(gtx, sc.Surface.Color, size)
+	fillWindowSurface(gtx, sc.Surface.Color, size)
 	menuWidth := a.layoutMenuButton(gtx) + gtx.Dp(4)
 	if narrow {
 		return layout.Dimensions{Size: size}

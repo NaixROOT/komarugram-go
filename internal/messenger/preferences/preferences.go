@@ -73,6 +73,12 @@ type Global struct {
 	// Overlays is how the panels drawn over the messenger look: the
 	// floating composer, the context menus and the toasts.
 	Overlays Overlays `json:"overlays"`
+	// WindowTransparency lets the desktop show through the main window
+	// surfaces on Wayland, in percent. Text and media stay opaque.
+	WindowTransparency int `json:"window_transparency,omitempty"`
+	// WindowBlur asks the Wayland compositor to blur behind translucent
+	// main window surfaces; transparency can also be used on its own.
+	WindowBlur bool `json:"window_blur"`
 	// Player is the external player videos open in; empty until the user
 	// chooses one, which is asked only when more than one is installed.
 	Player player.Kind `json:"player,omitempty"`
@@ -230,6 +236,7 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
+		WindowBlur:     true,
 		Overlays:       Overlays{Transparency: 30, MenusBlur: true, ToastsBlur: true},
 		Ghost:          Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true},
 		Keep:           Keep{Deleted: true, Edits: true},
@@ -314,6 +321,9 @@ func validate(g Global) error {
 	}
 	if g.Overlays.Transparency < 0 || g.Overlays.Transparency > TransparencyMax {
 		return errors.New("invalid overlay transparency")
+	}
+	if g.WindowTransparency < 0 || g.WindowTransparency > TransparencyMax {
+		return errors.New("invalid window transparency")
 	}
 	if g.AutoLockMinutes < 0 || g.AutoLockMinutes > 120 {
 		return errors.New("invalid automatic lock delay")
@@ -432,6 +442,20 @@ func (s *Store) SetOverlays(o Overlays) error {
 		return errors.New("invalid overlay transparency")
 	}
 	return s.change(func(g *Global) { g.Overlays = o })
+}
+
+// SetWindowBlur changes the compositor blur independently of transparency.
+func (s *Store) SetWindowBlur(on bool) error {
+	return s.change(func(g *Global) { g.WindowBlur = on })
+}
+
+// SetWindowTransparency changes the Wayland window surfaces independently
+// of the overlays. Zero keeps the surfaces opaque.
+func (s *Store) SetWindowTransparency(value int) error {
+	if value < 0 || value > TransparencyMax {
+		return errors.New("invalid window transparency")
+	}
+	return s.change(func(g *Global) { g.WindowTransparency = value })
 }
 
 // SetPlayer chooses the external player for videos.

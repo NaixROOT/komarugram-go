@@ -66,6 +66,13 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	p.composerStyle = func() preferences.ComposerStyle { return preferences.ComposerFloating }
 	p.composerBlur = func() bool { return true }
 	overlays := preferences.Overlays{Transparency: 30, MenusBlur: true}
+	windowBlur := true
+	p.windowBlur = func() bool { return windowBlur }
+	p.setWindowBlur = func(on bool) { windowBlur = on }
+	windowTransparency := 40
+	p.windowTransparency = func() int { return windowTransparency }
+	p.setWindowTransparency = func(value int) { windowTransparency = value }
+	p.windowTransparencyAvailable = func() bool { return true }
 	p.overlays = func() preferences.Overlays { return overlays }
 	p.setOverlays = func(o preferences.Overlays) { overlays = o }
 	size := image.Pt(900, 700)
@@ -76,7 +83,7 @@ func TestRenderSettingsAccounts(t *testing.T) {
 		look := preferences.Look{BubbleRadius: 8, AvatarCorners: 10, Seconds: true}
 		p.lookView.look = func() preferences.Look { return look }
 		p.lookView.setLook = func(l preferences.Look) { look = l }
-		size.Y = 1800
+		size.Y = 2080
 	}
 	if os.Getenv("SETTINGS_SECTION") == "privacy" {
 		p.section = settingsPrivacy

@@ -165,6 +165,14 @@ type settingsPage struct {
 	setOverlays  func(preferences.Overlays)
 	blur         *checkbox.Checkboxes[string]
 	transparency *slider.Slider
+	// Compositor blur is independent of in-app animation and overlay blur.
+	windowBlur                  func() bool
+	setWindowBlur               func(bool)
+	windowBlurCheckbox          *checkbox.Checkboxes[string]
+	windowTransparency          func() int
+	setWindowTransparency       func(int)
+	windowTransparencyAvailable func() bool
+	windowTransparencySlider    *slider.Slider
 	// confirmations and setConfirmations read and change whether stickers
 	// and GIFs are sent only once confirmed.
 	confirmations    func() (sticker, gif bool)
@@ -273,6 +281,16 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	for v := 0; v <= preferences.TransparencyMax; v += 5 {
 		steps = append(steps, v)
 	}
+	p.windowBlurCheckbox = checkbox.NewCheckboxes([]string{"window"}, nil, func(values []string) {
+		if p.setWindowBlur != nil {
+			p.setWindowBlur(slices.Contains(values, "window"))
+		}
+	})
+	p.windowTransparencySlider = slider.StandardSlider(steps, 0, func(v int) {
+		if p.setWindowTransparency != nil {
+			p.setWindowTransparency(v)
+		}
+	})
 	p.transparency = slider.StandardSlider(steps, 30, func(v int) {
 		if p.overlays != nil && p.setOverlays != nil {
 			o := p.overlays()
@@ -381,6 +399,28 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 			p.blur.Disable()
 		}
 		p.blur.Update(gtx)
+	}
+	if p.windowBlur != nil {
+		var want []string
+		if p.windowBlur() {
+			want = []string{"window"}
+		}
+		if !slices.Equal(p.windowBlurCheckbox.GetValues(), want) {
+			p.windowBlurCheckbox.SetValues(want)
+		}
+		if p.windowTransparencyAvailable != nil && !p.windowTransparencyAvailable() {
+			p.windowBlurCheckbox.Disable()
+		} else {
+			p.windowBlurCheckbox.Enable()
+		}
+		p.windowBlurCheckbox.Update(gtx)
+	}
+	if p.windowTransparency != nil {
+		// Imported preferences may be between the slider stops.
+		v := (p.windowTransparency() + 2) / 5 * 5
+		if p.windowTransparencySlider.GetValue() != v {
+			p.windowTransparencySlider.SetValue(v)
+		}
 	}
 	if p.confirmations != nil {
 		sticker, gif := p.confirmations()
@@ -835,6 +875,24 @@ func (p *settingsPage) layoutOverlays(gtx layout.Context, l localization.Catalog
 				vspace(8),
 			)
 		}
+		if p.windowTransparency != nil {
+			children = append(children, vspace(8),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return label(gtx, l.T("settings.window_transparency")+": "+strconv.Itoa(p.windowTransparency())+"%", token.TypestyleBodyLarge, sc.Surface.OnColor, 1)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if p.windowTransparencyAvailable != nil && !p.windowTransparencyAvailable() {
+						gtx = gtx.Disabled()
+					}
+					return p.windowTransparencySlider.Layout(gtx)
+				}),
+				vspace(4),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return label(gtx, l.T("settings.window_transparency_hint"), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 0)
+				}),
+			)
+		}
+		children = append(children, vspace(8))
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return p.blur.Layout(gtx, map[string]string{
 				"composer": l.T("settings.composer_blur"),
@@ -845,6 +903,11 @@ func (p *settingsPage) layoutOverlays(gtx layout.Context, l localization.Catalog
 		if hint != "" {
 			children = append(children, vspace(4), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return label(gtx, hint, token.TypestyleBodyMedium, sc.SurfaceVariant.OnColor, 0)
+			}))
+		}
+		if p.windowBlur != nil {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return p.windowBlurCheckbox.Layout(gtx, map[string]string{"window": l.T("settings.window_blur")})
 			}))
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
