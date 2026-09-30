@@ -294,7 +294,7 @@ func TestRenderComposer(t *testing.T) {
 		h.p.list.Position.BeforeEnd = true
 		h.p.list.Position.First = len(h.p.messages) - 4
 		h.p.list.Position.Offset = 120
-	case "files", "files-one", "files-documents", "files-many", "files-caption":
+	case "files", "files-one", "files-documents", "files-many", "files-caption", "files-music":
 		// The box for sending files, with what it shows for each way.
 		h.p.composer.pickerOpen = false
 		h.chat = 2
@@ -306,6 +306,7 @@ func TestRenderComposer(t *testing.T) {
 			"files-documents": {"photo", "photo", "video", "file"},
 			"files-many":      {"photo", "photo", "photo", "photo", "photo", "photo", "photo"},
 			"files-caption":   {"photo", "photo"},
+			"files-music":     {"song", "track", "file"},
 		}[os.Getenv("COMPOSER_VIEW")]
 		h.p.composer.files.addPaths(h.p.composer, boxPaths(t, kinds...), os.Getenv("COMPOSER_VIEW") == "files-documents")
 		if os.Getenv("COMPOSER_VIEW") == "files-caption" {

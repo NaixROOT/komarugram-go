@@ -54,6 +54,10 @@ func (s *Store) appendFiles(chat int64, h model.History, first model.MessageID, 
 			case f.Kind == sendfiles.KindAnimation && !way.Documents:
 				m.Kind = model.MessageGIF
 				data, _ = os.ReadFile(f.Path)
+			case f.Kind == sendfiles.KindMusic:
+				m.Kind = model.MessageMusic
+				media.Title, media.Performer, media.Duration = f.Title, f.Performer, f.Duration
+				data, _ = os.ReadFile(f.Path)
 			default:
 				m.Kind = model.MessageFile
 			}

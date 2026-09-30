@@ -111,7 +111,8 @@ The history is drawn as materialgram draws it:
   the composer's text and Enter to send, and the checkboxes that
   `sendfiles` says apply (`HasGroupOption`, `HasDocumentsOption`,
   `HasHighQualityOption`). Files are looked at in the background
-  (`sendfiles.Inspect`, `Thumbnail`; the first frame of a video from
+  (`sendfiles.Inspect`, `Thumbnail`; music as "Performer – Title" with its
+  cover, from `pkg/audiotag`; the first frame of a video from
   FFmpeg, when there is one); a file that cannot be sent is told in the
   dialog's toast. What it sends is `model.OutgoingFiles` in an
   `OutgoingMessage`, so retries reuse the composer's identity handling.
@@ -386,7 +387,7 @@ new piece sits next to its neighbours.
   `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
   a voice message being recorded; `files`, `files-one`, `files-documents`,
-  `files-many` and `files-caption`, the box for sending files.
+  `files-many`, `files-caption` and `files-music`, the box for sending files.
   `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
   an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
   off).

@@ -412,7 +412,12 @@ as documents" and, for large photos, "High Quality". Photos are made ready as
 Telegram Desktop makes them (`internal/messenger/sendfiles`): turned as their
 Exif asks, scaled to fit 1280 pixels (2560 in high quality), alpha laid on white,
 saved as JPEG; what can go in an album goes in one (`messages.sendMultiMedia`,
-ten at most), the caption on the last message. Video upload uses `ffprobe` for
+ten at most), the caption on the last message. Audio files (MP3, M4A, AAC, Ogg,
+Opus, FLAC) that say how long they play go as tracks, as in Telegram Desktop,
+whatever the choices: title, performer and length from their tags
+(`pkg/audiotag`: ID3, Vorbis comments, iTunes metadata, read in Go), the cover
+as the thumbnail, and grouped tracks in an album of music alone; other audio
+goes as a file. Video upload uses `ffprobe` for
 dimensions and duration. Creating native Telegram checklists requires Premium;
 received checklists display their items and completion state. The demo simulates
 sending locally without network traffic.

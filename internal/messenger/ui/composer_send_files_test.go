@@ -71,6 +71,14 @@ func boxPaths(t *testing.T, kinds ...string) []string {
 			photo++
 		case "video":
 			paths = append(paths, writeTemp(t, dir, "holiday.mp4", []byte("a video that is not one")))
+		case "song":
+			var cover bytes.Buffer
+			if err := png.Encode(&cover, gradientImage(400, 400, 3)); err != nil {
+				t.Fatal(err)
+			}
+			paths = append(paths, writeTemp(t, dir, "song.mp3", mp3Song("Закат над озером", "Оркестр", cover.Bytes())))
+		case "track":
+			paths = append(paths, writeTemp(t, dir, "track-07.mp3", mp3Song("", "", nil)))
 		case "file":
 			paths = append(paths, writeTemp(t, dir, "report.pdf", bytes.Repeat([]byte("pdf"), 40000)))
 		}
@@ -298,3 +306,26 @@ func settleBoxUntil(t *testing.T, h *menuHarness, cond func() bool) {
 
 // english is the catalog the tests read texts from.
 func english() localization.Catalog { return localization.For("en") }
+
+// mp3Song is an MP3 of 4 minutes of silent frames, whose ID3v2.3 tag says
+// what is set of its title, performer and cover.
+func mp3Song(title, performer string, cover []byte) []byte {
+	frame := func(id string, data []byte) []byte {
+		return append(append([]byte(id), byte(len(data)>>24), byte(len(data)>>16), byte(len(data)>>8), byte(len(data)), 0, 0), data...)
+	}
+	var body []byte
+	if title != "" {
+		body = append(body, frame("TIT2", append([]byte{3}, title...))...)
+	}
+	if performer != "" {
+		body = append(body, frame("TPE1", append([]byte{3}, performer...))...)
+	}
+	if cover != nil {
+		body = append(body, frame("APIC", append([]byte("\x00image/png\x00\x03\x00"), cover...))...)
+	}
+	n := len(body)
+	data := append([]byte{'I', 'D', '3', 3, 0, 0, byte(n >> 21 & 0x7f), byte(n >> 14 & 0x7f), byte(n >> 7 & 0x7f), byte(n & 0x7f)}, body...)
+	audio := make([]byte, 417)
+	copy(audio, []byte{0xff, 0xfb, 0x90, 0x64})
+	return append(data, bytes.Repeat(audio, 9188)...)
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
@@ -115,6 +116,9 @@ func (s *Store) uploadFile(ctx context.Context, api *tg.Client, f sendfiles.File
 		}
 		return &tg.InputMediaUploadedPhoto{File: file}, nil
 	}
+	if f.Kind == sendfiles.KindMusic {
+		return uploadMusic(ctx, up, f)
+	}
 	attrs, err := uploadAttributes(ctx, f.Path, f.MIME, asMedia && f.Kind == sendfiles.KindVideo, ffmpeg)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", f.Name, err)
@@ -128,6 +132,32 @@ func (s *Store) uploadFile(ctx context.Context, api *tg.Client, f sendfiles.File
 	}
 	media := asMedia && (f.Kind == sendfiles.KindVideo || f.Kind == sendfiles.KindAnimation)
 	return &tg.InputMediaUploadedDocument{File: file, MimeType: f.MIME, ForceFile: !media, Attributes: attrs}, nil
+}
+
+// uploadMusic uploads f as a track, as Telegram Desktop sends music: with
+// its title, performer and length, whole seconds of it, and its cover as
+// the thumbnail.
+func uploadMusic(ctx context.Context, up *uploader.Uploader, f sendfiles.File) (tg.InputMediaClass, error) {
+	audio := &tg.DocumentAttributeAudio{Duration: int(f.Duration / time.Second), Title: f.Title, Performer: f.Performer}
+	media := &tg.InputMediaUploadedDocument{MimeType: f.MIME, Attributes: []tg.DocumentAttributeClass{
+		&tg.DocumentAttributeFilename{FileName: f.Name}, audio,
+	}}
+	if f.Cover != nil {
+		// A cover that does not decode leaves the track without one.
+		if jpeg, err := sendfiles.DocumentThumbnail(f.Cover); err == nil {
+			thumb, err := up.FromBytes(ctx, "thumb.jpg", jpeg)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f.Name, err)
+			}
+			media.SetThumb(thumb)
+		}
+	}
+	file, err := up.FromPath(ctx, f.Path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", f.Name, err)
+	}
+	media.File = file
+	return media, nil
 }
 
 // inputMedia turns what messages.uploadMedia made of an upload into the
