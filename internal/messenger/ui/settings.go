@@ -152,6 +152,9 @@ type settingsPage struct {
 	filtersView *filterSettings
 	// lookView changes how messages and avatars are drawn.
 	lookView *lookSettings
+	// fontsView points the client at font files; hidden without its
+	// functions.
+	fontsView *fontSettings
 	// composerStyle and setComposerStyle read and switch the composer
 	// style; without them the choice is hidden.
 	composerStyle    func() preferences.ComposerStyle
@@ -260,6 +263,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	})
 	p.filtersView = newFilterSettings()
 	p.lookView = newLookSettings()
+	p.fontsView = newFontSettings(invalidate)
 	p.chats = newChatsSettings(invalidate)
 	p.chats.toast = &p.toast
 	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
@@ -459,6 +463,9 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 	if p.section == settingsPrivacy {
 		p.security.UpdateSettings(gtx)
 		p.filtersView.Update(gtx)
+	}
+	if p.section == settingsAppearance {
+		p.fontsView.Update(gtx)
 	}
 	if p.section == settingsChats {
 		p.lookView.Update(gtx)
@@ -814,6 +821,11 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 	}
 	if p.composerBlur != nil {
 		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutOverlays(gtx, l) }))
+	}
+	if p.fontsView.files != nil {
+		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return card(gtx, func(gtx layout.Context) layout.Dimensions { return p.fontsView.Layout(gtx, l) }, defaultCardPadding)
+		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, cards...)
 }

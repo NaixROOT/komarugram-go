@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -80,7 +81,11 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	size := image.Pt(900, 700)
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance
-		size.Y = 1400
+		// One font is picked and gone since, the others are the system's.
+		files := preferences.Fonts{Extra: filepath.Join(t.TempDir(), "NotoSansKR-Regular.ttf")}
+		p.fontsView.files = func() preferences.Fonts { return files }
+		p.fontsView.setFiles = func(f preferences.Fonts) { files = f }
+		size.Y = 2100
 	}
 	var chats *preferences.Store
 	if section := os.Getenv("SETTINGS_SECTION"); section == "chats" || section == "wallpapers" {

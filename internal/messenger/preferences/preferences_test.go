@@ -341,3 +341,25 @@ func TestChatWallpapersArePrunedWhenUnused(t *testing.T) {
 		t.Fatal("read outside the wallpapers")
 	}
 }
+
+func TestFontsPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Global().Fonts != (Fonts{}) {
+		t.Fatalf("fonts by default: %+v", s.Global().Fonts)
+	}
+	want := Fonts{Text: "/fonts/Text.ttf", Emoji: "/fonts/Emoji.ttf"}
+	if err := s.SetFonts(want); err != nil {
+		t.Fatal(err)
+	}
+	again, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Global().Fonts; got != want {
+		t.Errorf("fonts read back: %+v, want %+v", got, want)
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"komarugram/internal/diagnostics"
 	"komarugram/internal/messenger/chatmedia"
+	"komarugram/internal/messenger/fonts"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
 	"komarugram/internal/messenger/preferences"
@@ -475,7 +476,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 	}
 	p.historyWidth = size.X
 	theme := uint32(sc.Surface.Color.AsNRGBA().R)<<16 | uint32(sc.Surface.Color.AsNRGBA().G)<<8 | uint32(sc.Surface.Color.AsNRGBA().B)
-	env := model.RenderEnvironment{WidthPx: size.X, ScaleMilli: int(gtx.Metric.PxPerDp * 1000), TextScaleMilli: int(gtx.Metric.PxPerSp * 1000), Locale: string(l.Language()), FontRevision: 1, ThemeRevision: theme, RendererRevision: 10}
+	env := model.RenderEnvironment{WidthPx: size.X, ScaleMilli: int(gtx.Metric.PxPerDp * 1000), TextScaleMilli: int(gtx.Metric.PxPerSp * 1000), Locale: string(l.Language()), FontRevision: fonts.Revision(), ThemeRevision: theme, RendererRevision: 11}
 	if p.trace != nil {
 		p.trace.History.Environment = fmt.Sprintf("width:%d dp:%d sp:%d locale:%s font:%d theme:%x renderer:%d", env.WidthPx, env.ScaleMilli, env.TextScaleMilli, env.Locale, env.FontRevision, env.ThemeRevision, env.RendererRevision)
 	}
@@ -811,7 +812,7 @@ func (p *chatPage) richText(gtx layout.Context, r *messageRow, l localization.Ca
 			st.Font.Style = font.Italic
 		}
 		if run.Code {
-			st.Font.Typeface = "monospace"
+			st.Font.Typeface = theme.Typescale[token.TypestylePreformatted].Font
 		}
 		if run.URL != "" {
 			st.Color = scheme(gtx).Primary.Color.AsNRGBA()

@@ -75,7 +75,10 @@ otherwise, so `go test` never runs them: `COMPOSER_PNG` (with
 `SERVICE_PNG`, `JUMP_PNG_DIR`, `PINNED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`,
 `SAVED_EMPTY_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR` (see
 `docs/UI_COMPONENTS.md`). Run the one of the screen you changed, and look
-at the PNG. `go run ./cmd/render-all [dir]` renders all of them, every
+at the PNG. `KOMARUGRAM_FONT`, `KOMARUGRAM_FONT_EXTRA`,
+`KOMARUGRAM_FONT_MONO` and `KOMARUGRAM_FONT_EMOJI` name a font file for the
+text, for what it lacks, for code and for emoji, over the settings: in the
+client and in the render tests alike (`internal/messenger/fonts`). `go run ./cmd/render-all [dir]` renders all of them, every
 variant, into one directory (about a minute; `komarugram-renders` in the
 system's temporary directory by default; `-only composer` for some of
 them). Nothing compares them with references: the project is in active

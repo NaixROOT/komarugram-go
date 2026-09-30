@@ -62,6 +62,8 @@ type shotDialog struct {
 	close            surface
 	loader           loadingIndicator
 	light, dark      *token.Theme
+	// themeFonts is the version of the fonts the themes were made with.
+	themeFonts uint64
 }
 
 type shotRender struct {
@@ -110,7 +112,7 @@ func (d *shotDialog) open(p *chatPage, msgs []model.Message) {
 }
 
 func (d *shotDialog) stop() {
-	*d = shotDialog{light: d.light, dark: d.dark}
+	*d = shotDialog{light: d.light, dark: d.dark, themeFonts: d.themeFonts}
 }
 
 func (d *shotDialog) layout(gtx layout.Context, p *chatPage, l localization.Catalog) {
@@ -229,6 +231,9 @@ func (d *shotDialog) render(gtx layout.Context, p *chatPage, l localization.Cata
 	d.stale = false
 	sgtx := gtx
 	sgtx.Values = maps.Clone(gtx.Values)
+	if v := defaults.FontsVersion(); v != d.themeFonts {
+		d.themeFonts, d.light, d.dark = v, nil, nil
+	}
 	switch d.opts.theme {
 	case shotLight:
 		if d.light == nil {

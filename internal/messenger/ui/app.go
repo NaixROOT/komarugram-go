@@ -54,6 +54,8 @@ type App struct {
 	filter     *messageFilter
 	lightTheme *token.Theme
 	darkTheme  *token.Theme
+	// themeFonts is the version of the fonts the themes were made with.
+	themeFonts uint64
 
 	section section
 	// beforeSearch is the section search was opened from; opening search
@@ -177,6 +179,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		w.Motion.SetLowBattery(global.LowBattery)
 		services.MiniApps.SetStorage(global.MiniAppStorage)
 		miniapp.SetBrowser(global.BrowserPath)
+		applyFonts(global.Fonts)
 		title := localization.For(global.Language).T("app.title")
 		if services.WindowLocked == nil || !services.WindowLocked.Load() {
 			if name := store.Me().Name(); name != "" {
@@ -229,6 +232,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.settings.lookView.look = func() preferences.Look { return a.preferences.Global().Look }
 	a.settings.lookView.setLook = func(l preferences.Look) {
 		if err := services.Preferences.SetLook(l); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.fontsView.files = func() preferences.Fonts { return a.preferences.Global().Fonts }
+	a.settings.fontsView.setFiles = func(f preferences.Fonts) {
+		if err := services.Preferences.SetFonts(f); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
@@ -345,6 +354,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		a.settings.players.refresh()
 	}
 	miniapp.SetBrowser(global.BrowserPath)
+	applyFonts(global.Fonts)
 	a.settings.players.choose = func(kind player.Kind) {
 		if err := services.Preferences.SetPlayer(kind); err != nil {
 			log.Printf("save settings: %v", err)
@@ -551,6 +561,10 @@ func (a *App) dark() bool {
 
 // Theme implements appwindow.Content.
 func (a *App) Theme(gtx layout.Context) *token.Theme {
+	// Themes keep the fonts they were made with.
+	if v := defaults.FontsVersion(); v != a.themeFonts {
+		a.themeFonts, a.darkTheme, a.lightTheme = v, nil, nil
+	}
 	if a.dark() {
 		if a.darkTheme == nil {
 			a.darkTheme = defaults.NewTheme(gtx, schemes.SchemeBaselineDark())

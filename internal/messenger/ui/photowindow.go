@@ -27,7 +27,9 @@ type photoWindow struct {
 	images  imageOps
 	catalog localization.Catalog
 	theme   *token.Theme
-	closing bool
+	// themeFonts is the version of the fonts the theme was made with.
+	themeFonts uint64
+	closing    bool
 }
 
 func newPhotoWindow(w *appwindow.Window, source model.ConversationStore, catalog localization.Catalog, chat int64, current model.Message, known []model.Message) *photoWindow {
@@ -40,7 +42,8 @@ func newPhotoWindow(w *appwindow.Window, source model.ConversationStore, catalog
 
 // Theme is always dark: photos are looked at on a dark background.
 func (p *photoWindow) Theme(gtx layout.Context) *token.Theme {
-	if p.theme == nil {
+	if v := defaults.FontsVersion(); p.theme == nil || v != p.themeFonts {
+		p.themeFonts = v
 		p.theme = defaults.NewTheme(gtx, schemes.SchemeBaselineDark())
 	}
 	return p.theme

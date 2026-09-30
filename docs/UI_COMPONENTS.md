@@ -232,7 +232,10 @@ The history is drawn as materialgram draws it:
   is chosen; `playerSettings` is the same choice in the settings.
   `programSetting` (`programs.go`) is a card for a program the app runs — the
   one found, or a file the user picks, kept only after it passed a check. Use
-  it for any new external program. FFmpeg uses the same picker and validation;
+  it for any new external program. `fontSettings` (`settings_fonts.go`) is
+  the same for font files, a row per role in one card of the appearance
+  settings: a file is kept once `internal/messenger/fonts` loaded it, and
+  the windows' themes are made anew (`defaults.FontsVersion`). FFmpeg uses the same picker and validation;
   its path also applies to GIFs and animated avatars (with a companion
   `ffprobe` beside it, or on PATH). The internal WebM sticker player defaults
   to FFmpeg when found and falls back to WASM on decode failures; WASM can
