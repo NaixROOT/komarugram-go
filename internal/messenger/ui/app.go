@@ -7,6 +7,7 @@ import (
 	"image"
 	"komarugram/internal/diagnostics"
 	"log"
+	"math"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -188,6 +189,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		applyFonts(global.Fonts, a.emojiPacks)
 		if a.history != nil {
 			a.history.audio.setSpeed(global.VoiceSpeed)
+			a.history.audio.setVolume(float64(global.AudioVolume)/100, false)
 		}
 		title := localization.For(global.Language).T("app.title")
 		if services.WindowLocked == nil || !services.WindowLocked.Load() {
@@ -442,6 +444,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		a.history.audio.setSpeed(global.VoiceSpeed)
 		a.history.audio.saveSpeed = func(speed float64) {
 			if err := services.Preferences.SetVoiceSpeed(speed); err != nil {
+				log.Printf("save settings: %v", err)
+			}
+		}
+		a.history.audio.setVolume(float64(global.AudioVolume)/100, false)
+		a.history.audio.saveVolume = func(volume float64) {
+			if err := services.Preferences.SetAudioVolume(int(math.Round(volume * 100))); err != nil {
 				log.Printf("save settings: %v", err)
 			}
 		}

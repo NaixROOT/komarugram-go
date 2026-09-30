@@ -12,6 +12,11 @@ import (
 
 var (
 	iconAttach        = wdk.RequireIconWidget(icons.EditorAttachFile)
+	iconSkipPrevious  = wdk.RequireIconWidget(icons.AVSkipPrevious)
+	iconSkipNext      = wdk.RequireIconWidget(icons.AVSkipNext)
+	iconVolumeUp      = wdk.RequireIconWidget(icons.AVVolumeUp)
+	iconVolumeDown    = wdk.RequireIconWidget(icons.AVVolumeDown)
+	iconVolumeOff     = wdk.RequireIconWidget(icons.AVVolumeOff)
 	iconEmoji         = wdk.RequireIconWidget(icons.EditorInsertEmoticon)
 	iconAttachPhoto   = wdk.RequireIconWidget(icons.ImagePhoto)
 	iconAttachFile    = wdk.RequireIconWidget(icons.EditorInsertDriveFile)

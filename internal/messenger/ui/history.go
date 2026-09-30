@@ -250,7 +250,7 @@ func (p *chatPage) blurComposer() bool {
 }
 
 func newChatPage(source model.ConversationStore, changed func()) *chatPage {
-	return &chatPage{composer: newMessageComposer(source, changed), source: source, media: chatmedia.New(source, changed), invalidate: changed, audio: &audioPlayer{}}
+	return &chatPage{composer: newMessageComposer(source, changed), source: source, media: chatmedia.New(source, changed), invalidate: changed, audio: newAudioPlayer()}
 }
 
 // dropStickerLoops drops, at the end of the frame, the decoded loops of the

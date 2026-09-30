@@ -11,6 +11,9 @@ func init() {
 		"audio.yesterday": {"lng_player_message_yesterday", "вчера в {time}", "yesterday at {time}"},
 		"audio.date":      {"lng_player_message_date", "{date} в {time}", "{date} at {time}"},
 		"audio.close":     {"lng_close", "Закрыть", "Close"},
+		"audio.previous":  {"lng_shortcuts_media_previous", "Предыдущий трек", "Previous track"},
+		"audio.next":      {"lng_shortcuts_media_next", "Следующий трек", "Next track"},
+		"audio.volume":    {"lng_ringtones_box_volume", "Громкость", "Volume"},
 		"record.problem":  {"lng_record_audio_problem", "Не удалось начать запись звука. Пожалуйста, проверьте микрофон.", "Could not start audio recording. Please check your microphone."},
 	} {
 		TelegramKeys[key] = texts[0]

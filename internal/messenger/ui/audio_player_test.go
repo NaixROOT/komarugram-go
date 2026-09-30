@@ -26,7 +26,8 @@ type silentPlayback struct {
 	playing bool
 	closed  bool
 	// ended is set by end: the sound played through.
-	ended bool
+	ended  bool
+	volume float64
 }
 
 func (s *silentPlayback) Pause()  { s.mu.Lock(); s.playing = false; s.mu.Unlock() }
@@ -47,6 +48,11 @@ func (s *silentPlayback) end()            { s.mu.Lock(); s.playing, s.ended = fa
 func (s *silentPlayback) Position() int64 { return s.src.Position() }
 func (s *silentPlayback) SeekSample(pos int64) error {
 	return s.src.SeekSample(pos)
+}
+func (s *silentPlayback) SetVolume(volume float64) {
+	s.mu.Lock()
+	s.volume = volume
+	s.mu.Unlock()
 }
 func (s *silentPlayback) Close() { s.mu.Lock(); s.closed = true; s.mu.Unlock() }
 func (s *silentPlayback) isClosed() bool {

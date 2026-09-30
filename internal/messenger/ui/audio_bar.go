@@ -10,10 +10,15 @@ import (
 	"time"
 
 	"gio-mw/token"
+	"gio-mw/wdk"
 	"gio-mw/widget/button"
 
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"komarugram/internal/messenger/localization"
@@ -136,25 +141,172 @@ func (v *audioPlayer) advance(m model.Message) {
 // nextAudio is the message after m among messages that is of m's kind, a
 // voice message or music, if it plays in the client.
 func nextAudio(messages []model.Message, m model.Message) (model.Message, bool) {
+	return neighborAudio(messages, m, 1)
+}
+
+// neighborAudio is the message of m's kind, a voice message or music, that
+// follows m among messages, or precedes it when delta is below 0, if it
+// plays in the client.
+func neighborAudio(messages []model.Message, m model.Message, delta int) (model.Message, bool) {
+	var before *model.Message
 	after := false
-	for _, next := range messages {
+	for i, other := range messages {
 		switch {
-		case next.Key == m.Key:
+		case other.Key == m.Key:
+			if delta < 0 {
+				if before == nil {
+					return model.Message{}, false
+				}
+				return *before, internalAudio(*before)
+			}
 			after = true
-		case after && next.Kind == m.Kind && next.Media != nil && !next.Deleted:
-			return next, internalAudio(next)
+		case other.Kind != m.Kind || other.Media == nil || other.Deleted:
+		case after:
+			return other, internalAudio(other)
+		default:
+			before = &messages[i]
 		}
 	}
 	return model.Message{}, false
 }
 
+// skip plays the voice message, or the music, before what plays or after
+// it, where it is shown, as the bar's buttons ask.
+func (v *audioPlayer) skip(delta int) {
+	v.mu.Lock()
+	m, page, list := v.msg, v.page, v.list
+	v.mu.Unlock()
+	if page == nil {
+		return
+	}
+	if to, ok := neighborAudio(page.source.History(list).Messages, m, delta); ok {
+		v.toggleIn(page, list, to, -1)
+	}
+}
+
+// around reports whether something precedes what plays and whether
+// something follows it, for the bar's buttons. The history is looked
+// through again only when it changed.
+func (v *audioPlayer) around() (before, after bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.page == nil {
+		return false, false
+	}
+	var messages []model.Message
+	if source, ok := v.page.source.(interface {
+		HistorySince(int64, uint64) (model.History, bool)
+	}); ok && v.aroundKey == v.key {
+		history, fresh := source.HistorySince(v.list, v.aroundRev)
+		if !fresh {
+			return v.before, v.after
+		}
+		messages, v.aroundRev = history.Messages, history.Revision
+	} else {
+		history := v.page.source.History(v.list)
+		messages, v.aroundRev = history.Messages, history.Revision
+	}
+	v.aroundKey = v.key
+	_, v.before = neighborAudio(messages, v.msg, -1)
+	_, v.after = neighborAudio(messages, v.msg, 1)
+	return v.before, v.after
+}
+
+// newAudioPlayer is a player at full volume.
+func newAudioPlayer() *audioPlayer {
+	return &audioPlayer{volume: 1, unmuted: 1}
+}
+
+// loudness is the volume chosen, from 0 to 1.
+func (v *audioPlayer) loudness() float64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.volume
+}
+
+// setVolume makes what plays, and what plays after it, as loud as volume,
+// from 0 to 1, and keeps the choice when keep is set: not while a slider
+// moves, nor when it comes from what was kept.
+func (v *audioPlayer) setVolume(volume float64, keep bool) {
+	volume = min(max(volume, 0), 1)
+	v.mu.Lock()
+	v.volume = volume
+	if volume > 0 {
+		v.unmuted = volume
+	}
+	if v.playback != nil {
+		v.playback.SetVolume(volume)
+	}
+	save := v.saveVolume
+	v.mu.Unlock()
+	if keep && save != nil {
+		save(volume)
+	}
+}
+
+// toggleMute silences the player, or brings back the volume it had, as a
+// click on the volume button of Telegram Desktop's player does.
+func (v *audioPlayer) toggleMute() {
+	v.mu.Lock()
+	volume := 0.0
+	if v.volume == 0 {
+		volume = v.unmuted
+	}
+	v.mu.Unlock()
+	v.setVolume(volume, true)
+}
+
 // audioBar is the bar of what the window's player plays, as a chat page
-// shows it: play or pause, whose it is, the speed of what changes its
-// speed, and a button that ends it. A click on it goes to the message, in
-// the chat it is in.
+// shows it: the track before and the one after, play or pause, whose it
+// is, the speed of what changes its speed, the volume, and a button that
+// ends it. A click on it goes to the message, in the chat it is in.
 type audioBar struct {
-	bar                surface
-	play, speed, close *button.Button
+	bar                  surface
+	previous, play, next *button.Button
+	speed, volume, close *button.Button
+	// slider is the volume slider under the volume button, shown while the
+	// pointer is over the button or over it, and a little longer, as
+	// Telegram Desktop's is.
+	slider volumeSlider
+}
+
+// volumeSlider is the vertical slider of the player's volume.
+type volumeSlider struct {
+	shown bool
+	// hideAt is when it goes, once the pointer left it and its button.
+	hideAt time.Time
+	// over is set while the pointer is over the slider, and dragging while
+	// it is pressed there.
+	over, dragging bool
+	// wheel takes the wheel over the volume button.
+	wheel struct{}
+}
+
+const (
+	// volumeHideAfter is how long the slider stays once the pointer left.
+	volumeHideAfter = 300 * time.Millisecond
+	// volumeWheelStep is how much a notch of the wheel changes the volume.
+	volumeWheelStep = 0.05
+)
+
+// Telegram Desktop's slider is 27 by 100 px; ours is a little wider, for
+// the knob.
+const (
+	volumePanelWidth  = unit.Dp(36)
+	volumeTrackHeight = unit.Dp(100)
+	volumePanelPad    = unit.Dp(12)
+)
+
+// volumeIcon is the icon of the volume button, as in Telegram Desktop:
+// silent, below two thirds, and above.
+func volumeIcon(volume float64) wdk.IconWidget {
+	switch {
+	case volume == 0:
+		return iconVolumeOff
+	case volume < 0.66:
+		return iconVolumeDown
+	}
+	return iconVolumeUp
 }
 
 // audioBarSize is how much of the page's top the bar takes: nothing while
@@ -207,11 +359,114 @@ func speedText(speed float64) string {
 	return strconv.FormatFloat(speed, 'g', 3, 64) + "×"
 }
 
-// layoutAudioBar draws the bar across the top of gtx.
+// update takes the pointer over the slider, whose area is size, and the
+// wheel over its button, and returns the volume they ask for and whether
+// to keep it: a drag is kept when it ends.
+func (s *volumeSlider) update(gtx layout.Context, size image.Point, volume float64) (float64, bool, bool) {
+	changed, keep := false, false
+	pad := gtx.Dp(volumePanelPad)
+	track := max(size.Y-2*pad, 1)
+	at := func(y float32) float64 {
+		return min(max(1-float64(y-float32(pad))/float64(track), 0), 1)
+	}
+	wheel := pointer.ScrollRange{Min: -1 << 20, Max: 1 << 20}
+	for {
+		ev, ok := gtx.Event(
+			pointer.Filter{Target: s, Kinds: pointer.Enter | pointer.Leave | pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Scroll, ScrollY: wheel},
+			pointer.Filter{Target: &s.wheel, Kinds: pointer.Scroll, ScrollY: wheel},
+		)
+		if !ok {
+			break
+		}
+		e, ok := ev.(pointer.Event)
+		if !ok {
+			continue
+		}
+		switch e.Kind {
+		case pointer.Enter:
+			s.over = true
+		case pointer.Leave:
+			s.over = false
+		case pointer.Press:
+			s.dragging = true
+			volume, changed = at(e.Position.Y), true
+		case pointer.Drag:
+			if s.dragging {
+				volume, changed = at(e.Position.Y), true
+			}
+		case pointer.Release:
+			if s.dragging {
+				volume, changed, keep = at(e.Position.Y), true, true
+			}
+			s.dragging = false
+		case pointer.Cancel:
+			keep = keep || s.dragging
+			s.dragging = false
+		case pointer.Scroll:
+			if e.Scroll.Y != 0 {
+				// The wheel away from the user is louder.
+				step := volumeWheelStep
+				if e.Scroll.Y > 0 {
+					step = -step
+				}
+				volume, changed, keep = min(max(volume+step, 0), 1), true, true
+			}
+		}
+	}
+	return volume, changed, keep
+}
+
+// visible decides whether the slider shows: while the pointer is over its
+// button or over it, or drags it, and volumeHideAfter longer.
+func (s *volumeSlider) visible(gtx layout.Context, overButton bool) bool {
+	switch {
+	case overButton || s.over || s.dragging:
+		s.shown, s.hideAt = true, time.Time{}
+	case !s.shown:
+	case s.hideAt.IsZero():
+		s.hideAt = gtx.Now.Add(volumeHideAfter)
+		gtx.Execute(op.InvalidateCmd{At: s.hideAt})
+	case !gtx.Now.Before(s.hideAt):
+		s.shown, s.hideAt = false, time.Time{}
+	default:
+		gtx.Execute(op.InvalidateCmd{At: s.hideAt})
+	}
+	return s.shown
+}
+
+// layout draws the slider in size at the current origin: a track, filled
+// from the bottom up to the volume, and a knob there.
+func (s *volumeSlider) layout(gtx layout.Context, size image.Point, volume float64) {
+	sc := scheme(gtx)
+	radius := gtx.Dp(8)
+	fillRounded(gtx, sc.OutlineVariant, size, radius)
+	line := gtx.Dp(1)
+	offset(gtx, image.Pt(line, line), func(gtx layout.Context) layout.Dimensions {
+		fillRounded(gtx, sc.SurfaceContainerHigh, size.Sub(image.Pt(2*line, 2*line)), radius-line)
+		return layout.Dimensions{}
+	})
+	pad, width := gtx.Dp(volumePanelPad), gtx.Dp(4)
+	track := max(size.Y-2*pad, 1)
+	x := (size.X - width) / 2
+	level := pad + int(float64(track)*(1-volume)+.5)
+	paint.FillShape(gtx.Ops, sc.OutlineVariant.AsNRGBA(), clip.UniformRRect(image.Rect(x, pad, x+width, pad+track), width/2).Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, sc.Primary.Color.AsNRGBA(), clip.UniformRRect(image.Rect(x, level, x+width, pad+track), width/2).Op(gtx.Ops))
+	knob := gtx.Dp(12)
+	c := image.Pt(size.X/2, level)
+	paint.FillShape(gtx.Ops, sc.Primary.Color.AsNRGBA(), clip.Ellipse{Min: c.Sub(image.Pt(knob/2, knob/2)), Max: c.Add(image.Pt(knob/2, knob/2))}.Op(gtx.Ops))
+	area := clip.Rect{Max: size}.Push(gtx.Ops)
+	event.Op(gtx.Ops, s)
+	pointer.CursorPointer.Add(gtx.Ops)
+	area.Pop()
+}
+
+// layoutAudioBar draws the bar across the top of gtx, and the volume
+// slider under its button, over the page.
 func (p *chatPage) layoutAudioBar(gtx layout.Context, l localization.Catalog) {
 	b := &p.audioBar
 	if b.play == nil {
-		b.play, b.speed, b.close = button.Text(), button.Text(), button.Text()
+		b.previous, b.play, b.next = button.Text(), button.Text(), button.Text()
+		b.speed, b.volume, b.close = button.Text(), button.Text(), button.Text()
 	}
 	m, state, speed, ok := p.audio.current()
 	if !ok {
@@ -221,17 +476,35 @@ func (p *chatPage) layoutAudioBar(gtx layout.Context, l localization.Catalog) {
 		p.audio.stop()
 		return
 	}
-	if b.play.Clicked(gtx) {
+	before, after := p.audio.around()
+	switch {
+	case b.previous.Clicked(gtx) && before:
+		p.audio.skip(-1)
+	case b.next.Clicked(gtx) && after:
+		p.audio.skip(1)
+	case b.play.Clicked(gtx):
 		p.audio.toggle(p, m, -1)
-		state = p.audio.state(m)
 	}
 	if b.speed.Clicked(gtx) {
 		p.audio.nextSpeed()
-		_, _, speed, _ = p.audio.current()
+	}
+	if b.volume.Clicked(gtx) {
+		p.audio.toggleMute()
+	}
+	panel := image.Pt(gtx.Dp(volumePanelWidth), gtx.Dp(volumeTrackHeight)+2*gtx.Dp(volumePanelPad))
+	if volume, changed, keep := b.slider.update(gtx, panel, p.audio.loudness()); changed || keep {
+		p.audio.setVolume(volume, keep)
 	}
 	if b.bar.Clicked(gtx) && p.audio.shownIn() == p.chat {
 		p.jumpTo(m.Key.MessageID)
 	}
+	// What a click changed is drawn in this frame.
+	m, state, speed, ok = p.audio.current()
+	if !ok {
+		return
+	}
+	before, after = p.audio.around()
+	volume := p.audio.loudness()
 	if state.playing || state.loading {
 		// The line of what was heard moves while it plays.
 		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(100 * time.Millisecond)})
@@ -244,11 +517,11 @@ func (p *chatPage) layoutAudioBar(gtx layout.Context, l localization.Catalog) {
 	b.bar.Layout(gtx, size, surfaceStyle{content: sc.Surface.OnColor}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Dimensions{Size: size}
 	})
-	button := gtx.Dp(48)
+	square := gtx.Dp(48)
 	// iconButton draws one of the bar's buttons in a square at x.
-	iconButton := func(x int, w layout.Widget) {
-		offset(gtx, image.Pt(x, (size.Y-button)/2), func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints = layout.Exact(image.Pt(button, button))
+	iconButton := func(gtx layout.Context, x int, w layout.Widget) {
+		offset(gtx, image.Pt(x, (size.Y-square)/2), func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints = layout.Exact(image.Pt(square, square))
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min = image.Point{}
 				return w(gtx)
@@ -256,16 +529,49 @@ func (p *chatPage) layoutAudioBar(gtx layout.Context, l localization.Catalog) {
 		})
 	}
 	left := gtx.Dp(4)
-	iconButton(left, func(gtx layout.Context) layout.Dimensions {
+	// The buttons of the tracks are there when there is another track, as
+	// in Telegram Desktop; the one with nothing to go to is disabled.
+	if before || after {
+		btnGtx := gtx
+		if !before {
+			btnGtx = gtx.Disabled()
+		}
+		iconButton(btnGtx, left, func(gtx layout.Context) layout.Dimensions {
+			return b.previous.LayoutIconOnly(gtx, l.T("audio.previous"), iconSkipPrevious)
+		})
+		left += square
+	}
+	iconButton(gtx, left, func(gtx layout.Context) layout.Dimensions {
 		if state.playing {
 			return b.play.LayoutIconOnly(gtx, l.T("audio.pause"), iconPauseFile)
 		}
 		return b.play.LayoutIconOnly(gtx, l.T("audio.play"), iconPlayFile)
 	})
-	right := size.X - gtx.Dp(4) - button
-	iconButton(right, func(gtx layout.Context) layout.Dimensions {
+	left += square
+	if before || after {
+		btnGtx := gtx
+		if !after {
+			btnGtx = gtx.Disabled()
+		}
+		iconButton(btnGtx, left, func(gtx layout.Context) layout.Dimensions {
+			return b.next.LayoutIconOnly(gtx, l.T("audio.next"), iconSkipNext)
+		})
+		left += square
+	}
+	right := size.X - gtx.Dp(4) - square
+	iconButton(gtx, right, func(gtx layout.Context) layout.Dimensions {
 		return b.close.LayoutIconOnly(gtx, l.T("audio.close"), iconClear)
 	})
+	right -= square
+	volumeX := right
+	// The wheel over the volume button goes to an area around the button,
+	// which takes the clicks: an area beside it would get nothing.
+	wheelArea := clip.Rect{Min: image.Pt(volumeX, 0), Max: image.Pt(volumeX+square, size.Y)}.Push(gtx.Ops)
+	event.Op(gtx.Ops, &b.slider.wheel)
+	iconButton(gtx, volumeX, func(gtx layout.Context) layout.Dimensions {
+		return b.volume.LayoutIconOnly(gtx, l.T("audio.volume"), volumeIcon(volume))
+	})
+	wheelArea.Pop()
 	if speedChanges(m) {
 		width := gtx.Dp(56)
 		right -= width
@@ -278,7 +584,7 @@ func (p *chatPage) layoutAudioBar(gtx layout.Context, l localization.Catalog) {
 		})
 	}
 	title, subtitle := audioTitle(m, gtx.Now, l)
-	textX := left + button + gtx.Dp(8)
+	textX := left + gtx.Dp(8)
 	textGtx := gtx
 	textGtx.Constraints = layout.Constraints{Max: image.Pt(max(right-textX-gtx.Dp(8), 0), size.Y)}
 	offset(textGtx, image.Pt(textX, 0), func(gtx layout.Context) layout.Dimensions {
@@ -303,4 +609,12 @@ func (p *chatPage) layoutAudioBar(gtx layout.Context, l localization.Catalog) {
 		fillRect(gtx, sc.Primary.Color, image.Pt(int(state.progress*float32(size.X)), line))
 		return layout.Dimensions{}
 	})
+	if b.slider.visible(gtx, b.volume.Hovered(gtx)) {
+		// Under its button, touching the bar, so that the pointer gets
+		// from one to the other without leaving both.
+		offset(gtx, image.Pt(volumeX+(square-panel.X)/2, size.Y), func(gtx layout.Context) layout.Dimensions {
+			b.slider.layout(gtx, panel, volume)
+			return layout.Dimensions{}
+		})
+	}
 }

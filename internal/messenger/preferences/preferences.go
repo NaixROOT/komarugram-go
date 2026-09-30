@@ -103,6 +103,9 @@ type Global struct {
 	// VoiceSpeed is the speed voice messages, and music long enough to be
 	// a podcast, play at: 0 for their own, as 1 is.
 	VoiceSpeed float64 `json:"voice_speed,omitempty"`
+	// AudioVolume is how loud voice messages and music play in the client,
+	// in percent.
+	AudioVolume int `json:"audio_volume"`
 	// Ghost is what the accounts tell others of themselves, as AyuGram's
 	// Ghost Mode, the same for all of them.
 	Ghost Ghost `json:"ghost"`
@@ -305,6 +308,7 @@ func defaults() Global {
 		LowBattery:     powersave.DefaultLowBattery,
 		MiniAppStorage: miniapp.Shared,
 		ComposerBlur:   true,
+		AudioVolume:    100,
 		WindowBlur:     true,
 		Overlays:       Overlays{Transparency: 30, MenusBlur: true, ToastsBlur: true},
 		Ghost:          Ghost{SendRead: true, SendOnline: true, SendTyping: true, ReadOnInteract: true},
@@ -382,6 +386,9 @@ func validate(g Global) error {
 	if g.AnimationPlayer != "" && g.AnimationPlayer != "ffmpeg" && g.AnimationPlayer != "wasm" {
 		return errors.New("invalid animation player")
 	}
+	if g.AudioVolume < 0 || g.AudioVolume > 100 {
+		return errors.New("invalid audio volume")
+	}
 	if g.VoiceSpeed != 0 && (g.VoiceSpeed < 0.5 || g.VoiceSpeed > 3) {
 		return errors.New("invalid voice speed")
 	}
@@ -437,6 +444,10 @@ func (s *Store) SetAnimationPlayer(value string) error {
 
 func (s *Store) SetAudioPlayer(value string) error {
 	return s.change(func(g *Global) { g.AudioPlayer = value })
+}
+
+func (s *Store) SetAudioVolume(percent int) error {
+	return s.change(func(g *Global) { g.AudioVolume = percent })
 }
 
 func (s *Store) SetVoiceSpeed(value float64) error {

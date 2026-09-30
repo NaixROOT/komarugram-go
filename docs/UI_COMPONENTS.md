@@ -292,7 +292,10 @@ The history is drawn as materialgram draws it:
   chat pages share, so that what plays goes on in another chat; the bar
   over the chat (`audio_bar.go`, `layoutAudioBar`) tells what plays, with
   play or pause, the speed of what changes its speed (`speedChanges`,
-  `audio.Stretched`) and a button that ends it, and what follows plays
+  `audio.Stretched`), the buttons of the track before and after
+  (`neighborAudio`), the volume button with its vertical slider under it
+  (`volumeSlider`, shown while the pointer is over either) and a button
+  that ends it, and what follows plays
   after the end (`nextAudio`);
   `voiceLayout`, the row with its button, waveform (`drawWaveform`) and
   time, and `musicLayout`, with the title, the performer and a bar

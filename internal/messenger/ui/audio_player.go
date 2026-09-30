@@ -56,6 +56,16 @@ type audioPlayer struct {
 	stretch   *audio.Stretched
 	speed     float64
 	saveSpeed func(float64)
+	// volume is how loud what plays is, from 0 to 1, and unmuted what the
+	// muted button brings back; saveVolume keeps the choice.
+	volume, unmuted float64
+	saveVolume      func(float64)
+	// before and after tell whether a message of its kind precedes and
+	// follows what plays, as of revision aroundRev of the history of
+	// aroundKey.
+	before, after bool
+	aroundKey     model.MessageKey
+	aroundRev     uint64
 	// playback and source are the message's while it is loaded; they go
 	// when another plays, or the chat changes, and release then frees the
 	// decoder and the file under them.
@@ -88,6 +98,7 @@ type audioPlayback interface {
 	Ended() bool
 	Position() int64
 	SeekSample(pos int64) error
+	SetVolume(volume float64)
 	Close()
 }
 
@@ -402,6 +413,7 @@ func (v *audioPlayer) load(ctx context.Context, p *chatPage, m model.Message, at
 	}
 	v.loading, v.playback, v.source, v.release, v.samples = false, playback, source, release, samples
 	v.stretch = stretch
+	playback.SetVolume(v.volume)
 	if speedChanges(m) && v.speed > 0 {
 		stretch.SetTempo(v.speed)
 	}

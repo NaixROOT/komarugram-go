@@ -69,6 +69,9 @@ func TestRenderAudio(t *testing.T) {
 		p.audio.toggle(p, voiced, 0.3)
 		waitAudio(t, "the voice message did not start", func() bool { return p.audio.state(voiced).playing })
 		p.audio.toggle(p, voiced, -1)
+		// With the volume slider held at 60%.
+		p.audio.setVolume(0.6, false)
+		p.audioBar.slider.dragging = true
 		renderToast(t, filepath.Join(dir, "audio-voice-"+theme+".png"), image.Pt(600, 820), dark, draw)
 	}
 	os.Remove(filepath.Join(dir, "scratch.png"))
