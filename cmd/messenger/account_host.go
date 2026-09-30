@@ -541,11 +541,7 @@ func (h *accountWindows) windowSpec(a *account.Account, session *accountSession,
 			if a != nil {
 				session.id.Store(a.ID)
 				h.bind(a, session, w)
-				session.start(func(ctx context.Context) {
-					if err := h.runStore(ctx, a, session.store); err != nil && !errors.Is(err, context.Canceled) {
-						log.Printf("account %s: %v", a.ID, err)
-					}
-				})
+				session.start(func(ctx context.Context) { h.runAccount(ctx, a, session.store) })
 				return content
 			}
 			h.mu.Lock()
@@ -605,7 +601,10 @@ func (h *accountWindows) windowSpec(a *account.Account, session *accountSession,
 					h.bind(chosen, session, w)
 					h.remember(chosen.ID)
 					signIn.Finish()
-					return h.runStore(ctx, chosen, session.store)
+					// The sign-in is over: what fails from here on is told
+					// by the account's window, not by the sign-in.
+					h.runAccount(ctx, chosen, session.store)
+					return nil
 				})
 				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Print(err)
@@ -738,6 +737,43 @@ func (h *accountWindows) refreshPhoto(ctx context.Context, a *account.Account, s
 }
 
 var _ model.Accounts = (*accountWindows)(nil)
+
+// runAccount keeps account a connected until ctx ends. A connection that
+// stops is told by the account's window, which offers to make it again,
+// unless Telegram ended the session: that has a dialog of its own.
+func (h *accountWindows) runAccount(ctx context.Context, a *account.Account, store *tgstore.Store) {
+	keepConnected(ctx, func(ctx context.Context) error {
+		err := h.runStore(ctx, a, store)
+		if err != nil && ctx.Err() == nil {
+			log.Printf("account %s: %v", a.ID, err)
+		}
+		return err
+	}, store)
+}
+
+// connection is where keepConnected tells a failure and waits to be asked
+// for the connection again.
+type connection interface {
+	FailConnection(error)
+	Reconnects() <-chan struct{}
+}
+
+// keepConnected calls connect until ctx ends or Telegram ends the session;
+// after any other failure it waits to be asked for the connection again.
+func keepConnected(ctx context.Context, connect func(context.Context) error, c connection) {
+	for {
+		err := connect(ctx)
+		if err == nil || ctx.Err() != nil || tgstore.SessionEnd(err) != model.SessionAlive {
+			return
+		}
+		c.FailConnection(err)
+		select {
+		case <-c.Reconnects():
+		case <-ctx.Done():
+			return
+		}
+	}
+}
 
 func (h *accountWindows) runStore(ctx context.Context, a *account.Account, store *tgstore.Store) error {
 	if card, ok := h.card(a.ID); ok {

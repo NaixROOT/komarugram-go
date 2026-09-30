@@ -55,6 +55,38 @@ func (s *Store) SessionEnded() model.SessionEnd {
 	return s.sessionEnded
 }
 
+// FailConnection records that the account's connection stopped with err and
+// does not come back on its own: see model.ConnectionSource.
+func (s *Store) FailConnection(err error) {
+	s.publish(func() { s.connectionErr = err })
+}
+
+// ConnectionFailed implements model.ConnectionSource.
+func (s *Store) ConnectionFailed() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.connectionErr
+}
+
+// Reconnect implements model.ConnectionSource.
+func (s *Store) Reconnect() {
+	s.mu.Lock()
+	failed := s.connectionErr != nil
+	s.connectionErr = nil
+	s.mu.Unlock()
+	if !failed {
+		return
+	}
+	select {
+	case s.reconnect <- struct{}{}:
+	default:
+	}
+	s.changed()
+}
+
+// Reconnects is sent to when Reconnect asks for the connection again.
+func (s *Store) Reconnects() <-chan struct{} { return s.reconnect }
+
 // Freeze implements model.FreezeSource.
 func (s *Store) Freeze() model.Freeze {
 	s.mu.RLock()
@@ -122,6 +154,7 @@ func (s *Store) Remember(p model.Profile) {
 }
 
 var (
-	_ model.SessionSource = (*Store)(nil)
-	_ model.FreezeSource  = (*Store)(nil)
+	_ model.SessionSource    = (*Store)(nil)
+	_ model.ConnectionSource = (*Store)(nil)
+	_ model.FreezeSource     = (*Store)(nil)
 )

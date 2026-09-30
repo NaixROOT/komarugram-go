@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -20,20 +21,24 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
+	"komarugram/internal/messenger/account"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
 )
 
-// endedStore is a store whose session Telegram ended for why, or whose
-// account it froze.
+// endedStore is a store whose session Telegram ended for why, whose
+// account it froze, or whose connection stopped with failed.
 type endedStore struct {
 	model.Store
 	why    model.SessionEnd
 	freeze model.Freeze
+	failed error
 }
 
 func (s endedStore) SessionEnded() model.SessionEnd { return s.why }
 func (s endedStore) Freeze() model.Freeze           { return s.freeze }
+func (s endedStore) ConnectionFailed() error        { return s.failed }
+func (s endedStore) Reconnect()                     {}
 
 // renderFrames draws frame until animations settle and saves the last one.
 func renderFrames(t *testing.T, size image.Point, path string, frame func(gtx layout.Context)) {
@@ -72,7 +77,8 @@ func renderFrames(t *testing.T, size image.Point, path string, frame func(gtx la
 }
 
 // TestRenderSessionEnded draws the dialog for every reason the session
-// ended, and what a frozen account shows, in both languages, and saves the
+// ended, what a frozen account shows and a connection that stopped, in both
+// languages, and saves the
 // screenshots, for looking at them:
 //
 //	SESSION_PNG_DIR=/tmp/session go test ./internal/messenger/ui -run RenderSessionEnded
@@ -95,6 +101,16 @@ func TestRenderSessionEnded(t *testing.T) {
 			d := newSessionEndedDialog(func() {})
 			renderFrames(t, image.Pt(700, 420), filepath.Join(dir, fmt.Sprintf("%s-session-%d.png", lang, why)), func(gtx layout.Context) {
 				d.Update(gtx, endedStore{why: why})
+				d.Layout(gtx, l)
+			})
+		}
+		for name, failed := range map[string]error{
+			"failed": errors.New("history cache: open history.db: unable to open database file"),
+			"in-use": account.ErrInUse,
+		} {
+			d := newConnectionFailedDialog()
+			renderFrames(t, image.Pt(700, 420), filepath.Join(dir, lang+"-connection-"+name+".png"), func(gtx layout.Context) {
+				d.Update(gtx, endedStore{failed: failed})
 				d.Layout(gtx, l)
 			})
 		}

@@ -36,6 +36,18 @@ type SessionSource interface {
 	SessionEnded() SessionEnd
 }
 
+// ConnectionSource is a Store that knows whether the account's connection
+// stopped for a reason other than its session ending, such as its local
+// data not opening or the account being connected elsewhere.
+type ConnectionSource interface {
+	// ConnectionFailed is what stopped the connection, nil while it runs or
+	// is being made. Nothing loads until Reconnect; what is saved can still
+	// be read.
+	ConnectionFailed() error
+	// Reconnect starts the connection again after it failed.
+	Reconnect()
+}
+
 // Freeze is Telegram's freezing of an account for breaking its terms: the
 // account can read but not send or change anything, and is deleted at
 // Until unless an appeal succeeds.

@@ -264,13 +264,17 @@ func (c *conversation) noteTopic(m model.Message, isNew bool) (refresh bool) {
 			t.Unread++
 		}
 		// The topic takes its place: after the pinned ones, before older
-		// topics.
+		// topics. Telegram's dates are whole seconds, and of two messages
+		// of one second the later has the greater id.
 		sort.SliceStable(f.topics, func(a, b int) bool {
 			x, y := f.topics[a], f.topics[b]
 			if x.Pinned != y.Pinned {
 				return x.Pinned
 			}
-			return x.LastTime.After(y.LastTime)
+			if !x.LastTime.Equal(y.LastTime) {
+				return x.LastTime.After(y.LastTime)
+			}
+			return x.top > y.top
 		})
 		return false
 	}

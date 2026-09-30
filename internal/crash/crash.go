@@ -143,6 +143,49 @@ func Dir() (string, error) {
 	return filepath.Join(cache, "komarugram-go", "crashes"), nil
 }
 
+// fatalName is the file the runtime writes to when the process dies.
+const fatalName = "fatal.txt"
+
+// CaptureFatal makes the Go runtime write what ends the process, a panic on
+// a goroutine nothing guards or a fatal error, to a file among the reports,
+// besides stderr: a program without a console has none. It returns the path
+// of the report the previous run left, empty if it left none.
+func CaptureFatal() (previous string, err error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	previous = takeFatal(dir)
+	// Appending keeps what another running process may have written.
+	f, err := os.OpenFile(filepath.Join(dir, fatalName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return previous, err
+	}
+	defer f.Close()
+	return previous, debug.SetCrashOutput(f, debug.CrashOptions{})
+}
+
+// takeFatal moves the report a run that died left in dir among the panic
+// reports, and returns its path, empty if there is none.
+func takeFatal(dir string) string {
+	path := filepath.Join(dir, fatalName)
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+	kept := filepath.Join(dir, fmt.Sprintf("panic-%s-fatal.txt", info.ModTime().Format("20060102-150405")))
+	// The file of a process still running cannot be moved on Windows, and
+	// is its own to report.
+	if err := os.Rename(path, kept); err != nil {
+		return ""
+	}
+	prune(dir)
+	return kept
+}
+
 func write(p *Panic) (string, error) {
 	dir, err := Dir()
 	if err != nil {
