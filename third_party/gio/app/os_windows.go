@@ -56,6 +56,16 @@ type window struct {
 	// frameDims stores the last seen window frame width and height.
 	frameDims image.Point
 	loop      *eventLoop
+
+	// blurWanted is the BlurBehind option; config.BlurBehind is what was
+	// granted.
+	blurWanted bool
+	// accent is set once the window has an accent policy, which is then to
+	// be taken off it.
+	accent bool
+	// unseen are the borders the system's frame had around what was seen of
+	// the window when it last had that frame; zero before.
+	unseen windows.Rect
 }
 
 const _WM_WAKEUP = windows.WM_USER + iota
@@ -369,8 +379,16 @@ func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr
 		}
 		// lParam contains an NCCALCSIZE_PARAMS for us to adjust.
 		place := windows.GetWindowPlacement(w.hwnd)
-		if !place.IsMaximized() {
-			// Nothing do adjust.
+		// A fullscreen window is maximized too, and is all of its screen,
+		// not of the work area.
+		fullscreen := windows.GetWindowLong(w.hwnd, windows.GWL_STYLE)&windows.WS_OVERLAPPEDWINDOW == 0
+		if !place.IsMaximized() || fullscreen {
+			if w.config.BlurBehind {
+				// With a client area that is all of the window, acrylic is
+				// drawn over the content instead of behind it.
+				szp := (*windows.NCCalcSizeParams)(unsafe.Pointer(lParam))
+				szp.Rgrc[0].Bottom--
+			}
 			return 0
 		}
 		// Adjust window position to avoid the extra padding in maximized
@@ -839,19 +857,39 @@ func (w *window) Configure(options []Option) {
 	metric := configForDPI(dpi)
 	prev := w.config
 	cnf := w.config
+	cnf.BlurBehind = w.blurWanted
 	cnf.apply(metric, options)
+	w.blurWanted = cnf.BlurBehind
 	w.config.Title = cnf.Title
 	w.config.Decorated = cnf.Decorated
 	w.config.MinSize = cnf.MinSize
 	w.config.MaxSize = cnf.MaxSize
 	windows.SetWindowText(w.hwnd, cnf.Title)
+	w.config.Transparent = cnf.Transparent
+	// Acrylic is drawn behind the content of a window without the system's
+	// frame, and around the one with it.
+	w.config.BlurBehind = cnf.Transparent && cnf.BlurBehind && !cnf.Decorated && windows.TransparencyEffects()
+	effects := w.config.Transparent != prev.Transparent || w.config.BlurBehind != prev.BlurBehind
 	if w.placed && cnf.Mode == prev.Mode && cnf.Size == prev.Size && cnf.Decorated == prev.Decorated &&
 		cnf.TopMost == prev.TopMost && cnf.MinSize == prev.MinSize && cnf.MaxSize == prev.MaxSize {
-		// Nothing but the title changed. Placing the window again would
-		// size it from config.Size, which update may not have set yet.
+		// Nothing but the title or the effects changed. Placing the window
+		// again would size it from config.Size, which update may not have
+		// set yet.
+		if effects {
+			w.applyEffects()
+			// The client area follows the blur: see WM_NCCALCSIZE.
+			windows.SetWindowPos(w.hwnd, 0, 0, 0, 0, 0, windows.SWP_NOMOVE|windows.SWP_NOSIZE|windows.SWP_NOZORDER|windows.SWP_FRAMECHANGED)
+			w.update()
+		}
 		return
 	}
 	w.placed = true
+	defer func() {
+		if effects || cnf.Decorated != prev.Decorated {
+			w.applyEffects()
+			w.update()
+		}
+	}()
 
 	style := windows.GetWindowLong(w.hwnd, windows.GWL_STYLE)
 	var showMode int32
@@ -900,8 +938,30 @@ func (w *window) Configure(options []Option) {
 			width = r.Right - r.Left
 			height = r.Bottom - r.Top
 		} else {
-			// Enable drop shadows when we draw decorations.
-			windows.DwmExtendFrameIntoClientArea(w.hwnd, windows.Margins{-1, -1, -1, -1})
+			if w.config.BlurBehind {
+				// The client area is a pixel shorter than the window: see
+				// WM_NCCALCSIZE.
+				height++
+			}
+			if prev.Decorated && w.shown() {
+				seen := windows.DwmVisibleRect(w.hwnd)
+				w.unseen = windows.Rect{Left: seen.Left - wr.Left, Top: seen.Top - wr.Top, Right: wr.Right - seen.Right, Bottom: wr.Bottom - seen.Bottom}
+			}
+			if !cnf.Transparent {
+				// Enable drop shadows when we draw decorations. The frame
+				// is opaque, and is left out of a transparent window.
+				windows.DwmExtendFrameIntoClientArea(w.hwnd, windows.Margins{-1, -1, -1, -1})
+			}
+		}
+		if w.shown() && cnf.Decorated != prev.Decorated && cnf.Size == prev.Size && prev.Mode == Windowed {
+			// Only the frame changes: what is seen of the window stays where
+			// it is, and the content takes what the frame leaves of it.
+			unseen := w.unseen
+			if cnf.Decorated && unseen == (windows.Rect{}) {
+				unseen = unseenBorders(uint32(style))
+			}
+			r := reframed(windows.DwmVisibleRect(w.hwnd), cnf.Decorated, unseen)
+			x, y, width, height = r.Left, r.Top, r.Right-r.Left, r.Bottom-r.Top
 		}
 
 	case Fullscreen:
@@ -920,6 +980,60 @@ func (w *window) Configure(options []Option) {
 	windows.SetWindowPos(w.hwnd, hwndAfter, x, y, width, height, swpStyle)
 	windows.SetWindowLong(w.hwnd, windows.GWL_STYLE, style)
 	windows.ShowWindow(w.hwnd, showMode)
+}
+
+// shown reports whether the window was placed and is on the screen.
+func (w *window) shown() bool {
+	return w.placed && windows.IsWindowVisible(w.hwnd)
+}
+
+// unseenBorders are the borders that the system's frame of a window of the
+// style has around what is seen of it: the frame without its line of a pixel,
+// and nothing above the caption. It is for a window that never had that
+// frame to be measured.
+func unseenBorders(style uint32) windows.Rect {
+	var r windows.Rect
+	windows.AdjustWindowRectEx(&r, style, 0, dwExStyle)
+	return windows.Rect{Left: max(-r.Left-1, 0), Right: max(r.Right-1, 0), Bottom: max(r.Bottom-1, 0)}
+}
+
+// reframed returns the rectangle of a window whose frame changes, for what
+// is seen of it to stay where it is: seen is that, and unseen are the
+// borders the system's frame has around it. A window without that frame is
+// all seen.
+func reframed(seen windows.Rect, decorated bool, unseen windows.Rect) windows.Rect {
+	if !decorated {
+		return seen
+	}
+	return windows.Rect{Left: seen.Left - unseen.Left, Top: seen.Top - unseen.Top, Right: seen.Right + unseen.Right, Bottom: seen.Bottom + unseen.Bottom}
+}
+
+// acrylicTint is the tint of the blur behind a window: next to none, for the
+// content to tint it with what it paints. Acrylic is not drawn with a tint
+// that is wholly transparent.
+const acrylicTint = 0x01000000
+
+// applyEffects makes the system show what is behind the window where its
+// content is not opaque, as config.Transparent and config.BlurBehind say:
+// blurred, with acrylic, or as it is. config.BlurBehind is cleared when the
+// system has no acrylic.
+func (w *window) applyEffects() {
+	if w.config.BlurBehind {
+		if err := windows.SetWindowAccent(w.hwnd, windows.AccentAcrylic, acrylicTint); err != nil {
+			w.config.BlurBehind = false
+		} else {
+			w.accent = true
+		}
+	}
+	if !w.config.BlurBehind && w.accent {
+		windows.SetWindowAccent(w.hwnd, windows.AccentDisabled, 0)
+		w.accent = false
+	}
+	// Acrylic takes the alpha of the content itself.
+	windows.DwmEnableTransparency(w.hwnd, w.config.Transparent && !w.config.BlurBehind)
+	if w.config.Transparent || w.config.Decorated {
+		windows.DwmExtendFrameIntoClientArea(w.hwnd, windows.Margins{})
+	}
 }
 
 func (w *window) WriteClipboard(mime string, s []byte) {

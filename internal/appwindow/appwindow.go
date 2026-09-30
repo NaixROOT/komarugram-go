@@ -7,6 +7,7 @@
 package appwindow
 
 import (
+	"image"
 	"komarugram/internal/crash"
 	"komarugram/internal/diagnostics"
 	"log"
@@ -92,6 +93,10 @@ type Window struct {
 	// transparent and blurred are what the platform granted of
 	// Options.Transparent and Options.BlurBehind.
 	transparent, blurred bool
+	// blurAsked is whether blur was asked for last; frame is the window's
+	// own frame, drawn where the blur leaves it without the system's.
+	blurAsked bool
+	frame     frame
 	// view is the native window, once there is one; captureExcluded is
 	// whether it is hidden from screen capture, once captureApplied.
 	view                            uintptr
@@ -350,6 +355,7 @@ func (h *Host) Open(spec Spec) {
 	h.mu.Lock()
 	h.remaining++
 	w := &Window{Window: new(app.Window), host: h, title: spec.Options.Title}
+	w.blurAsked = spec.Options.Transparent && spec.Options.BlurBehind
 	if h.windows == nil {
 		h.windows = map[*Window]struct{}{}
 	}
@@ -357,7 +363,8 @@ func (h *Host) Open(spec Spec) {
 	h.mu.Unlock()
 	go func() {
 		opts := spec.Options
-		w.Option(app.Title(opts.Title), app.Size(opts.Width, opts.Height), app.Transparent(opts.Transparent), app.BlurBehind(opts.BlurBehind))
+		w.Option(app.Title(opts.Title), app.Size(opts.Width, opts.Height))
+		w.Option(effectOptions(opts.Transparent, opts.BlurBehind)...)
 		if opts.TopMost {
 			w.Option(app.TopMost(true))
 		}
@@ -434,6 +441,12 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 		case app.ConfigEvent:
 			w.fullscreen = e.Config.Mode == app.Fullscreen
 			w.transparent, w.blurred = e.Config.Transparent, e.Config.BlurBehind
+			w.frame.configure(e.Config)
+			if ownsFrame() && w.blurAsked && !e.Config.Decorated && !e.Config.BlurBehind {
+				// No blur was granted: the system's frame is the better one.
+				w.blurAsked = false
+				w.Option(app.Decorated(true))
+			}
 			hidden := e.Config.Suspended || e.Config.Mode == app.Minimized
 			if observer, ok := content.(interface{ SetMinimized(bool) }); ok {
 				observer.SetMinimized(hidden)
@@ -503,6 +516,18 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 			if quit := w.handleKeys(gtx, opts); quit {
 				return nil
 			}
+			// The window's own frame takes the top of it, and the content
+			// the rest.
+			w.titleMu.Lock()
+			title := w.title
+			w.titleMu.Unlock()
+			if actions := w.frame.layout(gtx, title, content); actions != 0 {
+				w.Perform(actions)
+			}
+			caption, window := w.frame.height(gtx), gtx.Constraints.Max
+			gtx.Constraints.Max.Y = max(gtx.Constraints.Max.Y-caption, 0)
+			gtx.Constraints.Min.Y = min(gtx.Constraints.Min.Y, gtx.Constraints.Max.Y)
+			below := op.Offset(image.Pt(0, caption)).Push(gtx.Ops)
 			var phase time.Time
 			if trace != nil {
 				phase = time.Now()
@@ -528,8 +553,17 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				// half recorded, so it is dropped as a whole.
 				ops.Reset()
 				gtx = app.NewContext(&ops, e)
+				gtx.Values = make(map[string]any)
+				wdk.InitMaterialThemeInContext(gtx, content.Theme(gtx))
+				if actions := w.frame.layout(gtx, title, nil); actions != 0 {
+					w.Perform(actions)
+				}
+				gtx.Constraints.Max.Y = max(gtx.Constraints.Max.Y-caption, 0)
 				recovered := recoverContent(content)
+				below := op.Offset(image.Pt(0, caption)).Push(gtx.Ops)
 				fallback.layout(gtx, p)
+				below.Pop()
+				w.frame.layoutBorder(gtx, window)
 				if recovered {
 					gtx.Execute(op.InvalidateCmd{})
 				}
@@ -540,6 +574,8 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				frame.Layout = time.Since(phase)
 				phase = time.Now()
 			}
+			below.Pop()
+			w.frame.layoutBorder(gtx, window)
 			area.Pop()
 			e.Frame(gtx.Ops)
 			if trace != nil {

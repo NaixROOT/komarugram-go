@@ -4,9 +4,9 @@ package ui
 
 import (
 	"image"
+	"image/color"
 
 	"gio-mw/token"
-	"gioui.org/app"
 	"gioui.org/layout"
 )
 
@@ -41,7 +41,16 @@ func (a *App) updateWindowEffects() {
 		return
 	}
 	a.windowEffectsSet, a.windowBlurWanted = true, want
-	if a.window.Window != nil {
-		a.window.Option(app.Transparent(true), app.BlurBehind(want))
+	a.window.SetEffects(true, want)
+}
+
+// FrameFill implements appwindow.FrameFiller: the caption of the window's
+// own frame is a surface of the window, as the sidebar below it is.
+func (a *App) FrameFill(gtx layout.Context) (fill, on color.NRGBA) {
+	sc := scheme(gtx)
+	surface := sc.SurfaceContainer
+	if transparent, _ := a.window.Translucency(); transparent {
+		surface = surface.SetOpacity(token.OpacityLevel(1 - float32(a.preferences.Global().WindowTransparency)/100))
 	}
+	return surface.AsNRGBA(), sc.Surface.OnColor.AsNRGBA()
 }
