@@ -102,6 +102,9 @@ type Window struct {
 	// whether it is hidden from screen capture, once captureApplied.
 	view                            uintptr
 	captureApplied, captureExcluded bool
+	// caption is the height of the window's own frame over the content,
+	// in pixels, as the last frame drew it.
+	caption int
 }
 
 // Translucency reports whether the window is transparent and whether the
@@ -488,6 +491,13 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				observer.SetFocused(e.Config.Focused)
 			}
 			focused = e.Config.Focused
+		case app.DropEvent:
+			// Files dragged from other programs, where the content is.
+			if target, ok := content.(interface{ Drop(app.DropEvent) }); ok {
+				e.Position.Y -= float32(w.caption)
+				target.Drop(e)
+				w.Invalidate()
+			}
 		case app.FrameEvent:
 			if w.suspended.Load() {
 				// Drain an already queued frame without running the UI or requesting more.
@@ -534,6 +544,7 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				w.Perform(actions)
 			}
 			caption, window := w.frame.height(gtx), gtx.Constraints.Max
+			w.caption = caption
 			gtx.Constraints.Max.Y = max(gtx.Constraints.Max.Y-caption, 0)
 			gtx.Constraints.Min.Y = min(gtx.Constraints.Min.Y, gtx.Constraints.Max.Y)
 			below := op.Offset(image.Pt(0, caption)).Push(gtx.Ops)

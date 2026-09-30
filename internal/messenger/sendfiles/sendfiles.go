@@ -350,3 +350,58 @@ func Size(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %s", value, suffix[i])
 }
+
+// DropState is what files dragged over a chat can be dropped as, as
+// Telegram Desktop tells it: the areas shown for them.
+type DropState int
+
+const (
+	// DropNone is a drag that cannot be sent: nothing, or a folder.
+	DropNone DropState = iota
+	// DropFiles go as documents, one area.
+	DropFiles
+	// DropPhotos are pictures: as documents, without compression, or as
+	// photos.
+	DropPhotos
+	// DropMedia are photos and videos: as documents, or as media.
+	DropMedia
+)
+
+// maxDropPicture is the largest picture Telegram Desktop offers to send
+// as a photo when it is dropped.
+const maxDropPicture = 64 << 20
+
+// DropStateOf says what the files at paths can be dropped as. Every file
+// is looked at, as Telegram Desktop does, but only what it is named and
+// the header of a picture.
+func DropStateOf(paths []string) DropState {
+	if len(paths) == 0 {
+		return DropNone
+	}
+	pictures, media := true, true
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return DropNone
+		}
+		mime := MIMEOf(path)
+		if pictures && (info.Size() > maxDropPicture || mime == "image/gif" || !strings.HasPrefix(mime, "image/")) {
+			pictures = false
+		}
+		if pictures {
+			if _, _, ok := imageSize(path); !ok {
+				pictures = false
+			}
+		}
+		if !strings.HasPrefix(mime, "image/") && !strings.HasPrefix(mime, "video/") {
+			media = false
+		}
+	}
+	switch {
+	case pictures:
+		return DropPhotos
+	case media:
+		return DropMedia
+	}
+	return DropFiles
+}

@@ -375,3 +375,44 @@ func TestInspectFindsMusic(t *testing.T) {
 		t.Fatalf("a broken FLAC: %+v, %v", f, err)
 	}
 }
+
+// Dragged files offer the areas Telegram Desktop's do.
+func TestDropStateOf(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, data []byte) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var g bytes.Buffer
+	if err := gif.Encode(&g, gradient(4, 4), nil); err != nil {
+		t.Fatal(err)
+	}
+	photo := write("a.png", pngBytes(t, gradient(30, 20)))
+	jpg := write("b.jpg", jpegBytes(t, gradient(16, 9)))
+	video := write("c.mp4", []byte("not really a video"))
+	anim := write("d.gif", g.Bytes())
+	text := write("e.txt", []byte("text"))
+	broken := write("f.png", []byte("a png that is not one"))
+	for _, c := range []struct {
+		name  string
+		paths []string
+		want  DropState
+	}{
+		{"nothing", nil, DropNone},
+		{"pictures", []string{photo, jpg}, DropPhotos},
+		{"a picture and a video", []string{photo, video}, DropMedia},
+		{"a gif is media, not a photo", []string{anim}, DropMedia},
+		{"a picture that does not decode", []string{broken}, DropMedia},
+		{"a text among pictures", []string{photo, text}, DropFiles},
+		{"a folder", []string{dir}, DropNone},
+		{"a folder among files", []string{text, dir}, DropNone},
+		{"a file that is gone", []string{filepath.Join(dir, "gone.txt")}, DropNone},
+	} {
+		if got := DropStateOf(c.paths); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"gio-mw/defaults/schemes"
 	"gio-mw/wdk"
 
+	"gioui.org/app"
 	"gioui.org/f32"
 	"gioui.org/gpu/headless"
 	"gioui.org/io/input"
@@ -42,6 +43,8 @@ type composerHarness struct {
 	animate bool
 	// still turns the animations of widgets off, as the setting does.
 	still bool
+	// drop, when set, is a drag of files over the page, drawn over it.
+	drop *fileDrop
 }
 
 func newComposerHarness(t *testing.T) *composerHarness {
@@ -62,6 +65,10 @@ func (h *composerHarness) frame() *op.Ops {
 	h.p.media.BeginFrame()
 	h.p.Layout(gtx, model.Chat{ID: h.chat, Kind: h.kind}, localization.For("ru"), h.animate)
 	h.p.layoutDialogs(gtx, localization.For("ru"))
+	if h.drop != nil {
+		h.drop.area, h.drop.metric = image.Rectangle{Max: h.size}, gtx.Metric
+		h.drop.layout(gtx, localization.For("ru"))
+	}
 	h.p.media.EndFrame()
 	h.p.images.EndFrame()
 	h.router.Frame(ops)
@@ -319,6 +326,15 @@ func TestRenderComposer(t *testing.T) {
 				break
 			}
 		}
+	case "drop-photos", "drop-media", "drop-files":
+		// Files dragged over the chat, the pointer over the area of
+		// photos or of documents.
+		h.p.composer.pickerOpen = false
+		h.chat = 2
+		h.frame()
+		kinds := map[string][]string{"drop-photos": {"photo", "photo"}, "drop-media": {"photo", "video"}, "drop-files": {"photo", "file"}}[os.Getenv("COMPOSER_VIEW")]
+		h.drop = &fileDrop{page: h.p}
+		h.drop.take(app.DropEvent{Kind: app.DropEnter, Position: f32.Pt(340, 600), Paths: boxPaths(t, kinds...)})
 	case "voice":
 		// A voice message being recorded.
 		h.p.composer.pickerOpen = false

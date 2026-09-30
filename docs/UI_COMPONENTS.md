@@ -116,6 +116,14 @@ The history is drawn as materialgram draws it:
   FFmpeg, when there is one); a file that cannot be sent is told in the
   dialog's toast. What it sends is `model.OutgoingFiles` in an
   `OutgoingMessage`, so retries reuse the composer's identity handling.
+- **Dropping files** (`drop.go`): `fileDrop`, the App's, follows the
+  `app.DropEvent`s of a drag from another program (`appwindow` hands them
+  over, less its own title bar) and draws Telegram Desktop's areas over the
+  page of the open chat when it takes files (`chatPage.takesFiles`): one
+  for documents, and one for photos or media when `sendfiles.DropStateOf`
+  says the files are pictures, or pictures and videos. A drop goes to the
+  box above, as documents or not by the area; over an open box the files
+  join it. Where the page is comes from the last frame.
 - **Bots** (`bot.go`): `botPage` on the chat page. The buttons under a message
   are `textButton`s in the bubble (`history_bubble.go`); a callback asks the store
   (`model.BotStore`) in a goroutine and comes back through `botUpdate` to the
@@ -387,7 +395,9 @@ new piece sits next to its neighbours.
   `COMPOSER_VIEW=featured-stickers` or `featured-emoji`
   with `COMPOSER_PNG` shows the picker's recommendations; `COMPOSER_VIEW=voice`,
   a voice message being recorded; `files`, `files-one`, `files-documents`,
-  `files-many`, `files-caption` and `files-music`, the box for sending files.
+  `files-many`, `files-caption` and `files-music`, the box for sending files;
+  `drop-photos`, `drop-media` and `drop-files`, the areas files dragged over
+  the chat are dropped on.
   `SETTINGS_SECTION=premium` with `SETTINGS_PNG` shows the Premium section of
   an account without Premium and with Local Premium on (`LOCAL_PREMIUM=off`,
   off).

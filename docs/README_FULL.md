@@ -418,7 +418,12 @@ whatever the choices: title, performer and length from their tags
 (`pkg/audiotag`: ID3, Vorbis comments, iTunes metadata, read in Go), the cover
 as the thumbnail, and grouped tracks in an album of music alone; other audio
 goes as a file. Video upload uses `ffprobe` for
-dimensions and duration. Creating native Telegram checklists requires Premium;
+dimensions and duration. Files dragged from another program over an open
+chat show Telegram Desktop's areas: one to send them as documents, and for
+pictures, photos and videos another to send them compressed, as media; dropped,
+they open the same box, or join it when it is open. The windows take drags
+through `app.DropEvent` of the Gio fork: OLE's `IDropTarget` on Windows, XDND on
+X11 and `wl_data_device` on Wayland. Creating native Telegram checklists requires Premium;
 received checklists display their items and completion state. The demo simulates
 sending locally without network traffic.
 
