@@ -21,6 +21,7 @@ import (
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/mockstore"
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/video"
 )
 
 // stickerHover draws one view of stickers with automatic animations off.
@@ -151,6 +152,10 @@ func TestStickerHoverSurfaces(t *testing.T) {
 				continue
 			}
 			t.Run(codec+"/"+view, func(t *testing.T) {
+				// A GIF file, unlike the stickers, is played by FFmpeg only.
+				if codec == "gif" && video.ResolveFFmpeg("") == "" {
+					t.Skip("no FFmpeg")
+				}
 				h := newStickerHover(t, codec, view, 1)
 				still := h.still(t)
 				h.point(stickerAt(view))

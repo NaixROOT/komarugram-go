@@ -358,6 +358,18 @@ func TestTopicsFollowMessages(t *testing.T) {
 		t.Fatalf("messages of other topics went into the open one: %d", got)
 	}
 
+	// Telegram's dates are whole seconds: of two messages of one second the
+	// later, which has the greater id, puts its topic first.
+	second := time.Now().Add(time.Hour).Truncate(time.Second)
+	for id, topic := range []int{9, model.GeneralTopic} {
+		m := message(66+id, topic, "same second", true)
+		m.Date = second
+		s.mergeUpdate(m)
+	}
+	if got := titles(s.Topics(chat)); got != "Release;General;Chat;" {
+		t.Fatalf("after messages of one second: %q", got)
+	}
+
 	// A message of a topic the list lacks asks for the list again.
 	server.mu.Lock()
 	asked := len(server.requests)
