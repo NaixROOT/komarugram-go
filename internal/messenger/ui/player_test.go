@@ -27,6 +27,11 @@ func TestPlayerFor(t *testing.T) {
 		{"chosen one removed", player.MPV, []player.Kind{player.VLC}, player.VLC, false},
 		{"both, not chosen", "", both, "", true},
 		{"both, chosen", player.VLC, both, player.VLC, false},
+		{"only the browser", "", []player.Kind{player.Chromium}, player.Chromium, false},
+		{"a player before the browser", "", []player.Kind{player.VLC, player.Chromium}, player.VLC, false},
+		{"both before the browser", "", []player.Kind{player.MPV, player.VLC, player.Chromium}, "", true},
+		{"the browser, chosen", player.Chromium, []player.Kind{player.MPV, player.VLC, player.Chromium}, player.Chromium, false},
+		{"the browser chosen, then gone", player.Chromium, []player.Kind{player.VLC}, player.VLC, false},
 	} {
 		kind, ask := playerFor(c.chosen, c.installed)
 		if kind != c.kind || ask != c.ask {

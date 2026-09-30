@@ -20,21 +20,39 @@ import (
 )
 
 // playerFor picks the external player for media: the chosen one while it is
-// installed, else the only one installed. ask is set when several are
-// installed and none of them is chosen; kind is "" when none is installed.
+// installed, else the only player installed, else a fallback such as
+// Chromium. ask is set when several players are installed and none of them
+// is chosen; kind is "" when there is nothing to play in.
 func playerFor(chosen player.Kind, installed []player.Kind) (kind player.Kind, ask bool) {
 	for _, k := range installed {
 		if k == chosen {
 			return k, false
 		}
 	}
-	switch len(installed) {
+	players := dedicatedPlayers(installed)
+	switch len(players) {
 	case 0:
+		// Only fallbacks, if anything.
+		if len(installed) > 0 {
+			return installed[0], false
+		}
 		return "", false
 	case 1:
-		return installed[0], false
+		return players[0], false
 	}
 	return "", true
+}
+
+// dedicatedPlayers are the kinds that are players of their own, not a
+// fallback.
+func dedicatedPlayers(kinds []player.Kind) []player.Kind {
+	var players []player.Kind
+	for _, k := range kinds {
+		if !k.Fallback() {
+			players = append(players, k)
+		}
+	}
+	return players
 }
 
 // playerChoice asks which of the installed players to open media in, the
@@ -58,16 +76,28 @@ func (p *chatPage) play(gtx layout.Context, m model.Message, report func(error),
 	}
 	installed := player.Installed(p.customPlayers())
 	kind, ask := playerFor(chosen, installed)
+	report = playerReport(report, l)
 	switch {
 	case ask:
 		c := &p.playerChoice
-		c.kinds, c.msg, c.report = installed, m, report
+		c.kinds, c.msg, c.report = dedicatedPlayers(installed), m, report
 		c.modal.Open()
 		gtx.Execute(op.InvalidateCmd{})
 	case kind == "":
 		report(errors.New(l.T("player.none")))
 	default:
 		p.media.Play(m, kind, kind.Resolve(p.customPlayers()[kind]), report)
+	}
+}
+
+// playerReport is report that says in the user's language why the browser
+// would not play a file: the reason it gives is for developers.
+func playerReport(report func(error), l localization.Catalog) func(error) {
+	return func(err error) {
+		if errors.Is(err, player.ErrCannotPlay) {
+			err = errors.New(l.T("player.browser_cannot_play"))
+		}
+		report(err)
 	}
 }
 
@@ -158,6 +188,10 @@ type playerSettings struct {
 func newPlayerSettings() *playerSettings {
 	s := &playerSettings{programs: make(map[player.Kind]*programSetting)}
 	for _, kind := range player.Kinds {
+		// A fallback plays in a program set elsewhere, such as the browser.
+		if kind.Fallback() {
+			continue
+		}
 		s.programs[kind] = &programSetting{
 			title: kind.Title(),
 			found: func(ctx context.Context) (string, string, error) {
@@ -203,7 +237,7 @@ func (s *playerSettings) refresh() {
 		}
 	}
 	// There is nothing to ask about with one player or none.
-	if len(s.installed) > 1 {
+	if len(dedicatedPlayers(s.installed)) > 1 {
 		s.radios.EnableOption("")
 	} else {
 		s.radios.DisableOption("")
@@ -231,8 +265,8 @@ func (s *playerSettings) current() (player.Kind, bool) {
 }
 
 func (s *playerSettings) Update(gtx layout.Context) {
-	for _, kind := range player.Kinds {
-		s.programs[kind].Update(gtx)
+	for _, program := range s.programs {
+		program.Update(gtx)
 	}
 	kind, _ := s.current()
 	s.radios.SetValue(kind)
@@ -260,7 +294,11 @@ func (s *playerSettings) Layout(gtx layout.Context, l localization.Catalog) layo
 		hint = l.T("player.undecided")
 	case kind == "":
 		hint = l.T("player.none")
-	case len(s.installed) == 1:
+	case kind.Fallback() && len(dedicatedPlayers(s.installed)) == 0:
+		hint = l.T("player.fallback")
+	case kind.Fallback():
+		hint = l.T("player.browser")
+	case len(dedicatedPlayers(s.installed)) == 1:
 		hint = l.Format("player.only", map[string]string{"player": kind.Title()})
 	}
 	labels := map[player.Kind]string{"": l.T("player.ask_option")}
@@ -292,8 +330,8 @@ func newBrowserSetting() *programSetting {
 // refreshPrograms looks for the programs of the integrations section again.
 func (p *settingsPage) refreshPrograms() {
 	p.players.refresh()
-	for _, kind := range player.Kinds {
-		p.players.programs[kind].refresh(context.Background(), p.invalidate)
+	for _, program := range p.players.programs {
+		program.refresh(context.Background(), p.invalidate)
 	}
 	p.browser.refresh(context.Background(), p.invalidate)
 	p.decoders.program.refresh(context.Background(), p.invalidate)

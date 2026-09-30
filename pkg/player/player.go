@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense OR MIT
 
-// Package player drives an external video player: mpv or VLC.
+// Package player drives an external video player: mpv, VLC, or a window of
+// the Chromium-based browser Mini Apps run in, for a system with neither.
 //
 // Playback inside the application window is handled by the video package; this
 // is the other half, the one a messenger opens when the user wants the full
@@ -18,6 +19,7 @@ import (
 	"runtime"
 	"time"
 
+	"komarugram/pkg/miniapp"
 	"komarugram/pkg/program"
 )
 
@@ -27,19 +29,31 @@ type Kind string
 const (
 	MPV Kind = "mpv"
 	VLC Kind = "vlc"
+	// Chromium plays in a window of the browser Mini Apps run in, the one
+	// the user picked for them or the one found. It is a fallback: offered
+	// when no player is installed, or when the user chose it.
+	Chromium Kind = "chromium"
 )
 
 // Kinds lists the supported players in the order they are preferred when
 // the user has not chosen one.
-var Kinds = []Kind{MPV, VLC}
+var Kinds = []Kind{MPV, VLC, Chromium}
 
 // Title is the player's name as its authors write it.
 func (k Kind) Title() string {
-	if k == VLC {
+	switch k {
+	case VLC:
 		return "VLC"
+	case Chromium:
+		return "Chromium"
 	}
 	return string(k)
 }
+
+// Fallback reports whether the kind is not a player of its own but a way to
+// play without one: it has no path of its own to point at, and is picked
+// over a player only when the user chose it.
+func (k Kind) Fallback() bool { return k == Chromium }
 
 // Status is what the player reports about the current file.
 type Status struct {
@@ -73,6 +87,9 @@ func (k Kind) FlatpakID() string { return flatpakIDs[k] }
 // as a flatpak, or where its Windows installer puts it — or "" if there is
 // none that can be driven here.
 func (k Kind) Find() string {
+	if k == Chromium {
+		return miniapp.Browser()
+	}
 	// mpv's IPC on Windows is a named pipe, which dial does not open yet:
 	// offering mpv there would only fail after the timeout.
 	if k == MPV && runtime.GOOS == "windows" {
@@ -150,7 +167,16 @@ func (k Kind) PrivateArgs() []string {
 // Open starts the player at path — "" for the one found — on source, which
 // may be a path or a URL, and waits for its IPC channel to come up. Extra
 // arguments are appended to the player's command line.
+//
+// Chromium takes no path: it runs the browser of Mini Apps, which package
+// miniapp has checked already.
 func Open(ctx context.Context, kind Kind, path, source string, extra ...string) (Player, error) {
+	if kind == Chromium {
+		if !miniapp.Available() {
+			return nil, fmt.Errorf("%s is not installed", kind.Title())
+		}
+		return openChromium(ctx, source, extra)
+	}
 	if path == "" {
 		path = kind.Find()
 	}

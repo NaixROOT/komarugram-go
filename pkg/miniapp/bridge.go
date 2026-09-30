@@ -186,6 +186,29 @@ type Bridge struct {
 // the Mini App is allowed to keep between launches; its zero value keeps
 // nothing.
 func Open(ctx context.Context, url string, params Params, profile Profile) (*Bridge, error) {
+	// The fragment carries the launch parameters, exactly as a webview would
+	// receive them.
+	return launch(ctx, url+"#"+params.fragment(), profile, Page{Width: 420, Height: 720}, true)
+}
+
+// Page is how OpenPage shows a page of the client's own.
+type Page struct {
+	// Width and Height are the size of the window, in the browser's pixels.
+	Width, Height int
+	// Args are more switches for the browser.
+	Args []string
+}
+
+// OpenPage starts the browser on url in a window of its own, on a throwaway
+// profile, without the Telegram transport: for a page the client itself
+// shows in the browser, such as a video player. Eval reaches the page.
+func OpenPage(ctx context.Context, url string, page Page) (*Bridge, error) {
+	return launch(ctx, url, Profile{}, page, false)
+}
+
+// launch starts the browser on url with profile and attaches to the page,
+// installing the Telegram transport when telegram is set.
+func launch(ctx context.Context, url string, profile Profile, page Page, telegram bool) (*Bridge, error) {
 	dir, ephemeral, err := profile.resolve()
 	if err != nil {
 		return nil, err
@@ -222,17 +245,15 @@ func Open(ctx context.Context, url string, params Params, profile Profile) (*Bri
 		replies:   map[int]chan json.RawMessage{},
 	}
 
-	// The fragment carries the launch parameters, exactly as a webview would
-	// receive them.
-	full := url + "#" + params.fragment()
-	prog, pre := chosen.command(dir)
-	bridge.chrome = exec.Command(prog, append(pre,
-		"--app="+full,
+	prog, args := chosen.command(dir)
+	args = append(args,
+		"--app="+url,
 		"--user-data-dir="+dir,
 		"--remote-debugging-port=0",
 		"--no-first-run", "--no-default-browser-check",
-		"--window-size=420,720",
-	)...)
+		fmt.Sprintf("--window-size=%d,%d", page.Width, page.Height),
+	)
+	bridge.chrome = exec.Command(prog, append(args, page.Args...)...)
 	if err := bridge.chrome.Start(); err != nil {
 		cancel()
 		discard()
@@ -245,7 +266,7 @@ func Open(ctx context.Context, url string, params Params, profile Profile) (*Bri
 		close(bridge.exited)
 	}()
 
-	if err := bridge.connect(ctx); err != nil {
+	if err := bridge.connect(ctx, telegram); err != nil {
 		bridge.Close()
 		return nil, err
 	}
@@ -335,9 +356,9 @@ func (p Params) fragment() string {
 	return strings.Join(fields, "&")
 }
 
-// connect waits for the debugging endpoint, attaches to the page and installs
-// both halves of the bridge.
-func (b *Bridge) connect(ctx context.Context) error {
+// connect waits for the debugging endpoint and attaches to the page, and
+// installs both halves of the bridge when telegram is set.
+func (b *Bridge) connect(ctx context.Context, telegram bool) error {
 	port, err := b.waitForPort(ctx)
 	if err != nil {
 		return err
@@ -357,18 +378,21 @@ func (b *Bridge) connect(ctx context.Context) error {
 	b.conn = conn
 	go b.read(ctx)
 
-	for _, step := range []struct {
+	type step struct {
 		method string
 		params map[string]any
-	}{
-		{"Runtime.enable", nil},
-		{"Page.enable", nil},
-		{"Runtime.addBinding", map[string]any{"name": bindingName}},
-		{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": shim}},
-		// The page loaded before the shim existed, so it is loaded again with
-		// the bridge in place.
-		{"Page.reload", map[string]any{"ignoreCache": true}},
-	} {
+	}
+	steps := []step{{"Runtime.enable", nil}, {"Page.enable", nil}}
+	if telegram {
+		steps = append(steps,
+			step{"Runtime.addBinding", map[string]any{"name": bindingName}},
+			step{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": shim}},
+			// The page loaded before the shim existed, so it is loaded again
+			// with the bridge in place.
+			step{"Page.reload", map[string]any{"ignoreCache": true}},
+		)
+	}
+	for _, step := range steps {
 		if _, err := b.call(ctx, step.method, step.params); err != nil {
 			return fmt.Errorf("%s: %w", step.method, err)
 		}

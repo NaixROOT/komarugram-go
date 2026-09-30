@@ -41,6 +41,10 @@ func sampleVideo(t *testing.T) string {
 // a flatpak.
 func eachPlayer(t *testing.T, test func(t *testing.T, kind player.Kind, path string)) {
 	for _, kind := range player.Kinds {
+		// The browser is tested on its own, in TestChromium.
+		if kind.Fallback() {
+			continue
+		}
 		for _, path := range playerPaths(kind) {
 			t.Run(string(kind)+strings.ReplaceAll(path, "/", "_"), func(t *testing.T) {
 				test(t, kind, path)

@@ -1040,7 +1040,14 @@ func (m *Manager) Play(msg model.Message, kind player.Kind, path string, report 
 			case <-m.ctx.Done():
 				return
 			case <-ticker.C:
-				if !p.Status().Running {
+				// A player that could not play the file says so, and may
+				// keep its window open on nothing: the error is shown here.
+				status := p.Status()
+				if status.Err != nil {
+					report(status.Err)
+					return
+				}
+				if !status.Running {
 					return
 				}
 			}

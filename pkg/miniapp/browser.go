@@ -285,12 +285,23 @@ func newest(found []browser) browser {
 	return best
 }
 
-// probe asks b for its version.
+// probe asks b for its version. On Windows, where a browser prints nothing
+// for --version and opens a window instead, it reads the version resource.
 func probe(b browser) browser {
-	prog, args := b.command("")
-	banner, err := program.Banner(context.Background(), prog, append(args, "--version")...)
-	if err != nil {
-		return b
+	var banner string
+	if runtime.GOOS == "windows" && !b.flatpak {
+		product, version, err := program.FileVersion(context.Background(), b.ref)
+		if err != nil {
+			return b
+		}
+		banner = product + " " + version
+	} else {
+		prog, args := b.command("")
+		var err error
+		banner, err = program.Banner(context.Background(), prog, append(args, "--version")...)
+		if err != nil {
+			return b
+		}
 	}
 	b.banner = banner
 	b.version = parseVersion(b.banner)

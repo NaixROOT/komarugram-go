@@ -326,8 +326,8 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	}
 	a.settings.players.chosen = func() player.Kind { return a.preferences.Global().Player }
 	a.settings.players.paths = func() map[player.Kind]string { return a.preferences.Global().PlayerPaths() }
-	for _, kind := range player.Kinds {
-		a.settings.players.programs[kind].save = func(path string) {
+	for kind, setting := range a.settings.players.programs {
+		setting.save = func(path string) {
 			if err := services.Preferences.SetPlayerPath(kind, path); err != nil {
 				log.Printf("save settings: %v", err)
 			}
