@@ -217,6 +217,11 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.sessionEnded = newSessionEndedDialog(leave)
 	a.frozen = newFrozenView(store)
 	a.profile.frozen = a.frozen
+	a.profile.openAvatar = func(chat int64) {
+		if a.viewer != nil {
+			a.viewer.OpenProfile(chat)
+		}
+	}
 	a.settings = newSettingsPage(w.Motion, services.MiniApps, services.Security, w.Invalidate, services.Accounts, currentAccount, themeMode(global.Theme), global.Language, a.setThemeMode, a.setLanguage)
 	a.settings.security.SetPreferences(services.Preferences)
 	a.settings.images = &a.images

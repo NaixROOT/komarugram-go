@@ -145,3 +145,27 @@ func TestChatInfoAvatarOpensPhoto(t *testing.T) {
 		t.Fatalf("the avatar asked for the photos of chat %d", asked)
 	}
 }
+
+// The avatar on the profile page opens the photos of the account's own
+// profile.
+func TestProfileAvatarOpensPhoto(t *testing.T) {
+	store := mockstore.New(time.Now(), 0)
+	p := newProfilePage(store)
+	var asked int64
+	p.openAvatar = func(chat int64) { asked = chat }
+	h := &focusHarness{draw: func(gtx layout.Context) {
+		p.Update(gtx, store.Me(), func() {})
+		p.Layout(gtx, store.Me(), localization.For("en"), func(gtx layout.Context, _ int64, _ model.ChatKind, _ string, size unit.Dp) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(gtx.Dp(size), gtx.Dp(size))}
+		}, false, false)
+	}}
+	h.frame()
+	// The avatar is 96 dp, centred, under the page's 24 dp of padding.
+	at := f32.Pt(450, 24+48)
+	h.router.Queue(pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: at}, pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: at})
+	h.frame()
+	h.frame()
+	if asked != store.Me().ID || asked == 0 {
+		t.Fatalf("the avatar asked for the photos of %d, not of the account %d", asked, store.Me().ID)
+	}
+}
