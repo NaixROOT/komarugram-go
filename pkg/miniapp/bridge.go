@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -415,11 +416,13 @@ func (b *Bridge) Send(ctx context.Context, eventType, data string) error {
 // Eval runs an expression in the Mini App and returns its value as a string.
 // It is what a client uses to inspect or adjust the page directly — drawing
 // the header and main button inside the page, for instance, since they cannot
-// be drawn around someone else's window.
+// be drawn around someone else's window. A promise is waited for, and its
+// value returned.
 func (b *Bridge) Eval(ctx context.Context, expression string) (string, error) {
 	result, err := b.call(ctx, "Runtime.evaluate", map[string]any{
 		"expression":    expression,
 		"returnByValue": true,
+		"awaitPromise":  true,
 	})
 	if err != nil {
 		return "", err
@@ -434,6 +437,52 @@ func (b *Bridge) Eval(ctx context.Context, expression string) (string, error) {
 	}
 	text, _ := wrapper.Result.Value.(string)
 	return text, nil
+}
+
+// SetWindowBounds moves and resizes the window the page is in, in the
+// screen's device-independent pixels, the ones window.screen measures. A
+// window manager may keep a window from placing itself, as Wayland does; the
+// size still applies.
+func (b *Bridge) SetWindowBounds(ctx context.Context, left, top, width, height int) error {
+	result, err := b.call(ctx, "Browser.getWindowForTarget", nil)
+	if err == nil {
+		err = replyError(result)
+	}
+	if err != nil {
+		return fmt.Errorf("Browser.getWindowForTarget: %w", err)
+	}
+	var window struct {
+		WindowID int `json:"windowId"`
+	}
+	if err := json.Unmarshal(result, &window); err != nil {
+		return err
+	}
+	result, err = b.call(ctx, "Browser.setWindowBounds", map[string]any{
+		"windowId": window.WindowID,
+		"bounds": map[string]any{
+			"left": left, "top": top, "width": width, "height": height,
+			"windowState": "normal",
+		},
+	})
+	if err == nil {
+		err = replyError(result)
+	}
+	if err != nil {
+		return fmt.Errorf("Browser.setWindowBounds: %w", err)
+	}
+	return nil
+}
+
+// replyError is the error the browser answered a call with, as read turns
+// it into a result.
+func replyError(result json.RawMessage) error {
+	var reply struct {
+		Error *string `json:"error"`
+	}
+	if json.Unmarshal(result, &reply) == nil && reply.Error != nil {
+		return errors.New(*reply.Error)
+	}
+	return nil
 }
 
 // Events returns everything the Mini App has sent so far.

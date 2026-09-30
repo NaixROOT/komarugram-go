@@ -89,6 +89,36 @@ const chromiumStatus = `(function () {
     e: v.error ? v.error.code : 0, m: v.error ? v.error.message : ''});
 })()`
 
+// chromiumFit waits for the video to tell its size, for five seconds at
+// most, and returns as JSON the bounds of a window that shows it whole: at
+// its own size where the screen has room, smaller to fit in nine tenths of
+// the screen, and at least 400 pixels wide, so that the controls fit, all
+// centered on the screen. A file of sound alone gets a strip for the
+// controls. It returns "" when the video never told, and "wait" while the
+// page is not built yet.
+const chromiumFit = `new Promise(function (resolve) {
+  var v = document.getElementById('player');
+  if (!v) return resolve('wait');
+  if (v.error) return resolve('');
+  function fit() {
+    var w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) { w = 480; h = 120; }
+    var frameW = outerWidth - innerWidth, frameH = outerHeight - innerHeight;
+    var maxW = screen.availWidth * 0.9 - frameW, maxH = screen.availHeight * 0.9 - frameH;
+    var scale = Math.min(1, maxW / w, maxH / h);
+    if (w * scale < 400) scale = Math.min(400 / w, maxW / w, maxH / h);
+    var width = Math.round(w * scale) + frameW, height = Math.round(h * scale) + frameH;
+    resolve(JSON.stringify({
+      left: Math.round((screen.availLeft || 0) + (screen.availWidth - width) / 2),
+      top: Math.round((screen.availTop || 0) + (screen.availHeight - height) / 2),
+      width: width, height: height}));
+  }
+  if (v.readyState >= 1) return fit();
+  v.addEventListener('loadedmetadata', fit);
+  v.addEventListener('error', function () { resolve(''); });
+  setTimeout(function () { resolve(''); }, 5000);
+})`
+
 // chromium is a video played in a window of the browser Mini Apps run in,
 // for a system with neither mpv nor VLC. It is driven over the DevTools
 // protocol, as a Mini App is, and polled for its state: a page pushes
@@ -135,6 +165,7 @@ func openChromium(ctx context.Context, source string, extra []string) (*chromium
 // poll reads the video's state until the window is gone.
 func (p *chromium) poll(ctx context.Context) {
 	defer close(p.done)
+	p.fit(ctx)
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -175,6 +206,40 @@ func (p *chromium) poll(ctx context.Context) {
 		}
 		p.mu.Unlock()
 	}
+}
+
+// fit gives the window the size of the video once the video tells it. The
+// window opens before the file is read, at a size that suits none in
+// particular; a window that cannot be fitted keeps that size.
+func (p *chromium) fit(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	// The launch returns while the page may still be loading: the first
+	// questions can land in the blank page before it, or in none.
+	var answer string
+	for {
+		var err error
+		answer, err = p.page.Eval(ctx, chromiumFit)
+		if err == nil && answer != "wait" {
+			break
+		}
+		if !p.page.Running() || p.page.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if answer == "" {
+		return
+	}
+	var bounds struct{ Left, Top, Width, Height int }
+	if json.Unmarshal([]byte(answer), &bounds) != nil || bounds.Width <= 0 || bounds.Height <= 0 {
+		return
+	}
+	_ = p.page.SetWindowBounds(ctx, bounds.Left, bounds.Top, bounds.Width, bounds.Height)
 }
 
 // mediaError is the error of a video element: its MediaError code and the

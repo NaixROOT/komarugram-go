@@ -157,10 +157,54 @@ var chromiumVersion = regexp.MustCompile(`(^|\s)\d+\.\d+\.\d+\.\d+(\s|$)`)
 // It runs the program with --version, so it is for a path the user picked
 // and trusts to be a program, not for any file. On Windows, where a browser
 // opens a window for --version, it reads the version resource instead.
+//
+// The answer is kept for each state of the file: the settings ask about the
+// file the user picked off the frame, and a launch, or the choice of the
+// player, asks again about the same file on it.
 func CheckBrowser(ctx context.Context, path string) (string, error) {
 	if !filepath.IsAbs(path) || !program.IsExecutable(path) {
 		return "", ErrNotExecutable
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", ErrNotExecutable
+	}
+	key := checkKey{path, info.Size(), info.ModTime()}
+	checksMu.Lock()
+	result, ok := checks[key]
+	checksMu.Unlock()
+	if ok {
+		return result.banner, result.err
+	}
+	banner, err := checkBrowser(ctx, path)
+	// A timeout or a cancelled context says nothing about the file.
+	if ctx.Err() == nil {
+		checksMu.Lock()
+		checks[key] = checkResult{banner, err}
+		checksMu.Unlock()
+	}
+	return banner, err
+}
+
+// checkKey identifies a program file as it was when it was checked.
+type checkKey struct {
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+type checkResult struct {
+	banner string
+	err    error
+}
+
+var (
+	checksMu sync.Mutex
+	checks   = map[checkKey]checkResult{}
+)
+
+// checkBrowser is CheckBrowser, asked every time.
+func checkBrowser(ctx context.Context, path string) (string, error) {
 	var banner string
 	if runtime.GOOS == "windows" {
 		product, version, err := program.FileVersion(ctx, path)

@@ -339,6 +339,10 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		if err := services.Preferences.SetBrowserPath(path); err != nil {
 			log.Printf("save settings: %v", err)
 		}
+		// Videos play in this browser when there is no player: the choice
+		// of the player is looked at again with it.
+		miniapp.SetBrowser(path)
+		a.settings.players.refresh()
 	}
 	miniapp.SetBrowser(global.BrowserPath)
 	a.settings.players.choose = func(kind player.Kind) {
