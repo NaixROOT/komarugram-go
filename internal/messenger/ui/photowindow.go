@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"image/color"
 	"sync"
 
 	"gio-mw/defaults"
@@ -143,4 +144,10 @@ func (a *App) openPhotoWindow(chat int64, m model.Message, known []model.Message
 		// Build and Closed run on the new window's goroutine, in that order.
 		Closed: func() { a.photoWindows.remove(opened) },
 	})
+}
+
+// FrameFill implements appwindow.FrameFiller: the caption of the window's
+// own frame is of the backdrop the photo lies on.
+func (p *photoWindow) FrameFill(gtx layout.Context) (fill, on color.NRGBA) {
+	return p.viewer.backdropColor, scheme(gtx).Surface.OnColor.AsNRGBA()
 }

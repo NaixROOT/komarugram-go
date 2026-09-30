@@ -76,9 +76,9 @@ type Global struct {
 	// floating composer, the context menus and the toasts.
 	Overlays Overlays `json:"overlays"`
 	// WindowTransparency lets the desktop show through the main window
-	// surfaces on Wayland, in percent. Text and media stay opaque.
+	// surfaces on Wayland and Windows, in percent. Text and media stay opaque.
 	WindowTransparency int `json:"window_transparency,omitempty"`
-	// WindowBlur asks the Wayland compositor to blur behind translucent
+	// WindowBlur asks the compositor, of Wayland or Windows, to blur behind translucent
 	// main window surfaces; transparency can also be used on its own.
 	WindowBlur bool `json:"window_blur"`
 	// Player is the external player videos open in; empty until the user
@@ -663,7 +663,7 @@ func (s *Store) SetWindowBlur(on bool) error {
 	return s.change(func(g *Global) { g.WindowBlur = on })
 }
 
-// SetWindowTransparency changes the Wayland window surfaces independently
+// SetWindowTransparency changes the window surfaces independently
 // of the overlays. Zero keeps the surfaces opaque.
 func (s *Store) SetWindowTransparency(value int) error {
 	if value < 0 || value > TransparencyMax {

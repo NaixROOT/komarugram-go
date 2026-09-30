@@ -139,11 +139,13 @@ The history is drawn as materialgram draws it:
   light text is only readable on its dark plate. A new overlay: take `p.menuBackdrop()` / `p.toastBackdrop()` (or the
   list's), fill with `overlayFill`. Not covered: forms, dialogs' toasts, the photo viewer,
   and the toast of the search results.
-- **Main window surfaces** (`window_surface.go`): on Wayland the sidebar, chat
-  list (including the compact folder bar) and chat header let the desktop show
-  through at `preferences.Global.WindowTransparency`. The compositor supplies
-  blur through the same `Transparent` / `BlurBehind` window options as the photo
-  viewer. `fillWindowSurface` changes only the fill alpha; text, avatars and
+- **Main window surfaces** (`window_surface.go`): on Wayland and Windows the
+  sidebar, chat list (including the compact folder bar) and chat header let
+  the desktop show through at `preferences.Global.WindowTransparency`. The
+  compositor supplies blur through the same effects as the photo viewer's
+  window: `appwindow.Options.Transparent` / `BlurBehind`, and
+  `Window.SetEffects` to change them; do not pass `app.Transparent` or
+  `app.BlurBehind` to a window yourself. `fillWindowSurface` changes only the fill alpha; text, avatars and
   history stay opaque. Other backends retain opaque surfaces. Never paint an
   opaque root behind translucent panels, or stack replacement headers over
   each other. Search and selection replace the ordinary header. The separate
@@ -152,6 +154,18 @@ The history is drawn as materialgram draws it:
   same card, can turn compositor blur off without changing transparency; it
   does not depend on animation settings. `TestWindowSurfacePixels` checks actual
   frame alpha, with `WINDOW_SURFACES_PNG_DIR` saving the frames.
+- **The window's own frame** (`internal/appwindow/frame.go`): on Windows blur
+  is acrylic, which is drawn right only behind a window without the system's
+  frame, so a window that blurs has none and `appwindow` draws one: a caption
+  of 32 dp with the title and the minimize, maximize and close buttons, above
+  the content, which gets the rest of the window. The caption moves the
+  window, and the system maximizes it on a double click and snaps it; the
+  buttons are beside the move area, not over it, or the system would take
+  their pointer. Without blur the window has the system's frame again. The
+  caption is of the theme's `SurfaceContainer` unless the content implements
+  `appwindow.FrameFiller`, as the main window (its sidebar's translucent
+  fill) and the photo window (its backdrop) do. `TestOwnFrameIsDrawn` draws
+  it, and saves both themes with `FRAME_PNG_DIR`.
 - **Mini Apps** (`webapp.go`, `internal/messenger/miniapps`): the window's
   `webApps` owns a `miniapps.Runner`, which asks the store for the link, opens
   it with `pkg/miniapp` and answers the app's events on its own goroutines;
