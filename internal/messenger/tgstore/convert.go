@@ -30,11 +30,13 @@ type fileLocation struct {
 	Photo                      bool
 	Thumb                      string
 	Peer                       *peerRecord
+	// Big asks for the large picture of a peer's photo, not the small one.
+	Big bool `json:",omitempty"`
 }
 
 func (l fileLocation) input() tg.InputFileLocationClass {
 	if l.Peer != nil {
-		return &tg.InputPeerPhotoFileLocation{Peer: l.Peer.input(), PhotoID: l.ID}
+		return &tg.InputPeerPhotoFileLocation{Peer: l.Peer.input(), PhotoID: l.ID, Big: l.Big}
 	}
 	if l.Photo {
 		return &tg.InputPhotoFileLocation{ID: l.ID, AccessHash: l.Hash, FileReference: l.Reference, ThumbSize: l.Thumb}

@@ -91,8 +91,18 @@ func savePhoto(data []byte, m model.Message) (string, error) {
 	case "image/gif":
 		ext = ".gif"
 	}
-	path := filepath.Join(dir, fmt.Sprintf("komarugram-go-%s-%d%s", m.Date.Local().Format("2006-01-02-150405"), m.Key.MessageID, ext))
+	path := filepath.Join(dir, photoFileName(m)+ext)
 	return path, os.WriteFile(path, data, 0o644)
+}
+
+// photoFileName names the file of photo m without its extension: after its
+// date and message, or after the chat and place of a profile photo, which
+// is no message.
+func photoFileName(m model.Message) string {
+	if model.IsProfilePhoto(m.Key.MessageID) {
+		return fmt.Sprintf("komarugram-go-avatar-%d-%d", m.Key.ChatID, m.Key.MessageID-model.ProfilePhotoID(0)+1)
+	}
+	return fmt.Sprintf("komarugram-go-%s-%d", m.Date.Local().Format("2006-01-02-150405"), m.Key.MessageID)
 }
 
 // updateKept takes the results of saving and copying: the toast tells them for

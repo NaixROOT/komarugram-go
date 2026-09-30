@@ -48,7 +48,7 @@ put it next to these, and add it to this page.
 | `vspace(dp)` | Vertical gap in a `layout.Flex`. |
 | `fillRect`, `fillRounded` | Filling a size with a theme color. |
 | `offset`, `inRect`, `exact` | Placing a widget at a point, in a rectangle or at an exact size. |
-| `avatar` / `App.layoutAvatar` | A chat's photo, or its colored initials; pass `layoutAvatar` down as `avatarLayout`. |
+| `avatar` / `App.layoutAvatar` | A chat's photo, or its colored initials; pass `layoutAvatar` down as `avatarLayout`. The avatar in a chat's header and at the top of its info opens the photos of its profile in the photo viewer (`layoutAvatarTarget`, `photoViewer.OpenProfile`). |
 | `withBadges` / `App.badges` | A name with the Premium star, emoji status, check mark or scam marks around it. |
 | `drawBadge`, `drawBadgeRight` | Unread counters. |
 | `flatEditor` | A borderless one-line editor with a hint, as in the composer and the picker's search. |

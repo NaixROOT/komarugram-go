@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"math"
 	"strings"
+	"time"
 
 	"komarugram/internal/messenger/model"
 	"komarugram/pkg/resample"
@@ -127,4 +128,40 @@ func (s *Store) ChatPhotos(ctx context.Context, chat int64, anchor model.Message
 		return photos[max(0, len(photos)-limit):], ctx.Err()
 	}
 	return photos[:min(len(photos), limit)], ctx.Err()
+}
+
+// ProfilePhoto implements model.ProfilePhotoSource: every chat of the demo
+// has three photos, drawn as the photos of its history are.
+func (s *Store) ProfilePhoto(chat int64) (model.Message, bool) {
+	return s.profilePhoto(chat, 0), true
+}
+
+// ProfilePhotos implements model.ProfilePhotoSource.
+func (s *Store) ProfilePhotos(ctx context.Context, chat int64) ([]model.Message, error) {
+	var photos []model.Message
+	for i := range 3 {
+		photos = append(photos, s.profilePhoto(chat, i))
+	}
+	return photos, ctx.Err()
+}
+
+func (s *Store) profilePhoto(chat int64, i int) model.Message {
+	n := int(uint64(chat)%uint64(len(demoPhotoSizes))) + i + 1
+	return model.Message{
+		Kind:       model.MessagePhoto,
+		Key:        model.MessageKey{ChatID: chat, MessageID: model.ProfilePhotoID(i)},
+		Media:      demoPhoto(n),
+		SenderName: s.chatTitle(chat),
+		Date:       time.Date(2024, 3, 1+i, 12, 0, 0, 0, time.UTC),
+	}
+}
+
+// chatTitle is the title of a chat of the demo, empty when it has none.
+func (s *Store) chatTitle(chat int64) string {
+	for _, c := range s.Chats() {
+		if c.ID == chat {
+			return c.Title
+		}
+	}
+	return ""
 }

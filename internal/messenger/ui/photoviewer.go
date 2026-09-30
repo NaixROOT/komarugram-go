@@ -163,6 +163,36 @@ func (v *photoViewer) Open(chat int64, m model.Message, known []model.Message) {
 	v.fetch(ctx, session, 1, last)
 }
 
+// OpenProfile shows the photos of chat's profile, the one it shows now
+// first: at once, from what is known, and with the older ones added when
+// Telegram has told them. It tells whether the store has a photo of the chat.
+func (v *photoViewer) OpenProfile(chat int64) bool {
+	source, ok := v.source.(model.ProfilePhotoSource)
+	if !ok {
+		return false
+	}
+	current, ok := source.ProfilePhoto(chat)
+	if !ok {
+		return false
+	}
+	v.Open(chat, current, nil)
+	v.mu.Lock()
+	ctx, session := v.ctx, v.session
+	v.mu.Unlock()
+	go func() {
+		defer crash.Recover("profile photos", func(*crash.Panic) {})
+		page, err := source.ProfilePhotos(ctx, chat)
+		v.mu.Lock()
+		defer v.invalidate()
+		defer v.mu.Unlock()
+		// The photo shown stays as it is, already decoded; the rest is added.
+		if v.session == session && err == nil {
+			v.items = mergePhotos(v.items, page)
+		}
+	}()
+	return true
+}
+
 func (v *photoViewer) Close() {
 	v.mu.Lock()
 	if v.cancel != nil {
@@ -616,9 +646,13 @@ func (v *photoViewer) layoutBar(gtx layout.Context, items []model.Message, i int
 							return label(gtx, l.Format("viewer.position", map[string]string{"n": fmt.Sprint(i + 1), "amount": fmt.Sprint(len(items))}), token.TypestyleTitleSmall, white, 1)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							txt := m.Date.Local().Format("02.01.2006 15:04")
-							if m.SenderName != "" {
-								txt = m.SenderName + " · " + txt
+							// A profile photo known only locally has no date yet.
+							txt := m.SenderName
+							if !m.Date.IsZero() {
+								if txt != "" {
+									txt += " · "
+								}
+								txt += m.Date.Local().Format("02.01.2006 15:04")
 							}
 							return label(gtx, txt, token.TypestyleLabelMedium, dim, 1)
 						}),

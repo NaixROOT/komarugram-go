@@ -135,6 +135,12 @@ func (s *Store) refreshReference(ctx context.Context, m model.Message) error {
 		s.wallpaper(ctx, wall)
 		return nil
 	}
+	if model.IsProfilePhoto(m.Key.MessageID) {
+		// A profile photo is no message: asking for the photos again
+		// brings the file references of all of them.
+		_, err := s.ProfilePhotos(ctx, m.Key.ChatID)
+		return err
+	}
 	if ref.Gift {
 		chat := ref.GiftChat
 		if chat == 0 {

@@ -37,6 +37,8 @@ type forumPage struct {
 	list scroll.List
 	// header takes a click on the forum's header, which opens its info.
 	header widget.Clickable
+	// avatar takes a click on the avatar in it, which shows its photo.
+	avatar widget.Clickable
 	rows   map[int]*surface
 	retry  surface
 	// spinner is the indicator of the first page on its way.
@@ -85,6 +87,7 @@ func (a *App) layoutForum(gtx layout.Context, c model.Chat, l localization.Catal
 	hgtx := gtx
 	hgtx.Constraints = layout.Exact(header)
 	f.header.Layout(hgtx, func(layout.Context) layout.Dimensions { return layout.Dimensions{Size: header} })
+	layoutAvatarTarget(gtx, &f.avatar)
 	return dims
 }
 
