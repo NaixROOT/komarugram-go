@@ -288,7 +288,12 @@ The history is drawn as materialgram draws it:
   the file is the user's and is not removed. `program.LookPath` and
   `FindFlatpak` are the only searches for external programs:
   `-no-integrations` turns them off. Voice messages and music play in the
-  client (`audio_player.go`): `audioPlayer`, one per chat page;
+  client (`audio_player.go`): `audioPlayer`, one per window, which its
+  chat pages share, so that what plays goes on in another chat; the bar
+  over the chat (`audio_bar.go`, `layoutAudioBar`) tells what plays, with
+  play or pause, the speed of what changes its speed (`speedChanges`,
+  `audio.Stretched`) and a button that ends it, and what follows plays
+  after the end (`nextAudio`);
   `voiceLayout`, the row with its button, waveform (`drawWaveform`) and
   time, and `musicLayout`, with the title, the performer and a bar
   (`drawBar`); `audioRow.update` takes their clicks and drags. `showWaveform`

@@ -849,6 +849,10 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			s.applyPinned(ctx, peerID(u.Peer), u.Messages, u.Pinned)
 		case *tg.UpdatePinnedChannelMessages:
 			s.applyPinned(ctx, peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.Messages, u.Pinned)
+		case *tg.UpdateReadMessagesContents:
+			s.contentsRead(0, u.Messages)
+		case *tg.UpdateChannelReadMessagesContents:
+			s.contentsRead(peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.Messages)
 		case *tg.UpdateChannelMessageViews:
 			s.changeMessage(peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.ID, func(m *model.Message) { m.Views = max(m.Views, u.Views) })
 		}

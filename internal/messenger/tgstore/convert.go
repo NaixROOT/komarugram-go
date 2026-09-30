@@ -50,6 +50,7 @@ func convertMessage(account string, m tg.MessageClass, names map[int64]string) (
 		out.Text = m.Message
 		out.Date = time.Unix(int64(m.Date), 0)
 		out.Outgoing = m.Out
+		out.MediaUnread = m.MediaUnread
 		out.GroupedID = m.GroupedID
 		out.NoForwards = m.Noforwards
 		out.Post = m.Post

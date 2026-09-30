@@ -154,8 +154,11 @@ type chatPage struct {
 	invalidate func()
 	// online counts the open group's members online.
 	online groupOnline
-	// audio plays the chat's voice messages and music.
-	audio audioPlayer
+	// audio plays voice messages and music: the window's pages share one
+	// player, which goes on when another chat is shown. audioBar shows
+	// what it plays over the history.
+	audio    *audioPlayer
+	audioBar audioBar
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
 	openPhoto  func(model.Message)
 	openAuthor func(model.Chat)
@@ -247,7 +250,7 @@ func (p *chatPage) blurComposer() bool {
 }
 
 func newChatPage(source model.ConversationStore, changed func()) *chatPage {
-	return &chatPage{composer: newMessageComposer(source, changed), source: source, media: chatmedia.New(source, changed), invalidate: changed}
+	return &chatPage{composer: newMessageComposer(source, changed), source: source, media: chatmedia.New(source, changed), invalidate: changed, audio: &audioPlayer{}}
 }
 
 // dropStickerLoops drops, at the end of the frame, the decoded loops of the
@@ -352,10 +355,11 @@ func (p *chatPage) save(force bool) {
 	p.saved = time.Now()
 }
 
-// Layout draws the chat's pinned bar, if it has pinned messages, and its
-// history under it.
+// Layout draws the bar of what plays, if anything does, the chat's pinned
+// bar, if it has pinned messages, and its history under them.
 func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
-	bar := p.pinnedHeight(gtx, c.ID)
+	playing := p.audioBarSize(gtx)
+	bar := playing + p.pinnedHeight(gtx, c.ID)
 	if bar == 0 {
 		return p.layoutHistory(gtx, c, l, animate)
 	}
@@ -365,7 +369,14 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 	offset(body, image.Pt(0, bar), func(gtx layout.Context) layout.Dimensions {
 		return p.layoutHistory(gtx, c, l, animate)
 	})
-	p.layoutPinned(gtx, c.ID, l)
+	// What plays is told over the pinned message, as in Telegram Desktop.
+	offset(gtx, image.Pt(0, playing), func(gtx layout.Context) layout.Dimensions {
+		p.layoutPinned(gtx, c.ID, l)
+		return layout.Dimensions{}
+	})
+	if playing > 0 {
+		p.layoutAudioBar(gtx, l)
+	}
 	return layout.Dimensions{Size: size}
 }
 
@@ -395,9 +406,6 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		}()
 	}
 	if p.chat != c.ID {
-		if p.audio.chat() != c.ID {
-			p.audio.stop()
-		}
 		p.forgetDialogStickers()
 		p.stickers.stop()
 		p.emojiPacks.stop()

@@ -100,6 +100,9 @@ type Global struct {
 	// AudioPlayer plays voice messages and music: empty or wasm for the
 	// client's own, external for mpv or VLC.
 	AudioPlayer string `json:"audio_player,omitempty"`
+	// VoiceSpeed is the speed voice messages, and music long enough to be
+	// a podcast, play at: 0 for their own, as 1 is.
+	VoiceSpeed float64 `json:"voice_speed,omitempty"`
 	// Ghost is what the accounts tell others of themselves, as AyuGram's
 	// Ghost Mode, the same for all of them.
 	Ghost Ghost `json:"ghost"`
@@ -379,6 +382,9 @@ func validate(g Global) error {
 	if g.AnimationPlayer != "" && g.AnimationPlayer != "ffmpeg" && g.AnimationPlayer != "wasm" {
 		return errors.New("invalid animation player")
 	}
+	if g.VoiceSpeed != 0 && (g.VoiceSpeed < 0.5 || g.VoiceSpeed > 3) {
+		return errors.New("invalid voice speed")
+	}
 	if g.AudioPlayer != "" && g.AudioPlayer != "wasm" && g.AudioPlayer != "external" {
 		return errors.New("invalid audio player")
 	}
@@ -431,6 +437,10 @@ func (s *Store) SetAnimationPlayer(value string) error {
 
 func (s *Store) SetAudioPlayer(value string) error {
 	return s.change(func(g *Global) { g.AudioPlayer = value })
+}
+
+func (s *Store) SetVoiceSpeed(value float64) error {
+	return s.change(func(g *Global) { g.VoiceSpeed = value })
 }
 
 func (s *Store) SetTheme(value Theme) error {

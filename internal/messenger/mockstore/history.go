@@ -96,6 +96,7 @@ func (s *Store) History(chat int64) model.History {
 	// whose waveform the player works out.
 	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice", MIMEType: "audio/ogg", Size: int64(len(demoVoice)), Duration: 7 * time.Second, Waveform: demoVoiceWaveform}, nil, nil)
 	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice-bare", MIMEType: "audio/ogg", Size: int64(len(demoVoice)), Duration: 7 * time.Second}, nil, nil)
+	messages[len(messages)-1].MediaUnread = true
 	// An MP3 voice message, as some bots send, without a waveform.
 	add("", model.MessageVoice, &model.MessageMedia{ID: "demo/voice-mp3", MIMEType: "audio/mpeg", Size: int64(len(demoVoiceMP3)), Duration: 5 * time.Second}, nil, nil)
 	// Music, which plays in the client as voice messages do.

@@ -17,8 +17,9 @@ import (
 // TestRenderAudio draws the demo's voice messages and music in the history:
 // voice messages with the waveform Telegram sends and without, whose
 // waveforms are worked out as they show (the M4A one's decoder is fetched),
-// and music with its bar, paused at 60%: one plays at a time. In the light
-// and the dark theme, into AUDIO_PNG_DIR:
+// and music with its bar, paused at 60%: one plays at a time, and the bar
+// over the chat tells which. In the light and the dark theme, into
+// AUDIO_PNG_DIR:
 //
 //	AUDIO_PNG_DIR=/tmp/voice go test ./internal/messenger/ui -run RenderAudio
 func TestRenderAudio(t *testing.T) {
@@ -62,6 +63,13 @@ func TestRenderAudio(t *testing.T) {
 			theme = "dark"
 		}
 		renderToast(t, filepath.Join(dir, "audio-"+theme+".png"), image.Pt(600, 820), dark, draw)
+		// A voice message at one and a half its speed: the bar over the
+		// chat has the button of the speed.
+		p.audio.nextSpeed()
+		p.audio.toggle(p, voiced, 0.3)
+		waitAudio(t, "the voice message did not start", func() bool { return p.audio.state(voiced).playing })
+		p.audio.toggle(p, voiced, -1)
+		renderToast(t, filepath.Join(dir, "audio-voice-"+theme+".png"), image.Pt(600, 820), dark, draw)
 	}
 	os.Remove(filepath.Join(dir, "scratch.png"))
 }
