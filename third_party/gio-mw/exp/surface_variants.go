@@ -17,52 +17,52 @@ import (
 func Background(gtx layout.Context) {
 	windowArea := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	// The background is the root surface of a frame: start the surface stack
-	// afresh, or it would grow by one theme every frame.
-	defaultStack.reset()
-	NewSurfaceTheme(materialTheme.Scheme.Background)
+	// The background is the root surface of a frame: the frame's surfaces
+	// start afresh on it, should it be drawn twice.
+	surfaces(gtx).reset()
+	NewSurfaceTheme(gtx, materialTheme.Scheme.Background)
 	paint.Fill(gtx.Ops, materialTheme.Scheme.Background.Color.AsNRGBA())
 	windowArea.Pop()
 }
 
 func PrimaryContainer(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(materialTheme.Scheme.PrimaryContainer)
+	surfaceTheme := NewSurfaceTheme(gtx, materialTheme.Scheme.PrimaryContainer)
 	paint.FillShape(gtx.Ops, materialTheme.Scheme.PrimaryContainer.Color.AsNRGBA(), shapeArea)
 	return surfaceTheme
 }
 
 func SecondaryContainer(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(materialTheme.Scheme.SecondaryContainer)
+	surfaceTheme := NewSurfaceTheme(gtx, materialTheme.Scheme.SecondaryContainer)
 	paint.FillShape(gtx.Ops, materialTheme.Scheme.SecondaryContainer.Color.AsNRGBA(), shapeArea)
 	return surfaceTheme
 }
 
 func TertiaryContainer(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(materialTheme.Scheme.TertiaryContainer)
+	surfaceTheme := NewSurfaceTheme(gtx, materialTheme.Scheme.TertiaryContainer)
 	paint.FillShape(gtx.Ops, materialTheme.Scheme.TertiaryContainer.Color.AsNRGBA(), shapeArea)
 	return surfaceTheme
 }
 
 func InverseSurface(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(materialTheme.Scheme.InverseSurface)
+	surfaceTheme := NewSurfaceTheme(gtx, materialTheme.Scheme.InverseSurface)
 	paint.FillShape(gtx.Ops, materialTheme.Scheme.InverseSurface.Color.AsNRGBA(), shapeArea)
 	return surfaceTheme
 }
 
 func Surface(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(materialTheme.Scheme.Surface)
+	surfaceTheme := NewSurfaceTheme(gtx, materialTheme.Scheme.Surface)
 	paint.FillShape(gtx.Ops, materialTheme.Scheme.Surface.Color.AsNRGBA(), shapeArea)
 	return surfaceTheme
 }
 
 func SurfaceDim(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceDim,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -72,7 +72,7 @@ func SurfaceDim(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 
 func SurfaceBright(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceBright,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -82,14 +82,14 @@ func SurfaceBright(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 
 func SurfaceVariant(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(materialTheme.Scheme.SurfaceVariant)
+	surfaceTheme := NewSurfaceTheme(gtx, materialTheme.Scheme.SurfaceVariant)
 	paint.FillShape(gtx.Ops, materialTheme.Scheme.SurfaceVariant.Color.AsNRGBA(), shapeArea)
 	return surfaceTheme
 }
 
 func SurfaceContainerLowest(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceContainerLowest,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -99,7 +99,7 @@ func SurfaceContainerLowest(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme
 
 func SurfaceContainerLow(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceContainerLow,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -109,7 +109,7 @@ func SurfaceContainerLow(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 
 func SurfaceContainer(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceContainer,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -119,7 +119,7 @@ func SurfaceContainer(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 
 func SurfaceContainerHigh(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceContainerHigh,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -129,7 +129,7 @@ func SurfaceContainerHigh(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 
 func SurfaceContainerHighest(gtx layout.Context, shapeArea clip.Op) *SurfaceTheme {
 	materialTheme := wdk.GetMaterialTheme(gtx)
-	surfaceTheme := NewSurfaceTheme(token.MatColorSet{
+	surfaceTheme := NewSurfaceTheme(gtx, token.MatColorSet{
 		Color:   materialTheme.Scheme.SurfaceContainerHighest,
 		OnColor: materialTheme.Scheme.Surface.Color,
 	})
@@ -138,7 +138,7 @@ func SurfaceContainerHighest(gtx layout.Context, shapeArea clip.Op) *SurfaceThem
 }
 
 func DisplayL(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleDisplayLarge,
@@ -147,7 +147,7 @@ func DisplayL(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func DisplayM(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleDisplayMedium,
@@ -156,7 +156,7 @@ func DisplayM(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func DisplayS(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleDisplaySmall,
@@ -165,7 +165,7 @@ func DisplayS(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func HeadlineL(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleHeadlineLarge,
@@ -174,7 +174,7 @@ func HeadlineL(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func HeadlineM(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleHeadlineMedium,
@@ -183,7 +183,7 @@ func HeadlineM(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func HeadlineS(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleHeadlineSmall,
@@ -192,7 +192,7 @@ func HeadlineS(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func TitleL(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleTitleLarge,
@@ -201,7 +201,7 @@ func TitleL(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func TitleM(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleTitleMedium,
@@ -210,7 +210,7 @@ func TitleM(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func TitleS(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleTitleSmall,
@@ -219,7 +219,7 @@ func TitleS(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func BodyL(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleBodyLarge,
@@ -228,7 +228,7 @@ func BodyL(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func BodyM(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleBodyMedium,
@@ -237,7 +237,7 @@ func BodyM(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func BodyS(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleBodySmall,
@@ -246,7 +246,7 @@ func BodyS(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func LabelL(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleLabelLarge,
@@ -255,7 +255,7 @@ func LabelL(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func LabelLP(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleLabelLarge,
@@ -264,7 +264,7 @@ func LabelLP(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func LabelM(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleLabelMedium,
@@ -273,7 +273,7 @@ func LabelM(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func LabelMP(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleLabelMedium,
@@ -282,7 +282,7 @@ func LabelMP(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func LabelS(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestyleLabelSmall,
@@ -291,7 +291,7 @@ func LabelS(gtx layout.Context, txt string) layout.Dimensions {
 }
 
 func Preformatted(gtx layout.Context, txt string) layout.Dimensions {
-	surfaceTheme := GetSurfaceTheme()
+	surfaceTheme := GetSurfaceTheme(gtx)
 	presentation := wdk.LabelStyle{
 		Color:     surfaceTheme.OnColor,
 		Typestyle: token.TypestylePreformatted,

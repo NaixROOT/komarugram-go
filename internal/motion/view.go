@@ -116,7 +116,7 @@ func (v *View) Layout(gtx layout.Context) layout.Dimensions {
 			if style == token.TypestyleDefault {
 				style = token.TypestyleTitleLarge
 			}
-			return wdk.LayoutLabel(gtx, wdk.LabelStyle{Typestyle: style, Color: exp.GetSurfaceTheme().OnColor}, v.strings.Title)
+			return wdk.LayoutLabel(gtx, wdk.LabelStyle{Typestyle: style, Color: exp.GetSurfaceTheme(gtx).OnColor}, v.strings.Title)
 		}),
 		block.NewSegment(func(gtx layout.Context) layout.Dimensions {
 			return v.mode.Layout(gtx, radio.LeadingKind, v.strings.Modes)

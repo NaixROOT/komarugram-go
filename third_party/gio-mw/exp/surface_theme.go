@@ -4,12 +4,18 @@ package exp
 
 import (
 	"gio-mw/token"
+	"gio-mw/wdk"
+
+	"gioui.org/layout"
 )
 
 const (
 	initialStackCapacity = 16
 	stackGrowthFactor    = 2
 )
+
+// SurfaceNamespace is the key of the frame's surfaces in gtx.Values.
+const SurfaceNamespace = "gio-mw/exp.surfaces"
 
 // ThemeStack defines the interface for theme stack operations
 type ThemeStack interface {
@@ -80,23 +86,43 @@ func (s *SurfaceThemeStack) reset() {
 	s.position = 0
 }
 
-// Current returns the current theme from the stack
+// Current returns the current theme from the stack, nil when it is empty.
 func (s *SurfaceThemeStack) Current() *SurfaceTheme {
 	if len(s.themes) > 0 {
 		return s.themes[len(s.themes)-1]
 	}
-	panic("SurfaceThemeStack: no current theme")
+	return nil
 }
 
-// defaultStack is the global instance of SurfaceThemeStack
-var defaultStack = NewSurfaceThemeStack()
-
-// GetSurfaceTheme returns the current surface theme
-func GetSurfaceTheme() *SurfaceTheme {
-	return defaultStack.Current()
+// surfaces is the stack of the frame gtx draws. It lives in gtx.Values,
+// which a window makes anew for every frame: each window and each frame has
+// its own, where a stack for the whole program would be pushed and popped by
+// the windows' goroutines at once.
+func surfaces(gtx layout.Context) *SurfaceThemeStack {
+	if s, ok := gtx.Values[SurfaceNamespace].(*SurfaceThemeStack); ok {
+		return s
+	}
+	if gtx.Values == nil {
+		panic("exp: the context has no Values for its surfaces")
+	}
+	s := NewSurfaceThemeStack()
+	gtx.Values[SurfaceNamespace] = s
+	return s
 }
 
-// NewSurfaceTheme creates and pushes a new surface theme
-func NewSurfaceTheme(colorSet token.MatColorSet) *SurfaceTheme {
-	return defaultStack.Push(colorSet)
+// GetSurfaceTheme returns the surface being drawn on: the one pushed last
+// in the frame, or the background of the material theme, which is under
+// every surface.
+func GetSurfaceTheme(gtx layout.Context) *SurfaceTheme {
+	if theme := surfaces(gtx).Current(); theme != nil {
+		return theme
+	}
+	background := wdk.GetMaterialTheme(gtx).Scheme.Background
+	return &SurfaceTheme{Color: background.Color, OnColor: background.OnColor}
+}
+
+// NewSurfaceTheme creates and pushes a new surface theme on the frame's
+// surfaces; Pop removes it.
+func NewSurfaceTheme(gtx layout.Context, colorSet token.MatColorSet) *SurfaceTheme {
+	return surfaces(gtx).Push(colorSet)
 }
