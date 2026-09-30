@@ -157,7 +157,7 @@ The history is drawn as materialgram draws it:
 - **The window's own frame** (`internal/appwindow/frame.go`): on Windows blur
   is acrylic, which is drawn right only behind a window without the system's
   frame, so a window that blurs has none and `appwindow` draws one: a caption
-  of 32 dp with the title and the minimize, maximize and close buttons, above
+  of 31 dp, the height of the system's at 100%, with the title and the minimize, maximize and close buttons, above
   the content, which gets the rest of the window. The caption moves the
   window, and the system maximizes it on a double click and snaps it; the
   buttons are beside the move area, not over it, or the system would take

@@ -82,7 +82,7 @@ func TestOwnFrameIsShownForAWindowWithoutTheSystems(t *testing.T) {
 		f.configure(c.cnf)
 		want := 0
 		if c.shown {
-			want = 64
+			want = 62
 		}
 		if f.shown != c.shown || f.height(gtx) != want {
 			t.Errorf("%s: shown %v, %d pixels high, want %v and %d", c.name, f.shown, f.height(gtx), c.shown, want)
@@ -223,7 +223,7 @@ func TestOwnFrameIsDrawn(t *testing.T) {
 	for i := range 3 {
 		found := false
 		for x := size.X - (3-i)*46; x < size.X-(2-i)*46; x++ {
-			for y := range 32 {
+			for y := range 31 {
 				r, _, _, _ := img.At(x, y).RGBA()
 				found = found || r > 0xc000
 			}

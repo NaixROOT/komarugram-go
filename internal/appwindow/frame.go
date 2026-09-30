@@ -61,7 +61,7 @@ type FrameFiller interface {
 }
 
 const (
-	captionHeight = unit.Dp(32)
+	captionHeight = unit.Dp(31)
 	captionButton = unit.Dp(46)
 	captionIcon   = unit.Dp(10)
 )
