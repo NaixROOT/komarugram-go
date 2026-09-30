@@ -159,18 +159,68 @@ func TestOwnFrameButtonsActOnTheWindow(t *testing.T) {
 func TestCaptionButtonColors(t *testing.T) {
 	on := color.NRGBA{R: 0x10, G: 0x20, B: 0x30, A: 0xff}
 	white := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
-	if fill, icon := captionButtonColors(system.ActionClose, false, false, on); fill.A != 0 || icon != on {
+	if fill, icon := captionButtonColors(system.ActionClose, 0, false, on); fill.A != 0 || icon != on {
 		t.Errorf("the close button at rest: fill %v, glyph %v", fill, icon)
 	}
-	for _, state := range [][2]bool{{true, false}, {false, true}} {
-		if fill, icon := captionButtonColors(system.ActionClose, state[0], state[1], on); fill != closeHover || icon != white {
-			t.Errorf("the close button hovered %v, pressed %v: fill %v, glyph %v", state[0], state[1], fill, icon)
-		}
+	if fill, icon := captionButtonColors(system.ActionClose, 1, false, on); fill != closeHover || icon != white {
+		t.Errorf("the close button lit: fill %v, glyph %v", fill, icon)
 	}
-	hover, _ := captionButtonColors(system.ActionMinimize, true, false, on)
-	press, icon := captionButtonColors(system.ActionMinimize, true, true, on)
-	if hover.A == 0 || press.A <= hover.A || icon != on || hover.R != on.R {
-		t.Errorf("another button: hovered %v, pressed %v, glyph %v", hover, press, icon)
+	// On the way it is the red, seen through, and a glyph between the two.
+	fill, icon := captionButtonColors(system.ActionClose, 0.5, false, on)
+	if fill.R != closeHover.R || fill.A < 0x70 || fill.A > 0x90 || icon.R <= on.R || icon.R >= white.R {
+		t.Errorf("the close button half lit: fill %v, glyph %v", fill, icon)
+	}
+	rest, _ := captionButtonColors(system.ActionMinimize, 0, false, on)
+	half, _ := captionButtonColors(system.ActionMinimize, 0.5, false, on)
+	hover, _ := captionButtonColors(system.ActionMinimize, 1, false, on)
+	press, icon := captionButtonColors(system.ActionMinimize, 1, true, on)
+	if rest.A != 0 || half.A == 0 || half.A >= hover.A || press.A <= hover.A || icon != on || hover.R != on.R {
+		t.Errorf("another button: at rest %v, half lit %v, lit %v, pressed %v, glyph %v", rest, half, hover, press, icon)
+	}
+}
+
+func TestCaptionButtonsFadeInAndOut(t *testing.T) {
+	var f frame
+	now := time.Now()
+	over := [3]bool{false, true, false}
+	// The first frame under the pointer starts the fade, and asks for more.
+	// However long ago the last frame was, the fade is at its start.
+	f.litAt = now.Add(-time.Hour)
+	if !f.light(now, over, true) || f.lit[1] != 0 {
+		t.Fatalf("the first frame: lit %v", f.lit)
+	}
+	if !f.light(now.Add(captionFadeIn/2), over, true) || f.lit[1] < 0.4 || f.lit[1] > 0.6 {
+		t.Fatalf("half the way in: lit %v", f.lit)
+	}
+	if f.light(now.Add(captionFadeIn*2), over, true) || f.lit[1] != 1 {
+		t.Fatalf("after the way in: lit %v, and a frame asked for", f.lit)
+	}
+	if f.lit[0] != 0 || f.lit[2] != 0 {
+		t.Errorf("the buttons the pointer is not over are lit: %v", f.lit)
+	}
+	// It fades once the pointer has left, slower than it lit up.
+	now = f.litAt.Add(time.Hour)
+	if !f.light(now, [3]bool{}, true) || f.lit[1] != 1 {
+		t.Fatalf("the frame the pointer left in: lit %v", f.lit)
+	}
+	if !f.light(now.Add(captionFadeIn), [3]bool{}, true) || f.lit[1] <= 0.5 || f.lit[1] >= 1 {
+		t.Fatalf("leaving: lit %v", f.lit)
+	}
+	if f.light(now.Add(captionFadeOut*2), [3]bool{}, true) || f.lit[1] != 0 {
+		t.Fatalf("after the way out: lit %v, and a frame asked for", f.lit)
+	}
+	// Without animations there is no way: lit or not.
+	if f.light(now, over, false) || f.lit[1] != 1 {
+		t.Errorf("without animations: lit %v", f.lit)
+	}
+	if f.light(now, [3]bool{}, false) || f.lit[1] != 0 {
+		t.Errorf("without animations, leaving: lit %v", f.lit)
+	}
+	// A window minimized by its button comes back with none lit.
+	f.lit[0] = 1
+	f.configure(app.Config{Mode: app.Minimized})
+	if f.lit != [3]float32{} {
+		t.Errorf("lit after the window was minimized: %v", f.lit)
 	}
 }
 

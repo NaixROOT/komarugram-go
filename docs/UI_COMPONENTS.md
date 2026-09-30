@@ -164,8 +164,11 @@ The history is drawn as materialgram draws it:
   their pointer. Without blur the window has the system's frame again. The
   caption is of the theme's `SurfaceContainer` unless the content implements
   `appwindow.FrameFiller`, as the main window (its sidebar's translucent
-  fill) and the photo window (its backdrop) do. `TestOwnFrameIsDrawn` draws
-  it, and saves both themes with `FRAME_PNG_DIR`.
+  fill) and the photo window (its backdrop) do. A button lights up under the
+  pointer and fades once it has left, as the system's buttons on Windows 10
+  do (80 ms in, 220 ms out, by eye), and switches at once with animations
+  off; the close button is red with a white glyph. `TestOwnFrameIsDrawn`
+  draws the frame, and saves both themes with `FRAME_PNG_DIR`.
 - **Mini Apps** (`webapp.go`, `internal/messenger/miniapps`): the window's
   `webApps` owns a `miniapps.Runner`, which asks the store for the link, opens
   it with `pkg/miniapp` and answers the app's events on its own goroutines;

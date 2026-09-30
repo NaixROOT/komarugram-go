@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"runtime"
+	"time"
 
 	"gio-mw/token"
 	"gio-mw/wdk"
@@ -70,12 +71,25 @@ const (
 // system's is.
 var closeHover = color.NRGBA{R: 0xc4, G: 0x2b, B: 0x1c, A: 0xff}
 
+// A button lights up under the pointer and fades once it has left, as the
+// buttons of the system's caption on Windows 10 do: quickly in, slower out.
+// The times are by eye, not measured.
+const (
+	captionFadeIn  = 80 * time.Millisecond
+	captionFadeOut = 220 * time.Millisecond
+)
+
 // frame is the window's own frame.
 type frame struct {
 	// shown is whether the window has no frame of the system's and is not
 	// fullscreen; maximized is whether it fills the screen.
 	shown, maximized bool
 	deco             widget.Decorations
+	// lit is how far each button is lit, from 0 to 1, as of litAt; fading is
+	// whether one of them was on its way then.
+	lit    [3]float32
+	litAt  time.Time
+	fading bool
 }
 
 // configure takes what the window is from its configuration.
@@ -86,6 +100,7 @@ func (f *frame) configure(cnf app.Config) {
 		// The pointer left with the window, and nothing told the button
 		// under it.
 		f.deco = widget.Decorations{}
+		f.lit = [3]float32{}
 	}
 	f.deco.Maximized = f.maximized
 }
@@ -133,13 +148,22 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 	if f.maximized {
 		maximize = system.ActionUnmaximize
 	}
-	for i, action := range []system.Action{system.ActionMinimize, maximize, system.ActionClose} {
+	buttons := [3]system.Action{system.ActionMinimize, maximize, system.ActionClose}
+	var under [3]bool
+	for i, action := range buttons {
+		click := f.deco.Clickable(action)
+		under[i] = click.Hovered() || click.Pressed()
+	}
+	if f.light(gtx.Now, under, wdk.AnimationsEnabled(gtx)) {
+		gtx.Execute(op.InvalidateCmd{})
+	}
+	for i, action := range buttons {
 		at := op.Offset(image.Pt(size.X-(3-i)*button.X, 0)).Push(gtx.Ops)
 		click := f.deco.Clickable(action)
 		gtx := gtx
 		gtx.Constraints = layout.Exact(button)
 		click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			back, icon := captionButtonColors(action, click.Hovered(), click.Pressed(), on)
+			back, icon := captionButtonColors(action, f.lit[i], click.Pressed(), on)
 			paint.FillShape(gtx.Ops, back, clip.Rect{Max: button}.Op())
 			drawCaptionIcon(gtx, action, button, icon)
 			return layout.Dimensions{Size: button}
@@ -149,19 +173,55 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 	return actions
 }
 
-// captionButtonColors are the fill of a window button and the color of its
-// glyph: the close button is red under the pointer, as the system's is, and
-// the others are tinted with the color of the glyph.
-func captionButtonColors(action system.Action, hovered, pressed bool, on color.NRGBA) (fill, icon color.NRGBA) {
-	switch {
-	case action == system.ActionClose && (hovered || pressed):
-		return closeHover, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
-	case pressed:
-		return withAlpha(on, 0x33), on
-	case hovered:
-		return withAlpha(on, 0x1f), on
+// light moves how far the buttons are lit towards what the pointer says,
+// under being the buttons it is over, by the time since the last frame. It
+// reports whether any of them is still on its way, and another frame is due.
+// Without animations a button is lit or not.
+func (f *frame) light(now time.Time, under [3]bool, animate bool) (moving bool) {
+	elapsed := now.Sub(f.litAt)
+	if !f.fading {
+		// Frames come when something happens: the time since the last one
+		// is not the time a fade that starts now has taken.
+		elapsed = 0
 	}
-	return color.NRGBA{}, on
+	f.litAt = now
+	defer func() { f.fading = moving }()
+	for i := range f.lit {
+		target, over := float32(0), captionFadeOut
+		if under[i] {
+			target, over = 1, captionFadeIn
+		}
+		step := float32(elapsed) / float32(over)
+		switch {
+		case !animate || f.lit[i] == target:
+			f.lit[i] = target
+		case f.lit[i] < target:
+			f.lit[i] = min(f.lit[i]+step, target)
+		default:
+			f.lit[i] = max(f.lit[i]-step, target)
+		}
+		moving = moving || f.lit[i] != target
+	}
+	return moving
+}
+
+// captionButtonColors are the fill of a window button and the color of its
+// glyph, for a button lit from 0 to 1: the close button is red under the
+// pointer, as the system's is, with a white glyph, and the others are tinted
+// with the color of the glyph, more when pressed.
+func captionButtonColors(action system.Action, lit float32, pressed bool, on color.NRGBA) (fill, icon color.NRGBA) {
+	lit = min(max(lit, 0), 1)
+	if action == system.ActionClose {
+		white := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+		mix := func(from, to uint8) uint8 { return uint8(float32(from) + (float32(to)-float32(from))*lit + 0.5) }
+		icon = color.NRGBA{R: mix(on.R, white.R), G: mix(on.G, white.G), B: mix(on.B, white.B), A: mix(on.A, white.A)}
+		return withAlpha(closeHover, uint8(float32(closeHover.A)*lit+0.5)), icon
+	}
+	tint := float32(0x1f)
+	if pressed {
+		tint = 0x33
+	}
+	return withAlpha(on, uint8(tint*lit+0.5)), on
 }
 
 func withAlpha(c color.NRGBA, alpha uint8) color.NRGBA {
