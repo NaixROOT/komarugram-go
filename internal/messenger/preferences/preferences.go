@@ -111,6 +111,8 @@ type Global struct {
 	// Look is how messages and avatars are drawn, as AyuGram's
 	// customization.
 	Look Look `json:"look"`
+	// Fonts are the font files the user pointed at.
+	Fonts Fonts `json:"fonts"`
 	// ConfirmSticker and ConfirmGIF ask before a sticker or a GIF chosen
 	// in the composer is sent, as AyuGram's confirmations.
 	ConfirmSticker bool `json:"confirm_sticker,omitempty"`
@@ -194,6 +196,24 @@ type Look struct {
 	// deleted messages; empty for the default ones.
 	EditedMark  string `json:"edited_mark,omitempty"`
 	DeletedMark string `json:"deleted_mark,omitempty"`
+}
+
+// Fonts are the paths of font files the user pointed at, by what they
+// draw; "" for the system's fonts. The files stay where they are: one that
+// is gone, or does not load, is passed over.
+type Fonts struct {
+	// Text draws the text, before every other font.
+	Text string `json:"text,omitempty"`
+	// Extra draws what Text has no glyph for, before the system's fonts:
+	// a font of another script, such as a CJK one.
+	Extra string `json:"extra,omitempty"`
+	// Mono draws preformatted text.
+	Mono string `json:"mono,omitempty"`
+	// Emoji draws emoji.
+	Emoji string `json:"emoji,omitempty"`
+	// EmojiPack is the installed emoji pack that draws emoji, before the
+	// font of Emoji: a font of the catalog, or sprites. "" for none.
+	EmojiPack string `json:"emoji_pack,omitempty"`
 }
 
 // The bounds of Look, as AyuGram's.
@@ -495,6 +515,15 @@ func (s *Store) SetChats(c ChatLook) error {
 	return s.pruneWallpapers(c)
 }
 
+// DataDir is a directory of the given name beside the settings, for what
+// is kept with them; empty for a store in memory.
+func (s *Store) DataDir(name string) string {
+	if s.path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(s.path), name)
+}
+
 // wallpaperDir is where the wallpapers' pictures are, beside the settings;
 // empty for a store in memory.
 func (s *Store) wallpaperDir() string {
@@ -598,6 +627,11 @@ func (s *Store) pruneWallpapers(c ChatLook) error {
 		}
 	}
 	return nil
+}
+
+// SetFonts chooses the font files.
+func (s *Store) SetFonts(f Fonts) error {
+	return s.change(func(g *Global) { g.Fonts = f })
 }
 
 // SetConfirmations chooses whether stickers and GIFs are sent only once

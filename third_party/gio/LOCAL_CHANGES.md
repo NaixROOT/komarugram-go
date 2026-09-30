@@ -142,6 +142,69 @@ The root go.mod selects this copy; the shared Go module cache is unchanged.
   and a one-line label cut them to "…". Test: `text` `TestEmojiPresentationFace`,
   skipped without a system emoji font.
 
+- Color glyphs of the COLR table (`text/colr.go`, `text/gotext.go`): go-text
+  returns a `font.GlyphColor` for them, which `Shape` and `Bitmaps` skipped,
+  so that the emoji of Windows' Segoe UI Emoji were not drawn at all (Noto
+  Color Emoji has bitmaps, and was). `Bitmaps` draws the layers of a COLR
+  version 0 glyph, each an outline filled with a color of the font's first
+  palette, once into an image at the glyph's size in pixels
+  (`golang.org/x/image/vector`), kept in the bitmap cache, and shows it where
+  `Shape` draws outlines. Layers in the color of the text go to `Shape`'s
+  path. Tests: `text` `TestColorGlyphImage`, `TestColorGlyphBitmap`, skipped
+  without a system font of such glyphs.
+
+- COLR version 1 (`text/colrv1.go`): the tree of paints of a glyph
+  (Noto-COLRv1, Fluent Emoji, the Segoe UI Emoji of Windows 11) is drawn on
+  the CPU into the same image: outlines clip (`PaintGlyph`, nested ones
+  intersect), solid colors and linear, radial and sweep gradients fill, as
+  sources of `image/draw` that map a pixel back to the paint's font units,
+  the transforms multiply into the matrix under them, and `PaintComposite`
+  draws its two subtrees into layers and blends them: the Porter-Duff modes
+  and the separable blend modes; hue, saturation, color and luminosity are
+  drawn as source over. The image is as large as the glyph's clip box, or
+  as the outlines of the tree. Variable paints are drawn as their default
+  instance, the shaper setting no variation coordinates; the color of the
+  text (palette entry 0xFFFF) is black in a paint. Tests: `text`
+  `TestPaint…`, on outlines of their own, without a font.
+
+- Emoji in bold, italic and monospace text (`text/gotext.go`
+  `shaperImpl.ResolveFace`): fontscan prunes the fonts that stand in for a
+  family to the query's aspect, all families at once, so an emoji font,
+  which has one weight, is found only when the typeface names it (the theme
+  names Noto Color Emoji, not Segoe UI Emoji), and nothing stands in for
+  `monospace` with emoji. A character that the face found does not have is
+  looked for again in the regular aspect with the `emoji` family added; the
+  query is kept in `shaperImpl.query` to return to. Test: `text`
+  `TestEmojiFaceInBoldAndMonospace`.
+
+- Emoji as pictures (`text/emojiimages.go`, `WithEmojiImages`): an
+  `EmojiImages` tells the emoji a text begins with and gives its picture at
+  a size, as a set of sprites does. `shapeText` cuts such emoji out of the
+  inputs before they are split by face, and lays each out as one glyph of a
+  face that stands for the pictures among the shaper's: a square of 18/16
+  of the text's size, 3/16 under the baseline, advancing 20/16 as the
+  emoji of fonts do; the glyph's number is the picture's and one more, 0
+  being the glyph of a missing character. `Bitmaps` draws the picture,
+  asked for once at the glyph's size in pixels and kept in the bitmap
+  cache. `EmojiPresentation` is exported for such a set to tell a lone ©
+  or digit from an emoji the way the shaper does. Tests: `text`
+  `TestEmojiImages…`.
+
+- An emoji font of the program's own (`text/shaper.go` `WithEmojiFamily`,
+  `text/gotext.go`): the family named draws, before the typeface's fonts,
+  the characters that are emoji on their own and the emoji sequences.
+  `emojiPresentation` tells the former: the supplementary planes'
+  pictographs, the basic plane's Emoji_Presentation=Yes, and U+2600–27BF,
+  which messengers draw as emoji whatever their presentation (Telegram sends
+  a reaction's heart as a bare U+2764). Without the family they go to the
+  query's emoji face, the one that has U+1F600, before a text font that has
+  them in black. It is not one of the
+  typeface's families: fontscan tries the families named before all that
+  stand in for generic ones, so an emoji font named in the typeface would
+  draw the digits, # and * of all text, which emoji fonts have for keycaps.
+  Tests: `text` `TestEmojiFamily`, skipped without a second system font
+  that has emoji, and `TestEmojiPresentation`.
+
 Run the focused check from the project root:
 `go test gioui.org/app/internal/xkb -run TestNonLatinShortcuts`.
 

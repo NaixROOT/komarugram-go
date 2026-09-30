@@ -16,9 +16,11 @@ Russian; code, comments and docs are in English.
 |---|---|
 | `cmd/messenger` | Entry point; `account_host.go` runs accounts, windows and their stores |
 | `cmd/render-all` | Renders every screen of the render tests into one directory |
+| `cmd/emoji-pack` | Makes the catalog of emoji packs built into the client (`official`: Telegram Desktop's emoji sets, pinned to commits), and catalogs of a directory |
 | `internal/messenger/ui` | All messenger UI. Components: `docs/UI_COMPONENTS.md` |
 | `internal/messenger/tgstore` | `model.Store` backed by Telegram (gotd): chats, history, search, updates |
 | `internal/messenger/historycache` | Per-account SQLite cache: messages (JSON), media, layouts, FTS5 search index |
+| `internal/messenger/{fonts,emojipacks}` | Font files of the user's own; emoji packs of a catalog, installed beside the settings |
 | `internal/messenger/account` | Registry, sign-in, tdata import, one client per auth key |
 | `internal/messenger/model` | Data types and the interfaces the UI reads |
 | `internal/messenger/{security,securedb}` | TPM-sealed key, encrypted SQLite (Adiantum VFS) |
@@ -75,7 +77,14 @@ otherwise, so `go test` never runs them: `COMPOSER_PNG` (with
 `SERVICE_PNG`, `JUMP_PNG_DIR`, `PINNED_PNG`, `CHAT_SEARCH_PNG`, `SHOT_PNG`,
 `SAVED_EMPTY_PNG`, `SHARED_PNG`, `TOAST_PNG_DIR`, `AUDIO_PNG_DIR` (see
 `docs/UI_COMPONENTS.md`). Run the one of the screen you changed, and look
-at the PNG. `go run ./cmd/render-all [dir]` renders all of them, every
+at the PNG. `KOMARUGRAM_FONT`, `KOMARUGRAM_FONT_EXTRA`,
+`KOMARUGRAM_FONT_MONO` and `KOMARUGRAM_FONT_EMOJI` name a font file for the
+text, for what it lacks, for code and for emoji, over the settings: in the
+client and in the render tests alike (`internal/messenger/fonts`).
+`KOMARUGRAM_EMOJI_SET` names the directory of an emoji pack to draw emoji
+with, there too, and `KOMARUGRAM_EMOJI_PACKS` a catalog of packs for the
+settings to offer in place of the one built in, a directory or a URL
+(`cmd/emoji-pack` makes both). `go run ./cmd/render-all [dir]` renders all of them, every
 variant, into one directory (about a minute; `komarugram-renders` in the
 system's temporary directory by default; `-only composer` for some of
 them). Nothing compares them with references: the project is in active

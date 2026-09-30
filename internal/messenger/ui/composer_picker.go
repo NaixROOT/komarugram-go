@@ -123,7 +123,7 @@ func (c *messageComposer) pickerRows(width, cell int, l localization.Catalog) []
 		if c.tab == model.PickerEmoji {
 			// The emoji of the picker are found at once, and Telegram's own
 			// come after them.
-			items = model.PreferSaved(c.searchedEmoji(l), items)
+			items = c.drawn.filter(model.PreferSaved(c.searchedEmoji(l), items))
 		}
 		add(l.T("composer.results"), items, 0, 0)
 		return rows
@@ -133,9 +133,9 @@ func (c *messageComposer) pickerRows(width, cell int, l localization.Catalog) []
 		return rows
 	}
 	if c.selectedPack == 0 {
-		add(l.T("composer.recent"), model.PreferSaved(c.recent[c.tab], c.page.Recent), 0, 0)
+		add(l.T("composer.recent"), c.drawn.filter(model.PreferSaved(c.recent[c.tab], c.page.Recent)), 0, 0)
 		if c.emojiSectionsShown() {
-			sections := emojiSectionItems()
+			sections := c.drawn.staticSections()
 			for i, category := range emojiCategories {
 				add(l.T(category.title), sections[i], i+1, 0)
 			}
@@ -279,6 +279,8 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 	if c.tab == model.PickerGIF {
 		cell = gtx.Dp(100)
 	}
+	// Emoji the theme's fonts do not draw are left out.
+	c.drawn.use(wdk.GetMaterialTheme(gtx))
 	rows := c.pickerRows(max(0, body.Dx()), cell, l)
 	sliding(body, func(gtx layout.Context) layout.Dimensions {
 		if c.searching() && len(rows) == 0 {

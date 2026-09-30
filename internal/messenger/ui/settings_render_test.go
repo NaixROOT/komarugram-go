@@ -3,11 +3,13 @@
 package ui
 
 import (
+	"context"
 	"gio-mw/exp"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
+	"komarugram/internal/messenger/emojipacks"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/mockstore"
 	"komarugram/internal/messenger/model"
@@ -80,7 +83,27 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	size := image.Pt(900, 700)
 	if os.Getenv("SETTINGS_SECTION") == "appearance" {
 		p.section = settingsAppearance
-		size.Y = 1400
+		// One font is picked and gone since, the others are the system's.
+		files := preferences.Fonts{Extra: filepath.Join(t.TempDir(), "NotoSansKR-Regular.ttf")}
+		p.fontsView.files = func() preferences.Fonts { return files }
+		p.fontsView.setFiles = func(f preferences.Fonts) { files = f }
+		// The packs of a catalog: one installed and in use, one to download.
+		catalog := emojiPackCatalog(t)
+		p.emojiView.files, p.emojiView.setFiles = p.fontsView.files, p.fontsView.setFiles
+		p.emojiView.store = emojipacks.Open(filepath.Join(t.TempDir(), "emoji"))
+		p.emojiView.source = emojipacks.NewSource(catalog)
+		if packs, err := emojipacks.ReadIndex(context.Background(), p.emojiView.source); err == nil {
+			p.emojiView.catalog, p.emojiView.asked = packs, true
+			for _, pack := range packs {
+				if pack.ID == "sprites" {
+					if err := p.emojiView.store.Install(context.Background(), p.emojiView.source, pack, nil); err != nil {
+						t.Fatal(err)
+					}
+					files.EmojiPack = pack.ID
+				}
+			}
+		}
+		size.Y = 2700
 	}
 	var chats *preferences.Store
 	if section := os.Getenv("SETTINGS_SECTION"); section == "chats" || section == "wallpapers" {
