@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"komarugram/pkg/miniapp"
 	"komarugram/pkg/program"
 )
 
@@ -54,6 +55,9 @@ var (
 // and trusts to be a program, not for any file: on Windows, where players
 // print nothing for --version, it reads the version resource instead.
 func Check(ctx context.Context, kind Kind, path string) (string, error) {
+	if kind == Chromium {
+		return miniapp.CheckBrowser(ctx, path)
+	}
 	if !filepath.IsAbs(path) || !program.IsExecutable(path) {
 		return "", ErrNotExecutable
 	}

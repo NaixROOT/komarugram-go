@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -186,6 +187,29 @@ type Bridge struct {
 // the Mini App is allowed to keep between launches; its zero value keeps
 // nothing.
 func Open(ctx context.Context, url string, params Params, profile Profile) (*Bridge, error) {
+	// The fragment carries the launch parameters, exactly as a webview would
+	// receive them.
+	return launch(ctx, url+"#"+params.fragment(), profile, Page{Width: 420, Height: 720}, true)
+}
+
+// Page is how OpenPage shows a page of the client's own.
+type Page struct {
+	// Width and Height are the size of the window, in the browser's pixels.
+	Width, Height int
+	// Args are more switches for the browser.
+	Args []string
+}
+
+// OpenPage starts the browser on url in a window of its own, on a throwaway
+// profile, without the Telegram transport: for a page the client itself
+// shows in the browser, such as a video player. Eval reaches the page.
+func OpenPage(ctx context.Context, url string, page Page) (*Bridge, error) {
+	return launch(ctx, url, Profile{}, page, false)
+}
+
+// launch starts the browser on url with profile and attaches to the page,
+// installing the Telegram transport when telegram is set.
+func launch(ctx context.Context, url string, profile Profile, page Page, telegram bool) (*Bridge, error) {
 	dir, ephemeral, err := profile.resolve()
 	if err != nil {
 		return nil, err
@@ -222,17 +246,15 @@ func Open(ctx context.Context, url string, params Params, profile Profile) (*Bri
 		replies:   map[int]chan json.RawMessage{},
 	}
 
-	// The fragment carries the launch parameters, exactly as a webview would
-	// receive them.
-	full := url + "#" + params.fragment()
-	prog, pre := chosen.command(dir)
-	bridge.chrome = exec.Command(prog, append(pre,
-		"--app="+full,
+	prog, args := chosen.command(dir)
+	args = append(args,
+		"--app="+url,
 		"--user-data-dir="+dir,
 		"--remote-debugging-port=0",
 		"--no-first-run", "--no-default-browser-check",
-		"--window-size=420,720",
-	)...)
+		fmt.Sprintf("--window-size=%d,%d", page.Width, page.Height),
+	)
+	bridge.chrome = exec.Command(prog, append(args, page.Args...)...)
 	if err := bridge.chrome.Start(); err != nil {
 		cancel()
 		discard()
@@ -245,7 +267,7 @@ func Open(ctx context.Context, url string, params Params, profile Profile) (*Bri
 		close(bridge.exited)
 	}()
 
-	if err := bridge.connect(ctx); err != nil {
+	if err := bridge.connect(ctx, telegram); err != nil {
 		bridge.Close()
 		return nil, err
 	}
@@ -335,9 +357,9 @@ func (p Params) fragment() string {
 	return strings.Join(fields, "&")
 }
 
-// connect waits for the debugging endpoint, attaches to the page and installs
-// both halves of the bridge.
-func (b *Bridge) connect(ctx context.Context) error {
+// connect waits for the debugging endpoint and attaches to the page, and
+// installs both halves of the bridge when telegram is set.
+func (b *Bridge) connect(ctx context.Context, telegram bool) error {
 	port, err := b.waitForPort(ctx)
 	if err != nil {
 		return err
@@ -357,18 +379,21 @@ func (b *Bridge) connect(ctx context.Context) error {
 	b.conn = conn
 	go b.read(ctx)
 
-	for _, step := range []struct {
+	type step struct {
 		method string
 		params map[string]any
-	}{
-		{"Runtime.enable", nil},
-		{"Page.enable", nil},
-		{"Runtime.addBinding", map[string]any{"name": bindingName}},
-		{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": shim}},
-		// The page loaded before the shim existed, so it is loaded again with
-		// the bridge in place.
-		{"Page.reload", map[string]any{"ignoreCache": true}},
-	} {
+	}
+	steps := []step{{"Runtime.enable", nil}, {"Page.enable", nil}}
+	if telegram {
+		steps = append(steps,
+			step{"Runtime.addBinding", map[string]any{"name": bindingName}},
+			step{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": shim}},
+			// The page loaded before the shim existed, so it is loaded again
+			// with the bridge in place.
+			step{"Page.reload", map[string]any{"ignoreCache": true}},
+		)
+	}
+	for _, step := range steps {
 		if _, err := b.call(ctx, step.method, step.params); err != nil {
 			return fmt.Errorf("%s: %w", step.method, err)
 		}
@@ -391,11 +416,13 @@ func (b *Bridge) Send(ctx context.Context, eventType, data string) error {
 // Eval runs an expression in the Mini App and returns its value as a string.
 // It is what a client uses to inspect or adjust the page directly — drawing
 // the header and main button inside the page, for instance, since they cannot
-// be drawn around someone else's window.
+// be drawn around someone else's window. A promise is waited for, and its
+// value returned.
 func (b *Bridge) Eval(ctx context.Context, expression string) (string, error) {
 	result, err := b.call(ctx, "Runtime.evaluate", map[string]any{
 		"expression":    expression,
 		"returnByValue": true,
+		"awaitPromise":  true,
 	})
 	if err != nil {
 		return "", err
@@ -410,6 +437,57 @@ func (b *Bridge) Eval(ctx context.Context, expression string) (string, error) {
 	}
 	text, _ := wrapper.Result.Value.(string)
 	return text, nil
+}
+
+// SetWindowBounds moves and resizes the window the page is in, in the
+// screen's device-independent pixels, the ones window.screen measures. A
+// window manager may keep a window from placing itself, as Wayland does; the
+// size still applies.
+func (b *Bridge) SetWindowBounds(ctx context.Context, left, top, width, height int) error {
+	result, err := b.call(ctx, "Browser.getWindowForTarget", nil)
+	if err == nil {
+		err = replyError(result)
+	}
+	if err != nil {
+		return fmt.Errorf("Browser.getWindowForTarget: %w", err)
+	}
+	var window struct {
+		WindowID int `json:"windowId"`
+	}
+	if err := json.Unmarshal(result, &window); err != nil {
+		return err
+	}
+	// The size and the place are asked for apart, the size first: a window
+	// that may not place itself should still be given its size.
+	set := func(bounds map[string]any) error {
+		result, err := b.call(ctx, "Browser.setWindowBounds", map[string]any{
+			"windowId": window.WindowID,
+			"bounds":   bounds,
+		})
+		if err == nil {
+			err = replyError(result)
+		}
+		if err != nil {
+			return fmt.Errorf("Browser.setWindowBounds: %w", err)
+		}
+		return nil
+	}
+	if err := set(map[string]any{"width": width, "height": height, "windowState": "normal"}); err != nil {
+		return err
+	}
+	return set(map[string]any{"left": left, "top": top})
+}
+
+// replyError is the error the browser answered a call with, as read turns
+// it into a result.
+func replyError(result json.RawMessage) error {
+	var reply struct {
+		Error *string `json:"error"`
+	}
+	if json.Unmarshal(result, &reply) == nil && reply.Error != nil {
+		return errors.New(*reply.Error)
+	}
+	return nil
 }
 
 // Events returns everything the Mini App has sent so far.

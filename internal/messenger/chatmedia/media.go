@@ -1027,7 +1027,11 @@ func (m *Manager) Play(msg model.Message, kind player.Kind, path string, report 
 			return
 		}
 		defer stream.Close()
-		p, err := player.Open(m.ctx, kind, path, stream.URL(), kind.PrivateArgs()...)
+		args := kind.PrivateArgs()
+		if msg.Media != nil {
+			args = append(args, kind.SizeArgs(msg.Media.Width, msg.Media.Height)...)
+		}
+		p, err := player.Open(m.ctx, kind, path, stream.URL(), args...)
 		if err != nil {
 			report(err)
 			return
@@ -1040,7 +1044,14 @@ func (m *Manager) Play(msg model.Message, kind player.Kind, path string, report 
 			case <-m.ctx.Done():
 				return
 			case <-ticker.C:
-				if !p.Status().Running {
+				// A player that could not play the file says so, and may
+				// keep its window open on nothing: the error is shown here.
+				status := p.Status()
+				if status.Err != nil {
+					report(status.Err)
+					return
+				}
+				if !status.Running {
 					return
 				}
 			}

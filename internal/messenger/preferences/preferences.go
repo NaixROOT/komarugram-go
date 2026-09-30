@@ -362,7 +362,7 @@ func validate(g Global) error {
 	if g.AudioPlayer != "" && g.AudioPlayer != "wasm" && g.AudioPlayer != "external" {
 		return errors.New("invalid audio player")
 	}
-	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC {
+	if g.Player != "" && g.Player != player.MPV && g.Player != player.VLC && g.Player != player.Chromium {
 		return errors.New("invalid external player")
 	}
 	if g.Overlays.Transparency < 0 || g.Overlays.Transparency > TransparencyMax {
