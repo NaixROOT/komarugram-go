@@ -97,7 +97,7 @@ func Play(src Source) (*Playback, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &stereo{src: src}
+	s := newStereo(src)
 	p := &Playback{player: ctx.NewPlayer(s), src: s}
 	hold(1)
 	p.player.Play()
@@ -164,9 +164,7 @@ func (p *Playback) Ended() bool {
 // Position is the sample being heard.
 func (p *Playback) Position() int64 {
 	buffered := int64(p.player.BufferedSize() / 4)
-	p.src.mu.Lock()
-	defer p.src.mu.Unlock()
-	return max(0, p.src.src.Position()-buffered)
+	return max(0, p.src.pump.position()-buffered)
 }
 
 // SeekSample moves the sound to sample pos, playing or paused as it was.
@@ -192,16 +190,21 @@ func (p *Playback) Close() {
 		hold(-1)
 	}
 	p.closed = true
+	p.src.pump.close()
 	_ = p.player.Close()
 }
 
-// stereo turns a Source into the 16-bit stereo bytes oto reads.
+// stereo turns a Source, read ahead by a pump, into the 16-bit stereo bytes
+// oto reads.
 type stereo struct {
+	pump *pump
+	// mu guards mono and ended.
 	mu    sync.Mutex
-	src   Source
 	mono  []int16
 	ended bool
 }
+
+func newStereo(src Source) *stereo { return &stereo{pump: newPump(src)} }
 
 func (s *stereo) Read(b []byte) (int, error) {
 	s.mu.Lock()
@@ -210,7 +213,7 @@ func (s *stereo) Read(b []byte) (int, error) {
 	if cap(s.mono) < want {
 		s.mono = make([]int16, want)
 	}
-	n, err := s.src.Read(s.mono[:want])
+	n, err := s.pump.read(s.mono[:want])
 	for i, v := range s.mono[:n] {
 		binary.LittleEndian.PutUint16(b[4*i:], uint16(v))
 		binary.LittleEndian.PutUint16(b[4*i+2:], uint16(v))
@@ -218,7 +221,8 @@ func (s *stereo) Read(b []byte) (int, error) {
 	return 4 * n, err
 }
 
-// Seek moves to a byte offset from the start, the only whence oto uses.
+// Seek moves to a byte offset from the start, the only whence oto uses. It
+// does not wait for the source to get there.
 func (s *stereo) Seek(offset int64, whence int) (int64, error) {
 	if whence != io.SeekStart {
 		return 0, errors.New("audio: seek from the start only")
@@ -226,8 +230,6 @@ func (s *stereo) Seek(offset int64, whence int) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ended = false
-	if err := s.src.SeekSample(offset / 4); err != nil {
-		return 0, err
-	}
-	return 4 * s.src.Position(), nil
+	s.pump.seek(offset / 4)
+	return offset, nil
 }

@@ -140,9 +140,15 @@ type Decoder struct {
 	module    api.Module
 	functions map[string]api.Function
 	handle    uint64
-	channels  int
-	rate      int64
-	frames    int64
+	// format is the file's; table is set when an MP3 was read through to make
+	// a table of its frames, which a move then goes by; moves counts the moves
+	// asked of the module.
+	format   Format
+	table    bool
+	moves    int
+	channels int
+	rate     int64
+	frames   int64
 	// pos is the next frame Read puts out; ready are frames decoded and not
 	// put out yet.
 	pos   int64
@@ -190,6 +196,7 @@ func (d *Decoder) open(format Format, size int64, length time.Duration) error {
 	if d.handle == 0 {
 		return errors.New("drdec: not a file of its format")
 	}
+	d.format, d.table = format, exact != 0
 	channels, err := d.call("drw_channels", d.handle)
 	if err != nil {
 		return err
@@ -224,9 +231,36 @@ func (d *Decoder) Frames() int64 { return d.frames }
 // Position is the next sample Read puts out.
 func (d *Decoder) Position() int64 { return d.pos }
 
+// seekSpan is how much sound an MP3 without a table of its frames is moved
+// over in one call of the module: dr_libs goes forward by decoding, from the
+// start when it is moving back, at something like five hundred times the
+// speed of the sound, and a call that takes over DefaultLimits.Slow ends the
+// decoder. A move over an hour is made of moves over less than this.
+var seekSpan = 200 * time.Second
+
 // SeekSample moves to sample pos of the file.
 func (d *Decoder) SeekSample(pos int64) error {
 	pos = max(0, min(pos, d.frames))
+	if d.format == MP3 && !d.table {
+		from := d.pos
+		if pos < from {
+			if err := d.move(0); err != nil {
+				return err
+			}
+			from = 0
+		}
+		for span := max(1, int64(seekSpan)*d.rate/int64(time.Second)); pos-from > span; from += span {
+			if err := d.move(from + span); err != nil {
+				return err
+			}
+		}
+	}
+	return d.move(pos)
+}
+
+// move asks the module to move to sample pos.
+func (d *Decoder) move(pos int64) error {
+	d.moves++
 	ok, err := d.call("drw_seek", d.handle, uint64(pos))
 	if err != nil {
 		return err

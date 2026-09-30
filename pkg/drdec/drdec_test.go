@@ -269,3 +269,53 @@ func TestSlowReadsAreNotSlowDecoding(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An MP3 without a table of its frames is moved over a long stretch in
+// several calls of the module, each short enough for the sandbox's time
+// limit, and lands on the right tone, forwards and back.
+func TestMP3WithoutTableIsMovedInSteps(t *testing.T) {
+	data, err := os.ReadFile("testdata/tone.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	rt, err := NewRuntime(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+	defer func(was time.Duration) { seekSpan = was }(seekSpan)
+	for _, span := range []time.Duration{time.Hour, 200 * time.Millisecond} {
+		seekSpan = span
+		// The length is what Telegram told, so there is no table.
+		d, err := rt.OpenAt(ctx, MP3, bytes.NewReader(data), int64(len(data)), 60*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			at   time.Duration
+			want float64
+		}{{2200 * time.Millisecond, 660}, {700 * time.Millisecond, 440}, {2600 * time.Millisecond, 660}, {100 * time.Millisecond, 440}} {
+			pos := int64(c.at) * d.Rate() / int64(time.Second)
+			if err := d.SeekSample(pos); err != nil || d.Position() != pos {
+				t.Fatalf("span %v: seek to %v: at %d, %v", span, c.at, d.Position(), err)
+			}
+			pcm := make([]int16, d.Rate()/10)
+			for n := 0; n < len(pcm); {
+				k, err := d.Read(pcm[n:])
+				if err != nil {
+					t.Fatal(err)
+				}
+				n += k
+			}
+			if f := pitch(pcm); math.Abs(f*float64(d.Rate())/float64(audio.Rate)-c.want) > 15 {
+				t.Errorf("span %v, after a seek to %v: %.0f Hz, want %.0f", span, c.at, f, c.want)
+			}
+		}
+		// A move over less than the span is one call, and over more is several:
+		// the ones forward from the start, from 0 to 2.2 s and to 2.6 s, are.
+		if short := span < time.Second; short != (d.moves > 8) {
+			t.Errorf("span %v: %d calls of the module", span, d.moves)
+		}
+	}
+}

@@ -38,7 +38,9 @@ func (c *counter) Read(pcm []int16) (int, error) {
 }
 
 func TestStereoDoublesAndSeeks(t *testing.T) {
-	s := &stereo{src: &counter{silence{n: 1000}}}
+	s := newStereo(&counter{silence{n: 1000}})
+	defer s.pump.close()
+	ready(t, s.pump)
 	b := make([]byte, 4*3)
 	if n, err := s.Read(b); n != 12 || err != nil {
 		t.Fatalf("%d, %v", n, err)
@@ -52,6 +54,7 @@ func TestStereoDoublesAndSeeks(t *testing.T) {
 	if at, err := s.Seek(4*500, io.SeekStart); at != 2000 || err != nil {
 		t.Fatalf("seek: %d, %v", at, err)
 	}
+	ready(t, s.pump)
 	s.Read(b)
 	if v := binary.LittleEndian.Uint16(b); v != 500 {
 		t.Fatalf("after the seek, sample %d", v)
@@ -90,13 +93,29 @@ func TestPlaybackEndsAndReplays(t *testing.T) {
 	if err := p.SeekSample(Rate / 10); err != nil {
 		t.Fatal(err)
 	}
-	if p.Playing() || src.pos != Rate/10 || playing != 0 {
-		t.Fatalf("seek while paused: playing %t, at %d, holding %d", p.Playing(), src.pos, playing)
+	if p.Playing() || p.Position() != Rate/10 || playing != 0 {
+		t.Fatalf("seek while paused: playing %t, at %d, holding %d", p.Playing(), p.Position(), playing)
 	}
 	p.Resume()
 	wait("it did not end again", func() bool { return !p.Playing() })
 	p.Close()
 	if playing != 0 {
 		t.Fatalf("holding the output %d times after Close", playing)
+	}
+}
+
+// ready waits until the pump has read something ahead.
+func ready(t *testing.T, p *pump) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		p.mu.Lock()
+		queued, seeking := p.queued, p.seeking
+		p.mu.Unlock()
+		if queued > 0 && !seeking {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the pump read nothing")
+		}
 	}
 }
