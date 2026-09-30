@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -14,6 +15,7 @@ import (
 	"komarugram/internal/messenger/model"
 
 	"gio-mw/token"
+	"gio-mw/wdk"
 
 	"gioui.org/f32"
 	"gioui.org/io/event"
@@ -24,65 +26,124 @@ import (
 	"gioui.org/widget"
 )
 
-var basicEmoji = strings.Fields("😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥸 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🫣 🤭 🫢 🫡 🤫 🫠 🤥 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😮‍💨 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 👹 👺 🤡 💩 👻 💀 ☠️ 👽 👾 🤖 🎃 😺 😸 😹 😻 😼 😽 🙀 😿 😾 👋 🤚 🖐️ ✋ 🖖 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 🖕 👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 🫶 👐 🤲 🤝 🙏 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❤️‍🔥 💕 💞 💓 💗 💖 💘 💝 💟 🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦆 🦉 🦋 🐝 🐞 🌸 🌼 🌻 🌹 🌺 🌷 🌿 🍀 🌲 🌳 🌴 🌵 🍎 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🥑 🍆 🥕 🌽 🍕 🍔 🍟 🌭 🍿 🍣 🍜 🍝 🍰 🎂 🍫 ☕ 🍵 🥤 🍺 🍷 🥂 ⚽ 🏀 🏈 ⚾ 🎾 🏐 🎱 🏓 🏸 🥊 🏆 🥇 🎮 🎲 🎯 🎨 🎭 🎤 🎧 🎼 🎹 🎸 🚗 🚕 🚌 🚎 🚓 🚑 🚒 🚲 🛵 🏍️ ✈️ 🚀 🚁 🚂 🚆 🚢 🏠 🏡 🏢 🏰 🗼 🗽 🌍 🌎 🌏 🌞 🌝 🌙 ⭐ 🌟 ✨ ⚡ 🔥 🌈 ☀️ 🌤️ 🌧️ ❄️ ☃️ 💧 🌊 💻 📱 ⌚ 📷 💡 📚 📖 ✏️ 📝 📌 📎 🔑 🔒 🔔 🎁 🎈 🎉 🎊 ✅ ❌ ❗ ❓ 💯 ♻️ 🏳️ 🏴 🏁 🚩 🇺🇦 🇬🇧 🇺🇸 🇫🇷 🇩🇪 🇮🇹 🇪🇸 🇯🇵")
+// emojiCategories are the static sections of the emoji tab, as Telegram
+// Desktop's are: a title of the catalog and the icon of the footer's button.
+var emojiCategories = [len(emojiSections)]struct {
+	title string
+	icon  wdk.IconWidget
+}{
+	{"composer.emoji_category1", iconEmojiPeople},
+	{"composer.emoji_category2", iconEmojiNature},
+	{"composer.emoji_category3", iconEmojiFood},
+	{"composer.emoji_category4", iconEmojiActivity},
+	{"composer.emoji_category5", iconEmojiTravel},
+	{"composer.emoji_category6", iconEmojiObjects},
+	{"composer.emoji_category7", iconEmojiSymbols},
+}
 
-func standardEmoji() []model.PickerItem {
-	out := make([]model.PickerItem, 0, len(basicEmoji))
-	for _, e := range basicEmoji {
-		out = append(out, model.PickerItem{ID: "emoji/" + e, Emoji: e})
+// emojiSectionItems returns the emoji of static section i, from 0.
+var emojiSectionItems = sync.OnceValue(func() (out [len(emojiSections)][]model.PickerItem) {
+	for i, section := range emojiSections {
+		for _, e := range strings.Fields(section) {
+			out[i] = append(out[i], model.PickerItem{ID: "emoji/" + e, Emoji: e})
+		}
 	}
 	return out
-}
+})
 
 type pickerRow struct {
 	title    string
 	items    []model.PickerItem
 	featured *model.PickerPack
+	// section is the number, from 1, of the static emoji section the row is
+	// of; pack is the id of the pack it is of. Both are 0 for the recent.
+	section int
+	pack    int64
+}
+
+// emojiSectionsShown reports whether the list has the static emoji sections:
+// on the emoji tab, unless searching, once the tab has come. While it loads
+// they would be shown first, and the recent emoji above them as it arrives.
+func (c *messageComposer) emojiSectionsShown() bool {
+	return c.tab == model.PickerEmoji && c.query == "" && (!c.loading || c.pageLoaded)
+}
+
+// searching reports whether the list waits for what a search finds.
+func (c *messageComposer) searching() bool {
+	return c.loading || c.query != "" && !c.due.IsZero()
+}
+
+// searchedEmoji returns the emoji of the picker found for the query.
+func (c *messageComposer) searchedEmoji(l localization.Catalog) []model.PickerItem {
+	if lang := string(l.Language()); c.local == nil || c.localQuery != c.query || c.localLanguage != lang {
+		c.localQuery, c.localLanguage = c.query, lang
+		c.local = searchEmoji(c.query, lang)
+		if c.local == nil {
+			c.local = []model.PickerItem{}
+		}
+	}
+	return c.local
+}
+
+// sectionRow returns the index of the row that starts static section n, from
+// 1, or -1.
+func sectionRow(rows []pickerRow, n int) int {
+	for i, row := range rows {
+		if row.section == n {
+			return i
+		}
+	}
+	return -1
 }
 
 func (c *messageComposer) pickerRows(width, cell int, l localization.Catalog) []pickerRow {
 	var rows []pickerRow
-	addItems := func(items []model.PickerItem, featured *model.PickerPack) {
+	addItems := func(items []model.PickerItem, featured *model.PickerPack, section int, pack int64) {
 		columns := max(1, width/max(1, cell))
 		for len(items) > 0 {
 			n := min(columns, len(items))
 			if c.tab == model.PickerGIF {
 				n = gifRowCount(items, width, cell)
 			}
-			rows = append(rows, pickerRow{items: items[:n], featured: featured})
+			rows = append(rows, pickerRow{items: items[:n], featured: featured, section: section, pack: pack})
 			items = items[n:]
 		}
 	}
-	add := func(title string, items []model.PickerItem) {
+	add := func(title string, items []model.PickerItem, section int, pack int64) {
 		if len(items) == 0 {
 			return
 		}
 		if title != "" {
-			rows = append(rows, pickerRow{title: title})
+			rows = append(rows, pickerRow{title: title, section: section, pack: pack})
 		}
-		addItems(items, nil)
+		addItems(items, nil, section, pack)
 	}
 	if c.query != "" {
-		add(l.T("composer.results"), c.page.Items)
+		items := c.page.Items
+		if c.tab == model.PickerEmoji {
+			// The emoji of the picker are found at once, and Telegram's own
+			// come after them.
+			items = model.PreferSaved(c.searchedEmoji(l), items)
+		}
+		add(l.T("composer.results"), items, 0, 0)
 		return rows
 	}
 	if c.tab == model.PickerGIF {
-		add("", c.page.Items)
+		add("", c.page.Items, 0, 0)
 		return rows
 	}
 	if c.selectedPack == 0 {
-		add(l.T("composer.recent"), model.PreferSaved(c.recent[c.tab], c.page.Recent))
-		if c.tab == model.PickerEmoji {
-			items := c.page.Items
-			if len(items) == 0 {
-				items = standardEmoji()
+		add(l.T("composer.recent"), model.PreferSaved(c.recent[c.tab], c.page.Recent), 0, 0)
+		if c.emojiSectionsShown() {
+			sections := emojiSectionItems()
+			for i, category := range emojiCategories {
+				add(l.T(category.title), sections[i], i+1, 0)
 			}
-			add(l.T("composer.all"), items)
 		}
 	}
 	for _, pack := range c.page.Packs {
 		if c.selectedPack == 0 || c.selectedPack == pack.ID {
-			add(pack.Title, pack.Items)
+			add(pack.Title, pack.Items, 0, pack.ID)
 		}
 	}
 	if len(c.page.Featured) > 0 && (c.selectedPack == 0 || c.selectedFeatured() != nil) {
@@ -94,8 +155,8 @@ func (c *messageComposer) pickerRows(width, cell int, l localization.Catalog) []
 			if c.selectedPack != 0 && c.selectedPack != pack.ID {
 				continue
 			}
-			rows = append(rows, pickerRow{title: pack.Title, featured: pack})
-			addItems(pack.Items, pack)
+			rows = append(rows, pickerRow{title: pack.Title, featured: pack, pack: pack.ID})
+			addItems(pack.Items, pack, 0, pack.ID)
 		}
 	}
 	return rows
@@ -220,7 +281,7 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 	}
 	rows := c.pickerRows(max(0, body.Dx()), cell, l)
 	sliding(body, func(gtx layout.Context) layout.Dimensions {
-		if c.loading && len(rows) == 0 {
+		if c.searching() && len(rows) == 0 {
 			// The first page loads in the middle of the empty picker.
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				n := min(gtx.Dp(48), gtx.Constraints.Max.X, gtx.Constraints.Max.Y)
@@ -230,7 +291,7 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 		}
 		return c.list.Layout(gtx, len(rows)+1, func(gtx layout.Context, n int) layout.Dimensions {
 			if n == len(rows) {
-				if c.loading || c.featuredLoading {
+				if c.searching() || c.featuredLoading {
 					// More loads under what is shown.
 					gtx.Constraints = layout.Exact(image.Pt(gtx.Constraints.Max.X, gtx.Dp(56)))
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -353,60 +414,105 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 				return label(gtx, l.T("composer.gif"), token.TypestyleLabelLarge, sc.SurfaceVariant.OnColor, 1)
 			})
 		}
-		dims := c.strip.Layout(gtx, len(c.page.Packs)+len(c.page.Featured)+1, func(gtx layout.Context, n int) layout.Dimensions {
-			id := int64(0)
-			var item model.PickerItem
-			var featured *model.PickerPack
-			if n > 0 {
-				var pack *model.PickerPack
-				if n <= len(c.page.Packs) {
-					pack = &c.page.Packs[n-1]
-				} else {
-					featured = &c.page.Featured[n-1-len(c.page.Packs)]
-					pack = featured
-				}
-				id = pack.ID
-				if len(pack.Items) > 0 {
-					item = pack.Items[0]
-				}
+		// The footer's buttons: the recent, the static emoji sections when
+		// the list has them, then the packs.
+		type entry struct {
+			id       int64
+			section  int
+			item     model.PickerItem
+			featured *model.PickerPack
+		}
+		entries := []entry{{}}
+		if c.emojiSectionsShown() {
+			for i := range emojiCategories {
+				entries = append(entries, entry{section: i + 1})
 			}
-			click := c.packClicks[id]
-			if click == nil {
+		}
+		for i := range c.page.Packs {
+			pack := &c.page.Packs[i]
+			e := entry{id: pack.ID}
+			if len(pack.Items) > 0 {
+				e.item = pack.Items[0]
+			}
+			entries = append(entries, e)
+		}
+		for i := range c.page.Featured {
+			pack := &c.page.Featured[i]
+			e := entry{id: pack.ID, featured: pack}
+			if len(pack.Items) > 0 {
+				e.item = pack.Items[0]
+			}
+			entries = append(entries, e)
+		}
+		// What the list shows at its top is the button's that is lit.
+		inView := pickerRow{}
+		if c.selectedPack == 0 && c.list.Position.First < len(rows) {
+			inView = rows[c.list.Position.First]
+		}
+		dims := c.strip.Layout(gtx, len(entries), func(gtx layout.Context, n int) layout.Dimensions {
+			e := entries[n]
+			click := c.packClicks[e.id]
+			if e.section != 0 {
+				click = &c.sectionClicks[e.section]
+			} else if click == nil {
 				click = new(surface)
-				c.packClicks[id] = click
+				c.packClicks[e.id] = click
 			}
 			if click.Clicked(gtx) {
 				c.cancelFeatured()
-				c.selectedPack = id
+				if e.section != 0 {
+					// The list keeps all its sections, and goes to this one.
+					if c.selectedPack != 0 {
+						c.selectedPack = 0
+						rows = c.pickerRows(max(0, body.Dx()), cell, l)
+					}
+					c.list.Position = layout.Position{First: max(0, sectionRow(rows, e.section))}
+				} else {
+					c.selectedPack = e.id
+					c.list.Position = layout.Position{}
+				}
 				if c.query != "" {
 					c.due = gtx.Now
 				}
 				c.query = ""
 				c.search.SetText("")
-				c.list.Position = layout.Position{}
 				if !c.due.IsZero() || c.page.Next != "" {
 					c.due = gtx.Now
 				}
-				if featured != nil && !featured.Complete {
-					c.loadFeatured(*featured)
+				if e.featured != nil && !e.featured.Complete {
+					c.loadFeatured(*e.featured)
 				}
 				gtx.Execute(op.InvalidateCmd{})
 			}
 			gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(44), footer))
 			style := surfaceStyle{radius: gtx.Dp(10), background: sc.SecondaryContainer.Color.SetOpacity(0), content: sc.Surface.OnColor}
-			if c.selectedPack == id {
+			lit := c.selectedPack == e.id && e.section == 0
+			switch {
+			case e.section != 0:
+				lit = c.selectedPack == 0 && inView.section == e.section
+			case e.id == 0:
+				lit = c.selectedPack == 0 && inView.section == 0 && inView.pack == 0
+			case c.selectedPack == 0:
+				lit = inView.pack == e.id
+			}
+			if lit {
 				style.background, style.content = sc.SecondaryContainer.Color, sc.SecondaryContainer.OnColor
 			}
 			return click.Layout(gtx, gtx.Constraints.Max, style, func(gtx layout.Context) layout.Dimensions {
+				if e.section != 0 {
+					return layout.UniformInset(10).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return emojiCategories[e.section-1].icon(gtx, style.content)
+					})
+				}
 				if n == 0 {
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return label(gtx, "◷", token.TypestyleHeadlineSmall, sc.Surface.OnColor, 1)
+						return label(gtx, "◷", token.TypestyleHeadlineSmall, style.content, 1)
 					})
 				}
 				return layout.UniformInset(6).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					hovered := click.click.Hovered()
-					cheap := hovered && p.media.CheapToPlay(item.Media, gtx.Constraints.Max, c.tab == model.PickerGIF)
-					return c.drawItem(gtx, item, p, animate || c.hover.Play(gtx, pickerStripKey(id), hovered, cheap))
+					cheap := hovered && p.media.CheapToPlay(e.item.Media, gtx.Constraints.Max, c.tab == model.PickerGIF)
+					return c.drawItem(gtx, e.item, p, animate || c.hover.Play(gtx, pickerStripKey(e.id), hovered, cheap))
 				})
 			})
 		})

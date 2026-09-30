@@ -5,6 +5,7 @@ package tgstore
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
@@ -111,7 +112,7 @@ func (s *Store) threadFailed(id int64, err error) {
 	c := s.history
 	c.mu.Lock()
 	if h := c.histories[id]; h != nil {
-		h.LoadingOlder, h.Err = false, err
+		h.LoadingOlder, h.LoadingNewer, h.Err = false, false, err
 		h.Revision++
 	}
 	c.mu.Unlock()
@@ -272,10 +273,13 @@ func (c *conversation) mergeThreads(m model.Message) {
 				found = true
 			}
 		}
-		if !found && in {
+		// A window that stops short of the newest messages, after a jump to
+		// the start, gets the new ones when it pages down to them.
+		add := in && !h.HasNewer
+		if !found && add {
 			h.Messages = dedupe(append(h.Messages, m))
 		}
-		if found || in {
+		if found || add {
 			h.Revision++
 		}
 	}
@@ -291,4 +295,121 @@ func (c *conversation) threadsOf(group int64) []int64 {
 		}
 	}
 	return ids
+}
+
+// revealThread replaces a thread's history with its oldest page, or with its
+// newest one, as the buttons to its start and its end do. It reports false
+// when the thread cannot be loaded now. What was shown is dropped as the
+// load starts, so that the page comes alone, and paged from there: down for
+// the oldest, up for the newest.
+func (s *Store) revealThread(id int64, first bool) bool {
+	c := s.history
+	c.mu.Lock()
+	h, t := c.histories[id], c.threads[id]
+	if c.closing || h == nil || t == nil || t.group == 0 || h.LoadingOlder || h.LoadingNewer {
+		c.mu.Unlock()
+		return false
+	}
+	h.LoadingOlder, h.HasNewer, h.Err = true, false, nil
+	h.Messages = nil
+	h.Revision++
+	c.mu.Unlock()
+	s.changed()
+	c.wg.Go(func() {
+		defer crash.Recover("thread jump", func(p *crash.Panic) { s.threadFailed(id, p) })
+		ctx, cancel := context.WithTimeout(c.ctx, time.Minute)
+		defer cancel()
+		if err := s.threadWindow(ctx, id, first); err != nil {
+			s.threadFailed(id, err)
+		}
+	})
+	return true
+}
+
+// threadWindow loads the oldest page of the thread's replies, with the root
+// before it, or the newest, into its emptied history.
+func (s *Store) threadWindow(ctx context.Context, id int64, first bool) error {
+	if !first {
+		return s.threadPage(ctx, id, 0)
+	}
+	page, err := s.threadReplies(ctx, id, 1, -threadPage)
+	if err != nil {
+		return err
+	}
+	c := s.history
+	c.mu.Lock()
+	h, t := c.histories[id], c.threads[id]
+	if h == nil {
+		c.mu.Unlock()
+		return nil
+	}
+	// Nothing is older than the oldest page, and the root comes first.
+	h.Messages = dedupe(append(append([]model.Message(nil), t.root...), page...))
+	h.HasOlder, h.HasNewer = false, len(page) >= threadPage
+	h.LoadingOlder, h.Err = false, nil
+	h.ThreadRoot = model.MessageID(t.top)
+	h.Revision++
+	c.mu.Unlock()
+	s.changed()
+	return nil
+}
+
+// threadReplies asks for threadPage replies of thread id from offset with
+// add: the ones before offset for 0, and the ones from it on for a negative
+// add. The messages come sorted, oldest first.
+func (s *Store) threadReplies(ctx context.Context, id int64, offset, add int) ([]model.Message, error) {
+	c := s.history
+	c.mu.Lock()
+	api, t := c.api, c.threads[id]
+	group := c.peers[t.group]
+	top := t.top
+	c.mu.Unlock()
+	if api == nil {
+		return nil, errNotConnected
+	}
+	res, err := api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{Peer: group.input(), MsgID: top, OffsetID: offset, AddOffset: add, Limit: threadPage})
+	if err != nil {
+		return nil, err
+	}
+	page, ok := res.AsModified()
+	if !ok {
+		return nil, errors.New("unexpected replies")
+	}
+	s.rememberPeers(page.GetUsers(), page.GetChats())
+	return s.threadMessages(ctx, page.GetMessages())
+}
+
+// loadNewerComments loads the page of replies after the ones shown, when the
+// history was moved to the start of the thread.
+func (s *Store) loadNewerComments(id int64) {
+	c := s.history
+	c.mu.Lock()
+	h, t := c.histories[id], c.threads[id]
+	if c.closing || h == nil || t == nil || t.group == 0 || !h.HasNewer || h.LoadingNewer || h.LoadingOlder || len(h.Messages) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	h.LoadingNewer = true
+	after := int(h.Messages[len(h.Messages)-1].Key.MessageID)
+	c.mu.Unlock()
+	c.wg.Go(func() {
+		defer crash.Recover("comments", func(p *crash.Panic) { s.threadFailed(id, p) })
+		ctx, cancel := context.WithTimeout(c.ctx, time.Minute)
+		defer cancel()
+		page, err := s.threadReplies(ctx, id, after+1, -threadPage)
+		if err != nil {
+			s.threadFailed(id, err)
+			return
+		}
+		// Past the newest message Telegram answers with the last page again.
+		page = slices.DeleteFunc(page, func(m model.Message) bool { return int(m.Key.MessageID) <= after })
+		c.mu.Lock()
+		if h := c.histories[id]; h != nil {
+			h.Messages = dedupe(append(h.Messages, page...))
+			h.HasNewer, h.LoadingNewer, h.Err = len(page) >= threadPage, false, nil
+			h.Revision++
+		}
+		c.mu.Unlock()
+		s.changed()
+	})
 }

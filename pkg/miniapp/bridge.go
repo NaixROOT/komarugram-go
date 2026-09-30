@@ -61,6 +61,10 @@ type Params struct {
 	Version     string
 	Platform    string
 	ThemeParams string // JSON
+	// Extra is more of the fragment, as a client got it from Telegram and
+	// escaped as it was: launch fields this package does not know, such as
+	// tgWebAppStartParam.
+	Extra string
 }
 
 // Storage decides what a Mini App leaves behind and who may read it.
@@ -325,6 +329,9 @@ func (p Params) fragment() string {
 	add("tgWebAppVersion", p.Version)
 	add("tgWebAppPlatform", p.Platform)
 	add("tgWebAppThemeParams", p.ThemeParams)
+	if p.Extra != "" {
+		fields = append(fields, p.Extra)
+	}
 	return strings.Join(fields, "&")
 }
 

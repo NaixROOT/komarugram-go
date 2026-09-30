@@ -80,6 +80,9 @@ type chatPage struct {
 	highlight      model.MessageID
 	highlightUntil time.Time
 	infoAsked      bool
+	// themeAsked is set when the menu asks for the chat's theme, which
+	// themeShown keeps for the info opened.
+	themeAsked, themeShown bool
 	// filter hides messages, as the settings ask; filtered counts what it
 	// hid in the open chat, and showFiltered are the chats that show it.
 	filter       *messageFilter
@@ -129,16 +132,20 @@ type chatPage struct {
 	rows      map[model.MessageID]*messageRow
 	// textRunes are the rune counts of the messages' texts, which the
 	// estimates of unmeasured heights need on every change of width.
-	textRunes                         map[model.MessageID]textRunes
-	env                               model.RenderEnvironment
-	heights                           *model.HeightIndex
-	measures                          map[model.MessageID]model.MessageLayout
-	dirty                             map[model.MessageID]model.MessageLayout
-	restored                          bool
-	view                              model.Viewport
-	saved                             time.Time
-	older, newer, retry, open, cancel surface
-	link                              string
+	textRunes                                  map[model.MessageID]textRunes
+	env                                        model.RenderEnvironment
+	heights                                    *model.HeightIndex
+	measures                                   map[model.MessageID]model.MessageLayout
+	dirty                                      map[model.MessageID]model.MessageLayout
+	restored                                   bool
+	view                                       model.Viewport
+	saved                                      time.Time
+	newer, retry, toStart, toEnd, open, cancel surface
+	link                                       string
+	// jump is a jump to an end of a thread, waiting for its load.
+	jump jump
+	// flights are the messages that fly from the composer to their places.
+	flights map[model.MessageID]*sendFlight
 	// mediaError is a failure of a background task on the chat's media,
 	// reported from its goroutine and told in the toast.
 	errorMu    sync.Mutex
@@ -156,8 +163,10 @@ type chatPage struct {
 	openComments func(model.Message)
 	thread       bool
 	// bot is what the page shows of bots: reply keyboards and the Start
-	// button.
-	bot botPage
+	// button. openWebApp opens the Mini App of a bot's button; nil leaves
+	// those buttons off.
+	bot        botPage
+	openWebApp func(gtx layout.Context, p *chatPage, req model.WebViewRequest, button string)
 	// topic is set when the thread shown is a topic of a forum, whose
 	// messages are read like a chat's.
 	topic bool
@@ -409,6 +418,8 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.measures = nil
 		p.dirty = map[model.MessageID]model.MessageLayout{}
 		p.restored = false
+		p.jump = jumpNone
+		p.flights = nil
 		p.link = ""
 		p.linkModal.Hide()
 	}
@@ -481,7 +492,14 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		if p.trace != nil {
 			p.trace.History.Reason = historyInvalidationReason(p.env, env, len(p.messages), len(history.Messages))
 		}
+		// A message the composer sent, at the end of a history that shows its
+		// end, flies to its place.
+		var prevLast model.MessageID
+		if n := len(p.messages); n > 0 && p.restored && !p.list.Position.BeforeEnd {
+			prevLast = p.messages[n-1].Key.MessageID
+		}
 		p.rebuild(history.Messages, env)
+		p.startFlights(gtx, prevLast, animate)
 	}
 	p.updateBot(c, history)
 	v, anchored := p.source.Viewport(c.ID)
@@ -502,10 +520,11 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		}
 		p.restored = true
 	}
+	p.finishJump(history)
 	classic := p.classicComposer()
 	// The floating composer covers the end of the history, which scrolls
 	// out from under it; the classic one takes its height from the history.
-	top, bottom, tail := gtx.Dp(34), 0, gtx.Dp(80)
+	top, bottom, tail := 0, 0, gtx.Dp(80)
 	// cover is how much of the history's bottom the composer hides.
 	cover := 0
 	if p.composer != nil && !classic {
@@ -524,38 +543,18 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 			tail += reply
 		}
 	}
-	if history.LoadingOlder && len(p.messages) > 0 {
-		// Older messages on their way: a small ring in the band above them.
-		band := gtx
-		band.Constraints = layout.Exact(image.Pt(size.X, top))
-		layout.Center.Layout(band, func(gtx layout.Context) layout.Dimensions {
-			return p.loader.sized(gtx, l, 20)
-		})
+	// The composer's middle is below the row's: a floating one is over the
+	// tail of the history, a classic one under it.
+	flightFrom := tail / 2
+	if classic {
+		flightFrom = tail + bottom/2
 	}
-	offset(gtx, image.Pt(12, 0), func(gtx layout.Context) layout.Dimensions {
-		if history.LoadingOlder {
-			return layout.Dimensions{}
-		}
-		if history.Err != nil {
-			if p.retry.Clicked(gtx) {
-				if s, ok := p.source.(interface{ Reload(int64) }); ok {
-					s.Reload(p.chat)
-				} else {
-					p.source.LoadOlder(p.chat)
-				}
-			}
-			return textButton(gtx, &p.retry, l.T("history.failed")+"  "+l.T("history.retry"))
-		}
-		if history.HasOlder {
-			if p.older.Clicked(gtx) {
-				p.source.LoadOlder(p.chat)
-			}
-			return textButton(gtx, &p.older, l.T("history.older"))
-		}
-		return layout.Dimensions{}
-	})
 	body := gtx
 	body.Constraints = layout.Exact(image.Pt(size.X, max(0, size.Y-top-bottom)))
+	if p.appearance != nil {
+		// Dates and service messages lie on the wallpaper.
+		body = p.appearance.historyContext(body)
+	}
 	offset(body, image.Pt(0, top), func(gtx layout.Context) layout.Dimensions {
 		if len(p.messages) == 0 {
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -574,7 +573,9 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 				p.trace.History.RowsLaidOut++
 			}
 			rowEnd := p.trace.Begin("history.rows")
-			dims := p.row(gtx, msg, date, p.joins[i], l, animate)
+			dims := p.flyingRow(gtx, msg.Key.MessageID, flightFrom, func(gtx layout.Context) layout.Dimensions {
+				return p.row(gtx, msg, date, p.joins[i], l, animate)
+			})
 			if i == len(p.messages)-1 {
 				dims.Size.Y += tail
 			}
@@ -610,6 +611,7 @@ func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localizatio
 		p.composer.Layout(gtx, c.ID, l, p, animate, composerBackdrop)
 		end = p.composer.top
 	}
+	p.jumpButtons(gtx, size, end, max(0, size.Y-top-bottom), history, l)
 	p.errorMu.Lock()
 	if err := p.mediaError; err != nil {
 		p.mediaError = nil

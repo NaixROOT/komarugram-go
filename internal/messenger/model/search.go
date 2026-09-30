@@ -116,3 +116,14 @@ type MessageRevealer interface {
 	// its viewport start there.
 	Reveal(chat int64, id MessageID)
 }
+
+// HistoryEnds is a Store that can open a chat at either end of its history,
+// as the buttons that scroll to the start and to the end do when the loaded
+// part of the history is somewhere in the middle.
+type HistoryEnds interface {
+	// RevealFirst makes the next history of chat load from its oldest
+	// message. It reports false for a chat this does not work for.
+	RevealFirst(chat int64) bool
+	// RevealLast is RevealFirst for the newest message.
+	RevealLast(chat int64) bool
+}

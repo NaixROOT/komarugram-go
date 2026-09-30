@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/gotd/td/session"
@@ -288,7 +289,7 @@ func TestAccountsPersistAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if notOwnerOnly(info) {
 		t.Errorf("registry mode %v, want 0600", info.Mode().Perm())
 	}
 
@@ -311,7 +312,7 @@ func TestAccountsPersistAndReload(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o600 {
+		if notOwnerOnly(info) {
 			t.Errorf("account %s session mode %v, want 0600", a.ID, info.Mode().Perm())
 		}
 	}
@@ -557,4 +558,12 @@ func TestRegistryUpgradesFromFirstSchema(t *testing.T) {
 	if records, _ = r.list(); !records[0].Card.Premium {
 		t.Fatal("Premium was not saved")
 	}
+}
+
+// notOwnerOnly reports whether others than the file's owner may read it, as
+// far as its mode tells. On Windows it tells nothing (Go reports 0666 for a
+// writable file): the ACL of the user's profile, where the files are, keeps
+// them.
+func notOwnerOnly(info os.FileInfo) bool {
+	return runtime.GOOS != "windows" && info.Mode().Perm() != 0o600
 }

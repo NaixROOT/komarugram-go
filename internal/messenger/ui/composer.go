@@ -107,14 +107,24 @@ type messageComposer struct {
 	strip              layout.List
 	hover              hoverPlay
 	// pickerDrawn is whether the picker was drawn in the last frame.
-	pickerDrawn       bool
-	stripDrag         stripDrag
-	packClicks        map[int64]*surface
-	itemClicks        map[string]*surface
-	selectedPack      int64
-	recent            [3][]model.PickerItem
-	more, retry       surface
-	attachmentActions [3]surface
+	pickerDrawn bool
+	stripDrag   stripDrag
+	packClicks  map[int64]*surface
+	// sectionClicks are the footer's buttons of the static emoji sections.
+	sectionClicks [len(emojiSections) + 1]surface
+	// pageLoaded is whether the tab has had its page: what follows changes
+	// it, not replaces it. local is what the search of emoji found for
+	// localQuery, in localLanguage.
+	pageLoaded bool
+	// sentNotes are the messages sent that the history has not shown yet.
+	sentNotes                 []sentNote
+	localQuery, localLanguage string
+	local                     []model.PickerItem
+	itemClicks                map[string]*surface
+	selectedPack              int64
+	recent                    [3][]model.PickerItem
+	more, retry               surface
+	attachmentActions         [3]surface
 	// replies is the strip of the message a draft replies to.
 	replies replyBar
 	// The picker, the attachment menu and the attachment forms open as
@@ -274,6 +284,7 @@ func (c *messageComposer) submit(chat int64, msg model.OutgoingMessage) {
 	d.pending = &msg
 	d.sending = true
 	d.err = nil
+	c.noteSent(chat)
 	go func() {
 		ctx, cancel := context.WithTimeout(c.ctx, 10*time.Minute)
 		defer cancel()
@@ -311,6 +322,9 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 			d := c.draft(r.chat)
 			d.sending = false
 			d.err = r.err
+			if r.err != nil {
+				c.forgetSent(r.chat)
+			}
 			if r.err == nil {
 				if r.request.Item == nil && r.request.Path == "" && len(r.request.Tasks) == 0 && d.editor.Text() == r.request.Text {
 					d.editor.SetText("")
@@ -334,6 +348,7 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 				continue
 			}
 			c.loading = false
+			c.pageLoaded = true
 			c.pickerErr = r.err
 			if r.err == nil {
 				if r.append {
@@ -474,7 +489,8 @@ drained:
 			c.loadCancel()
 		}
 		c.loading = false
-		c.page.Items = nil
+		// What the last search found stays until the next one has come,
+		// so that the list does not empty and fill as a query is typed.
 		c.page.Next = ""
 		c.selectedPack = 0
 		c.list.Position = layout.Position{}
@@ -512,7 +528,7 @@ drained:
 		c.search.SetText("")
 		c.query = ""
 		c.due = time.Time{}
-		c.page = model.PickerPage{}
+		c.page, c.pageLoaded = model.PickerPage{}, false
 		c.selectedPack = 0
 		c.list.Position = layout.Position{}
 		c.strip.Position = layout.Position{}
@@ -726,6 +742,9 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			return layout.Dimensions{Size: s}
 		}
 		button(0, &c.attach, iconAttach, l.T("composer.attach"))
+		// A bot's menu button, which opens its Mini App, is beside the
+		// clip.
+		menuWidth := p.layoutBotMenu(gtx, chat, image.Rect(iconWidth, 0, s.X-2*iconWidth, s.Y), l)
 		sendWidth := 0
 		if c.canRecord(d) {
 			// With nothing written, the microphone takes the far right, as
@@ -754,7 +773,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		} else {
 			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		}
-		inRect(gtx, image.Rect(iconWidth, 0, max(iconWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
+		inRect(gtx, image.Rect(iconWidth+menuWidth, 0, max(iconWidth+menuWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
 			if d.sending || c.source == nil {
 				gtx = gtx.Disabled()
 			}

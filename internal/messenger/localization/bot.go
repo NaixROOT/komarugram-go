@@ -9,6 +9,7 @@ func init() {
 	for key, texts := range map[string][2]string{
 		"bot.start":         {"Запустить", "Start"},
 		"bot.hide_keyboard": {"Скрыть клавиатуру", "Hide keyboard"},
+		"bot.menu":          {"Меню", "Menu"},
 		"bot.silent":        {"Бот не ответил", "The bot did not answer"},
 		"bot.password":      {"Кнопка требует пароль аккаунта: здесь это не поддерживается", "The button needs the account's password, which this client does not support"},
 		"bot.failed":        {"Не удалось нажать кнопку", "Could not press the button"},

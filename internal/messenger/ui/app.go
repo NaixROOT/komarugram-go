@@ -87,6 +87,9 @@ type App struct {
 	// shows over its channel while it is set.
 	comments *chatPage
 	thread   *commentsView
+	// mini runs the Mini Apps of bots; nil when the store cannot ask for
+	// them.
+	mini *webApps
 	// forum is the list of topics that shows in place of the history of a
 	// forum; a topic opens as thread, like comments.
 	forum  *forumPage
@@ -195,6 +198,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		id := services.AccountID
 		currentAccount = func() string { return id }
 	}
+	a.initMiniApps(store, services.MiniApps.Storage, currentAccount)
 	var leave func()
 	if services.Accounts != nil {
 		leave = func() {
@@ -353,6 +357,24 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	}
 	if source, ok := store.(model.ConversationStore); ok {
 		a.themes = newChatThemeController(source, &a.images, w.Invalidate)
+		a.themes.look = a.chatMode
+		a.themes.loadWallpaper = services.Preferences.LoadWallpaper
+		chats := a.settings.chats
+		chats.chats = func() preferences.ChatLook { return a.preferences.Global().Chats }
+		chats.setChats = services.Preferences.SetChats
+		chats.dark = a.dark
+		chats.setDark = func(dark bool) {
+			if dark {
+				a.setThemeMode(themeDark)
+			} else {
+				a.setThemeMode(themeLight)
+			}
+		}
+		chats.store = services.Preferences
+		chats.wallpapers, _ = store.(model.WallpaperSource)
+		chats.media = source
+		chats.images = &a.images
+		chats.thumbs = newWallpaperThumbs(source, w.Invalidate)
 		a.info = newChatInfo(source, &a.images, w.Invalidate)
 		a.info.themes = a.themes
 		a.info.drawAvatar = a.layoutAvatar
@@ -402,6 +424,7 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
+	p.openWebApp = a.launchWebApp
 	if p.composer != nil {
 		p.composer.confirmations = func() (bool, bool) {
 			g := a.preferences.Global()
@@ -432,6 +455,7 @@ func (a *App) messageFilter() *messageFilter {
 
 // Close releases process-wide subscriptions when this window closes.
 func (a *App) Close() {
+	a.closeMiniApps()
 	a.photoWindows.closeAll()
 	if a.avatars != nil {
 		a.avatars.media.Close()
@@ -441,6 +465,9 @@ func (a *App) Close() {
 	}
 	if a.themes != nil {
 		a.themes.Close()
+	}
+	if a.settings != nil && a.settings.chats.thumbs != nil {
+		a.settings.chats.thumbs.Close()
 	}
 	if a.viewer != nil {
 		a.viewer.Destroy()
@@ -594,6 +621,15 @@ func (a *App) Update(gtx layout.Context) {
 		global := a.preferences.Global()
 		a.settings.Update(gtx, themeMode(global.Theme), global.Language)
 	}
+}
+
+// chatMode is the look the settings give every chat in the theme of dark.
+func (a *App) chatMode(dark bool) preferences.ChatMode {
+	c := a.preferences.Global().Chats
+	if dark {
+		return c.Night
+	}
+	return c.Day
 }
 
 // toggleTheme switches to the other theme for good.
@@ -775,6 +811,11 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 		return
 	}
 	a.tellGhost()
+	if a.thread != nil {
+		a.updateMiniApps(a.comments, a.catalog())
+	} else {
+		a.updateMiniApps(a.history, a.catalog())
+	}
 	a.window.SetCaptureExcluded(a.preferences.Global().StreamerMode)
 	a.history.filter = a.messageFilter()
 	if a.comments != nil {
@@ -783,7 +824,11 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked() || a.forum != nil && a.forum.header.Clicked(gtx)) {
 		if c, ok := a.selectedChat(); ok {
 			a.info.Open(c)
+			if a.history.themeShown {
+				a.info.OpenTheme()
+			}
 		}
+		a.history.themeShown = false
 	}
 	overlayGtx := gtx
 	if a.info != nil && a.info.visible {
@@ -897,6 +942,7 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 		a.chats.panel.recent.layoutConfirm(overlayGtx, a.catalog())
 	}
 	a.settings.sessions.layoutDialog(overlayGtx, a.catalog())
+	a.settings.chats.layoutDialog(overlayGtx, a.catalog())
 	a.frozen.Layout(overlayGtx, a.catalog())
 	a.sessionEnded.Layout(overlayGtx, a.catalog())
 }
@@ -963,6 +1009,12 @@ func (a *App) SetSuspended(hidden bool) {
 	}
 	if a.info != nil {
 		a.info.Release()
+	}
+	if a.themes != nil {
+		a.themes.Release()
+	}
+	if a.settings != nil && a.settings.chats.thumbs != nil {
+		a.settings.chats.thumbs.Release()
 	}
 	if a.avatars != nil {
 		a.avatars.media.Release()

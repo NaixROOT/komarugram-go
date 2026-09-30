@@ -64,39 +64,6 @@ func (s *Store) SharedMedia(ctx context.Context, chat int64, kind model.SharedKi
 	}
 	return page, nil
 }
-func (s *Store) ChatThemes(context.Context) ([]model.ChatTheme, error) {
-	light := &model.ChatThemeStyle{Accent: 0x397f91, OutAccent: 0x276c81, Incoming: 0xffffffff, Text: 0x162d39ff, OutText: 0x102d39ff, Outgoing: []uint32{0xb2e4d2, 0xa9d4ee}, Wallpaper: &model.ChatWallpaper{Colors: []uint32{0xd2e4ef, 0xbbe1c4, 0xf4edd2, 0xc9d5f1}}}
-	dark := &model.ChatThemeStyle{Dark: true, Accent: 0x86c8e4, OutAccent: 0xa7dff0, Incoming: 0x20313eff, Text: 0xeff5faff, OutText: 0xf5faffff, Outgoing: []uint32{0x315964, 0x354c70}, Wallpaper: &model.ChatWallpaper{Colors: []uint32{0x182f3c, 0x24463f, 0x353550, 0x1d2839}}}
-	return []model.ChatTheme{{ID: "🌿", Title: "🌿 Garden", Light: light, Dark: dark}}, nil
-}
-func (s *Store) ChatAppearance(ctx context.Context, chat int64) (model.ChatAppearance, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return model.ChatAppearance{Theme: s.themes[chat]}, nil
-}
-func (s *Store) SetChatTheme(ctx context.Context, chat int64, id string) error {
-	themes, _ := s.ChatThemes(ctx)
-	theme := model.ChatTheme{}
-	for _, t := range themes {
-		if t.ID == id {
-			theme = t
-		}
-	}
-	return s.SetLocalChatTheme(ctx, chat, &theme)
-}
-func (s *Store) SetLocalChatTheme(ctx context.Context, chat int64, theme *model.ChatTheme) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.themes == nil {
-		s.themes = map[int64]model.ChatTheme{}
-	}
-	if theme == nil {
-		delete(s.themes, chat)
-	} else {
-		s.themes[chat] = *theme
-	}
-	return nil
-}
 
 func (s *Store) SharedCollection(ctx context.Context, chat int64, kind model.SharedKind, cursor string, limit int) (model.SharedCollectionPage, error) {
 	p := model.SharedCollectionPage{}

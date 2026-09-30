@@ -12,13 +12,17 @@ import (
 	"time"
 
 	"komarugram/internal/messenger/model"
+	"komarugram/pkg/miniapp"
 )
 
 type Store struct {
 	sent map[int64]bool
 	// files are what the voice messages sent in the demo hold, by media ID.
-	files  map[string][]byte
-	themes map[int64]model.ChatTheme
+	files map[string][]byte
+	// themes are the chats' themes set only here; chatThemes, the emoji of
+	// the ones set for all in the chat, as Telegram keeps them.
+	themes     map[int64]model.ChatTheme
+	chatThemes map[int64]string
 	// mu guards histories and views: a photo viewer in its own window reads
 	// the store from that window's goroutine.
 	mu        sync.Mutex
@@ -34,6 +38,8 @@ type Store struct {
 	// created is when the store was made, which the times of its forum's
 	// topics count back from.
 	created time.Time
+	// miniApp is the bundled Mini App the demo's bots open, served once asked.
+	miniApp *miniapp.Demo
 }
 
 // New returns a store with demo chats whose times are relative to now, and
@@ -61,16 +67,18 @@ func New(now time.Time, extra int) *Store {
 	}
 	chats = append(chats, generate(now, extra, int64(len(chats)+1))...)
 	model.Renumbered(chats)
-	return &Store{chats: chats, created: now, me: model.Profile{
-		ID:        5000000001,
-		DC:        2,
-		FirstName: "Алексей",
-		LastName:  "Петров",
-		Username:  "alexey_petrov",
-		Phone:     "+7 900 000-00-00",
-		Bio:       "Пишу интерфейсы на Go и Gio.",
-		Badges:    model.Badges{Premium: true},
-	}}
+	return &Store{chats: chats, created: now,
+		// A chat of the demo has a theme set for all in it, as from Telegram.
+		chatThemes: map[int64]string{2: "🌷"}, me: model.Profile{
+			ID:        5000000001,
+			DC:        2,
+			FirstName: "Алексей",
+			LastName:  "Петров",
+			Username:  "alexey_petrov",
+			Phone:     "+7 900 000-00-00",
+			Bio:       "Пишу интерфейсы на Go и Gio.",
+			Badges:    model.Badges{Premium: true},
+		}}
 }
 
 // Premium implements model.PremiumSource: the demo account has Premium,

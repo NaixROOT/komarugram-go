@@ -10,7 +10,6 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,10 +24,9 @@ import (
 )
 
 type pickerCache struct {
-	keywords map[string][]tg.EmojiKeyword
-	mu       sync.Mutex
-	pages    map[model.PickerTab]model.PickerPage
-	at       map[model.PickerTab]time.Time
+	mu    sync.Mutex
+	pages map[model.PickerTab]model.PickerPage
+	at    map[model.PickerTab]time.Time
 }
 
 func (s *Store) pickerItems(ctx context.Context, docs []tg.DocumentClass) []model.PickerItem {
@@ -146,12 +144,8 @@ func (s *Store) Picker(ctx context.Context, req model.PickerRequest) (model.Pick
 	if err != nil {
 		return base, err
 	}
-	if req.Tab == model.PickerEmoji {
-		emoji, e := s.pickerUnicode(ctx, api, req.Language, req.Query)
-		if e == nil {
-			base.Items = emoji
-		}
-	}
+	// The emoji of the picker are searched by the client, in its own names
+	// and keywords; what Telegram finds is custom emoji and stickers.
 	if req.Query == "" {
 		return base, nil
 	}
@@ -181,7 +175,9 @@ func (s *Store) Picker(ctx context.Context, req model.PickerRequest) (model.Pick
 			}
 		}
 	}
-	return model.PickerPage{Packs: base.Packs, Items: model.PreferSaved(saved, append(base.Items, global...)), Next: next}, nil
+	// The rest of the page stays as it was, for the list not to change as
+	// the search ends.
+	return model.PickerPage{Packs: base.Packs, Recent: base.Recent, Featured: base.Featured, Items: model.PreferSaved(saved, global), Next: next}, nil
 }
 func (s *Store) pickerCatalogue(ctx context.Context, api *tg.Client, tab model.PickerTab) (model.PickerPage, error) {
 	s.picker.mu.Lock()
@@ -438,41 +434,6 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 	return nil
 }
 
-func (s *Store) pickerUnicode(ctx context.Context, api *tg.Client, language, query string) ([]model.PickerItem, error) {
-	s.picker.mu.Lock()
-	words, ok := s.picker.keywords[language]
-	s.picker.mu.Unlock()
-	if !ok {
-		res, err := api.MessagesGetEmojiKeywords(ctx, language)
-		if err != nil {
-			return nil, err
-		}
-		for _, raw := range res.Keywords {
-			if word, ok := raw.(*tg.EmojiKeyword); ok {
-				words = append(words, *word)
-			}
-		}
-		s.picker.mu.Lock()
-		if s.picker.keywords == nil {
-			s.picker.keywords = map[string][]tg.EmojiKeyword{}
-		}
-		s.picker.keywords[language] = words
-		s.picker.mu.Unlock()
-	}
-	seen := map[string]bool{}
-	var result []model.PickerItem
-	q := strings.ToLower(query)
-	for _, word := range words {
-		for _, emoji := range word.Emoticons {
-			if (q == "" || strings.Contains(strings.ToLower(word.Keyword), q) || strings.Contains(emoji, q)) && !seen[emoji] {
-				seen[emoji] = true
-				result = append(result, model.PickerItem{ID: "emoji/" + emoji, Emoji: emoji})
-			}
-		}
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Emoji < result[j].Emoji })
-	return result, nil
-}
 func (s *Store) pickerWebItem(ctx context.Context, r *tg.BotInlineResult, dc int) model.PickerItem {
 	doc := r.Content
 	id := fmt.Sprintf("inline/%x", sha256.Sum256([]byte(doc.GetURL())))

@@ -432,3 +432,36 @@ func TestVideoAttributesUseChosenFFmpeg(t *testing.T) {
 		t.Fatalf("attributes %+v", attrs)
 	}
 }
+
+// A search keeps the rest of the page, so that the list does not change as it
+// ends, and leaves the emoji of the picker to the client: Telegram is not
+// asked for the keywords.
+func TestPickerSearchKeepsThePage(t *testing.T) {
+	s := testStore(t)
+	s.picker.pages = map[model.PickerTab]model.PickerPage{model.PickerEmoji: {
+		Recent:   []model.PickerItem{{ID: "emoji/🅰", Emoji: "🅰"}},
+		Packs:    []model.PickerPack{{ID: 1, Title: "Mine"}},
+		Featured: []model.PickerPack{{ID: 2, Title: "Featured"}},
+	}}
+	s.picker.at = map[model.PickerTab]time.Time{model.PickerEmoji: time.Now()}
+	keywords := 0
+	s.history.api = composerAPI(func(in bin.Encoder) (bin.Encoder, error) {
+		switch in.(type) {
+		case *tg.MessagesSearchStickersRequest:
+			return &tg.MessagesFoundStickers{Stickers: []tg.DocumentClass{&tg.Document{ID: 1, MimeType: "image/webp"}}}, nil
+		case *tg.MessagesGetEmojiKeywordsRequest:
+			keywords++
+		}
+		return nil, fmt.Errorf("unexpected %T", in)
+	})
+	p, err := s.Picker(context.Background(), model.PickerRequest{Tab: model.PickerEmoji, Query: "cat", Language: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Recent) != 1 || len(p.Packs) != 1 || len(p.Featured) != 1 || len(p.Items) != 1 {
+		t.Fatalf("the page of a search: %d recent, %d packs, %d featured, %d found", len(p.Recent), len(p.Packs), len(p.Featured), len(p.Items))
+	}
+	if keywords != 0 {
+		t.Fatal("Telegram was asked for the emoji keywords")
+	}
+}
