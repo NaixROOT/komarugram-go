@@ -110,11 +110,12 @@ func TestJumpReserve(t *testing.T) {
 	h := newChatInputHarnessOf(t, 100, func(m model.History) model.ConversationStore { return benchmarkHistory{h: m} })
 	p := h.page
 	const viewport, reserve = 600, 480
-	total := p.heights.Total()
 	nearEnd, nearStart, far := 0, 0, 0
 	for first := range p.messages {
 		h.seek(first, 0)
-		below := total - (p.heights.Prefix(first) + int64(viewport))
+		// The rows laid out replace their estimated heights, so the total
+		// is taken after each.
+		below := p.heights.Total() - (p.heights.Prefix(first) + int64(viewport))
 		if got := p.atEnd(model.History{}, viewport, reserve); got != (below <= reserve) {
 			t.Fatalf("row %d, %d px above the end: atEnd %v", first, below, got)
 		}
