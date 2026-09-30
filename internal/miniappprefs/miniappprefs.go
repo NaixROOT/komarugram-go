@@ -129,7 +129,7 @@ func (v *View) Update(gtx layout.Context) {
 }
 
 func (v *View) Layout(gtx layout.Context) layout.Dimensions {
-	onSurface := exp.GetSurfaceTheme().OnColor
+	onSurface := exp.GetSurfaceTheme(gtx).OnColor
 	text := func(txt string, style token.Typestyle) layout.Widget {
 		return func(gtx layout.Context) layout.Dimensions {
 			return wdk.LayoutLabel(gtx, wdk.LabelStyle{Typestyle: style, Color: onSurface}, txt)
