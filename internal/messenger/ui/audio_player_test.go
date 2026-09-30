@@ -25,6 +25,9 @@ type silentPlayback struct {
 	src     audio.Source
 	playing bool
 	closed  bool
+	// ended is set by end: the sound played through.
+	ended  bool
+	volume float64
 }
 
 func (s *silentPlayback) Pause()  { s.mu.Lock(); s.playing = false; s.mu.Unlock() }
@@ -34,10 +37,22 @@ func (s *silentPlayback) Playing() bool {
 	defer s.mu.Unlock()
 	return s.playing
 }
-func (s *silentPlayback) Ended() bool     { return false }
+func (s *silentPlayback) Ended() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ended
+}
+
+// end is the sound playing to its end.
+func (s *silentPlayback) end()            { s.mu.Lock(); s.playing, s.ended = false, true; s.mu.Unlock() }
 func (s *silentPlayback) Position() int64 { return s.src.Position() }
 func (s *silentPlayback) SeekSample(pos int64) error {
 	return s.src.SeekSample(pos)
+}
+func (s *silentPlayback) SetVolume(volume float64) {
+	s.mu.Lock()
+	s.volume = volume
+	s.mu.Unlock()
 }
 func (s *silentPlayback) Close() { s.mu.Lock(); s.closed = true; s.mu.Unlock() }
 func (s *silentPlayback) isClosed() bool {
@@ -123,7 +138,7 @@ func TestVoicePlaysPausesAndSeeks(t *testing.T) {
 	if p.audio.state(m).active || !played(0).isClosed() {
 		t.Fatal("the first message still plays")
 	}
-	// A page that leaves the chat stops it.
+	// The bar's button ends it.
 	p.audio.stop()
 	if p.audio.state(other).active || !played(1).isClosed() {
 		t.Fatal("stop left it playing")

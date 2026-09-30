@@ -146,6 +146,10 @@ type Message struct {
 	// ForumTopic is set when the message's reply header marks it as part of
 	// a forum topic: it replies to the topic's root, or to a message in it.
 	ForumTopic bool `json:",omitempty"`
+	// MediaUnread is Telegram's mark of a voice message nobody listened to
+	// yet: the account, for one that came, or who it was sent to. Telegram
+	// sets it on an unread mention as well; only voice messages show it.
+	MediaUnread bool `json:",omitempty"`
 }
 
 // GeneralTopic is the id of the topic every forum has, whose messages have

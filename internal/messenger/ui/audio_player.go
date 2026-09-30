@@ -33,8 +33,8 @@ import (
 	"gioui.org/widget"
 )
 
-// audioPlayer plays the voice messages and the music of a chat page in the
-// client, one at a time, each decoder in a WebAssembly sandbox of its own:
+// audioPlayer plays the voice messages and the music of a window's chats in
+// the client, one at a time, whatever chat is shown meanwhile, each decoder in a WebAssembly sandbox of its own:
 // libopus (pkg/opus) for Opus, dr_libs (pkg/drdec) for MP3, FLAC and WAV,
 // fdk-aac (pkg/aac, fetched) for M4A; pkg/audio puts them out. A file that
 // downloads plays as it does: the decoders read it a range at a time, and
@@ -42,9 +42,30 @@ import (
 // external player.
 type audioPlayer struct {
 	mu sync.Mutex
-	// key is the message playing or loading; zero for none.
+	// key is the message playing or loading; zero for none. msg is that
+	// message, page the one it was played from, which tells its failures
+	// and has the store, and list the chat, or the thread, it is shown in:
+	// the voice message or the music after it there plays next.
 	key     model.MessageKey
+	msg     model.Message
+	page    *chatPage
+	list    int64
 	loading bool
+	// stretch changes the speed of what plays. speed is the one chosen for
+	// what changes its speed, 1 when zero; saveSpeed keeps the choice.
+	stretch   *audio.Stretched
+	speed     float64
+	saveSpeed func(float64)
+	// volume is how loud what plays is, from 0 to 1, and unmuted what the
+	// muted button brings back; saveVolume keeps the choice.
+	volume, unmuted float64
+	saveVolume      func(float64)
+	// before and after tell whether a message of its kind precedes and
+	// follows what plays, as of revision aroundRev of the history of
+	// aroundKey.
+	before, after bool
+	aroundKey     model.MessageKey
+	aroundRev     uint64
 	// playback and source are the message's while it is loaded; they go
 	// when another plays, or the chat changes, and release then frees the
 	// decoder and the file under them.
@@ -77,6 +98,7 @@ type audioPlayback interface {
 	Ended() bool
 	Position() int64
 	SeekSample(pos int64) error
+	SetVolume(volume float64)
 	Close()
 }
 
@@ -276,6 +298,9 @@ func (v *audioPlayer) waveform(m model.Message) []byte {
 
 // takeExternal is the message to open in the external player, once.
 func (v *audioPlayer) takeExternal() *model.Message {
+	if v == nil {
+		return nil
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	m := v.external
@@ -286,6 +311,12 @@ func (v *audioPlayer) takeExternal() *model.Message {
 // toggle plays m, or pauses it, or goes on with it. at, from 0 to 1, moves
 // it there first; below 0, it plays from where it is.
 func (v *audioPlayer) toggle(p *chatPage, m model.Message, at float32) {
+	v.toggleIn(p, p.chat, m, at)
+}
+
+// toggleIn is toggle for a message shown in list, a chat or a thread of
+// p's store, whatever p shows now.
+func (v *audioPlayer) toggleIn(p *chatPage, list int64, m model.Message, at float32) {
 	v.mu.Lock()
 	if v.key == m.Key && v.key != (model.MessageKey{}) {
 		defer v.mu.Unlock()
@@ -307,9 +338,16 @@ func (v *audioPlayer) toggle(p *chatPage, m model.Message, at float32) {
 	v.stopLocked()
 	ctx, cancel := context.WithCancel(context.Background())
 	v.key, v.loading, v.cancel, v.work = m.Key, true, cancel, new(sync.WaitGroup)
+	v.msg, v.page, v.list = m, p, list
 	work := v.work
 	work.Add(1)
 	v.mu.Unlock()
+	if m.Kind == model.MessageVoice && m.MediaUnread && !m.Outgoing {
+		// Played, it is listened to, as in Telegram Desktop.
+		if r, ok := p.source.(model.ContentReader); ok {
+			r.ReadContents(m)
+		}
+	}
 	go func() {
 		defer work.Done()
 		defer crash.Recover("audio", func(e *crash.Panic) { v.fail(m, p, e) })
@@ -344,7 +382,8 @@ func (v *audioPlayer) load(ctx context.Context, p *chatPage, m model.Message, at
 	if at > 0 {
 		err = reader.SeekSample(int64(at * float32(samples)))
 	}
-	source := &audioSource{reader: reader}
+	stretch := audio.Stretch(reader)
+	source := &audioSource{reader: stretch}
 	var playback audioPlayback
 	if err == nil {
 		v.mu.Lock()
@@ -373,7 +412,17 @@ func (v *audioPlayer) load(ctx context.Context, p *chatPage, m model.Message, at
 		return err
 	}
 	v.loading, v.playback, v.source, v.release, v.samples = false, playback, source, release, samples
+	v.stretch = stretch
+	playback.SetVolume(v.volume)
+	if speedChanges(m) && v.speed > 0 {
+		stretch.SetTempo(v.speed)
+	}
 	v.mu.Unlock()
+	work.Add(1)
+	go func() {
+		defer work.Done()
+		v.watch(ctx, m, playback)
+	}()
 	if f.data == nil {
 		// The rest downloads while it plays, a part at a time, so that
 		// what plays next is there, and a move ahead finds it.
@@ -391,14 +440,14 @@ func (v *audioPlayer) load(ctx context.Context, p *chatPage, m model.Message, at
 	if m.Kind == model.MessageVoice {
 		// One that came without a waveform gets one, from a decoder of its
 		// own, while it plays.
-		v.workOutWaveform(ctx, m, f)
+		v.workOutWaveform(ctx, p.source, m, f)
 	}
 	return nil
 }
 
-// workOutWaveform makes the waveform of voice message m from its file,
-// unless it has one.
-func (v *audioPlayer) workOutWaveform(ctx context.Context, m model.Message, f *audioFile) {
+// workOutWaveform makes the waveform of voice message m of source from its
+// file, unless it has one.
+func (v *audioPlayer) workOutWaveform(ctx context.Context, source model.ConversationStore, m model.Message, f *audioFile) {
 	v.mu.Lock()
 	has := len(m.Media.Waveform) > 0 || v.waveforms[m.Media.ID] != nil
 	v.mu.Unlock()
@@ -415,6 +464,10 @@ func (v *audioPlayer) workOutWaveform(ctx context.Context, m model.Message, f *a
 	}
 	v.waveforms[m.Media.ID] = w
 	v.mu.Unlock()
+	// A store that keeps it has it the next time, without the file.
+	if k, ok := source.(model.WaveformKeeper); ok {
+		k.KeepWaveform(m, w)
+	}
 }
 
 // waveformOf decodes voice message m through and makes its waveform, as
@@ -480,7 +533,7 @@ func (v *audioPlayer) showWaveform(p *chatPage, m model.Message) {
 			// Offline, say: it is tried again when played.
 			return
 		}
-		v.workOutWaveform(ctx, m, fileOf(data))
+		v.workOutWaveform(ctx, p.source, m, fileOf(data))
 	}()
 }
 
@@ -502,15 +555,11 @@ func (v *audioPlayer) fail(m model.Message, p *chatPage, err error) {
 	p.invalidate()
 }
 
-// chat is the chat of the message playing, 0 for none.
-func (v *audioPlayer) chat() int64 {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.key.ChatID
-}
-
 // stop ends what plays and gives back its memory.
 func (v *audioPlayer) stop() {
+	if v == nil {
+		return
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.stopLocked()
@@ -535,6 +584,7 @@ func (v *audioPlayer) stopLocked() {
 		}()
 	}
 	v.key, v.loading, v.playback, v.release, v.source, v.work, v.samples, v.cancel = model.MessageKey{}, false, nil, nil, nil, nil, 0, nil
+	v.msg, v.list, v.stretch = model.Message{}, 0, nil
 }
 
 // audioSource is the reader of a voice message, as the output reads it
@@ -703,7 +753,21 @@ func (p *chatPage) voiceLayout(gtx layout.Context, r *messageRow, m model.Messag
 				}),
 				vspace(4),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return label(gtx, audioTime(state, m.Media.Duration), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 1)
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return label(gtx, audioTime(state, m.Media.Duration), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 1)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !m.MediaUnread {
+								return layout.Dimensions{}
+							}
+							// Not listened to yet: a dot, as in Telegram Desktop.
+							d := gtx.Dp(6)
+							size := image.Pt(gtx.Dp(6)+d, d)
+							paint.FillShape(gtx.Ops, sc.Primary.Color.AsNRGBA(), clip.Ellipse{Min: image.Pt(size.X-d, 0), Max: size}.Op(gtx.Ops))
+							return layout.Dimensions{Size: size}
+						}),
+					)
 				}),
 			)
 		}),

@@ -200,6 +200,7 @@ func TestPlaybackAnswersWhileTheSourceMoves(t *testing.T) {
 			p.Position()
 			p.Playing()
 			p.Ended()
+			p.SetVolume(0.5)
 		})
 		if !src.moving.Load() {
 			break

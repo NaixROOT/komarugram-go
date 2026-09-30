@@ -178,6 +178,11 @@ func (p *Playback) SeekSample(pos int64) error {
 	return err
 }
 
+// SetVolume sets how loud the sound is, from 0, silent, to 1, as it is.
+func (p *Playback) SetVolume(volume float64) {
+	p.player.SetVolume(min(max(volume, 0), 1))
+}
+
 // Close stops the sound for good.
 func (p *Playback) Close() {
 	p.mu.Lock()
