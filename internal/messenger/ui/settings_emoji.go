@@ -18,6 +18,7 @@ import (
 	"komarugram/internal/messenger/emojipacks"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/preferences"
+	"komarugram/internal/messenger/sendfiles"
 )
 
 // emojiSettings is the part of the appearance settings that chooses what
@@ -234,8 +235,10 @@ func (s *emojiSettings) install(ctx context.Context, p emojipacks.Pack) {
 	s.invalidate()
 }
 
-func megabytes(l localization.Catalog, size int64) string {
-	return l.Format("fonts.size", map[string]string{"size": strconv.FormatFloat(float64(size)/(1<<20), 'f', 1, 64)})
+// sizeText is the size of a file of the settings, as sendfiles.Size writes
+// it, in the units of the language.
+func sizeText(l localization.Catalog, size int64) string {
+	return sendfiles.SizeIn(size, l.T("size.bytes"), l.T("size.kilobytes"), l.T("size.megabytes"))
 }
 
 func (s *emojiSettings) Layout(gtx layout.Context, l localization.Catalog) layout.Dimensions {
@@ -263,7 +266,7 @@ func (s *emojiSettings) Layout(gtx layout.Context, l localization.Catalog) layou
 			if p.Kind == emojipacks.KindSprites {
 				kind = l.T("emojipacks.sprites")
 			}
-			about := kind + " · " + megabytes(l, p.DownloadSize())
+			about := kind + " · " + sizeText(l, p.DownloadSize())
 			if p.License != "" {
 				about += " · " + p.License
 			}

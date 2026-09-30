@@ -336,19 +336,23 @@ func TitleOf(files []File, way Way) Title {
 	return TitleImages
 }
 
-// Size is a file's size as a person reads it.
-func Size(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
+// Size is a file's size as Telegram Desktop writes it (FormatSizeText):
+// bytes, then kilobytes and megabytes of 1024, the tenths cut rather than
+// rounded, so that a size never reads as more than it is, nor as zero.
+func Size(n int64) string { return SizeIn(n, "B", "KB", "MB") }
+
+// SizeIn is Size with the units of a language: bytes, kilobytes and
+// megabytes.
+func SizeIn(n int64, b, kb, mb string) string {
+	switch {
+	case n >= 1<<20:
+		tenths := n * 10 / (1 << 20)
+		return fmt.Sprintf("%d.%d %s", tenths/10, tenths%10, mb)
+	case n >= 1<<10:
+		tenths := n * 10 / (1 << 10)
+		return fmt.Sprintf("%d.%d %s", tenths/10, tenths%10, kb)
 	}
-	value, suffix := float64(n), []string{"KB", "MB", "GB", "TB"}
-	i := -1
-	for value >= unit && i < len(suffix)-1 {
-		value /= unit
-		i++
-	}
-	return fmt.Sprintf("%.1f %s", value, suffix[i])
+	return fmt.Sprintf("%d %s", n, b)
 }
 
 // DropState is what files dragged over a chat can be dropped as, as

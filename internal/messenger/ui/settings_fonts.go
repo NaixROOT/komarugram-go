@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"gio-mw/token"
 
@@ -211,7 +210,7 @@ func (s *fontSettings) layoutRow(gtx layout.Context, role fonts.Role, path strin
 		children = append(children, line(filepath.Base(path)+": "+fontErrorText(row.err, l), true))
 	default:
 		// The size is what the font takes of memory while it is chosen.
-		children = append(children, line(row.family+" · "+filepath.Base(path)+" · "+l.Format("fonts.size", map[string]string{"size": strconv.FormatFloat(float64(row.size)/(1<<20), 'f', 1, 64)}), false))
+		children = append(children, line(row.family+" · "+filepath.Base(path)+" · "+sizeText(l, row.size), false))
 	}
 	if row.pickErr != nil {
 		children = append(children, line(l.T("fonts.rejected")+": "+fontErrorText(row.pickErr, l), true))

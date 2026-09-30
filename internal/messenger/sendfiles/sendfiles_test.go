@@ -13,7 +13,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -329,8 +328,16 @@ func TestOptionsOfTheBox(t *testing.T) {
 			t.Errorf("%v %+v: %d, want %d", c.files, c.way, got, c.want)
 		}
 	}
-	if !reflect.DeepEqual([]string{Size(0), Size(1023), Size(1024), Size(1536), Size(5 << 20), Size(3 << 30)}, []string{"0 B", "1023 B", "1.0 KB", "1.5 KB", "5.0 MB", "3.0 GB"}) {
-		t.Error("sizes")
+	// As Telegram Desktop writes them: tenths cut, megabytes at most.
+	sizes := []int64{0, 9, 1023, 1024, 1536, 1<<20 - 1, 5 << 20, 5<<20 + 1<<20*99/100, 3 << 30}
+	want := []string{"0 B", "9 B", "1023 B", "1.0 KB", "1.5 KB", "1023.9 KB", "5.0 MB", "5.9 MB", "3072.0 MB"}
+	for i, n := range sizes {
+		if got := Size(n); got != want[i] {
+			t.Errorf("Size(%d) = %q, want %q", n, got, want[i])
+		}
+	}
+	if got := SizeIn(1536, "Б", "КБ", "МБ"); got != "1.5 КБ" {
+		t.Errorf("in Russian: %q", got)
 	}
 }
 

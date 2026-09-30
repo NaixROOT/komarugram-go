@@ -16,6 +16,7 @@ import (
 	"komarugram/internal/crash"
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
+	"komarugram/internal/messenger/sendfiles"
 
 	"gio-mw/token"
 
@@ -152,7 +153,7 @@ func (p *chatPage) fileLayout(gtx layout.Context, r *messageRow, m model.Message
 		busy = p.files.busy
 		p.files.mu.Unlock()
 	}
-	details := fmt.Sprintf("%.1f MiB", float64(m.Media.Size)/(1<<20))
+	details := sendfiles.Size(m.Media.Size)
 	icon := iconFileRow
 	if playing {
 		details = m.Media.Duration.Round(time.Second).String()
