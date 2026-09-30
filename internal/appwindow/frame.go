@@ -128,7 +128,6 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 	size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(captionHeight))
 	button := image.Pt(gtx.Dp(captionButton), size.Y)
 	paint.FillShape(gtx.Ops, fill, clip.Rect{Max: size}.Op())
-	f.layoutEdge(gtx, fill, size)
 
 	// The caption moves the window, and the system maximizes it on a double
 	// click there. The buttons are beside it and not over it: where the
@@ -174,43 +173,26 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 	return actions
 }
 
-// edgeHeight is the height of the edge of a caption of the fill given: the
-// upper half of it. An opaque caption has none.
-func edgeHeight(gtx layout.Context, fill color.NRGBA) int {
-	if fill.A == 0xff {
-		return 0
-	}
-	return max(gtx.Dp(captionHeight)/2, 1)
-}
-
-// edgeAlpha is how opaque the edge is in row y of height: opaque in the top
-// row, and nothing at the end, leaving the top quickly and arriving slowly,
-// as a shadow does.
-func edgeAlpha(y, height int) uint8 {
-	if y < 0 || y >= height {
-		return 0
-	}
-	left := 1 - float32(y)/float32(height)
-	return uint8(left*left*0xff + 0.5)
-}
-
-// layoutEdge thickens a translucent caption towards the top of the window,
-// where it is opaque, as a shadow cast from the edge. The system draws a
-// white line of a pixel along the top of a window that has the blur and no
-// frame of the system's, behind the content: it shows through the caption,
-// the more the more transparent the caption is. The top row of the caption
-// covers it, and the rows of the upper half lead from it to the caption's
-// own fill: the more the caption lets through, the more there is to see of
-// them. A maximized window has its top beyond the screen, and no line.
-func (f *frame) layoutEdge(gtx layout.Context, fill color.NRGBA, size image.Point) {
-	height := edgeHeight(gtx, fill)
-	if f.maximized {
+// layoutBorder draws a line of a pixel around a window of the size given,
+// over its content: the border of the window's own frame. The system draws
+// a white line of a pixel along the top of a window that has the blur and
+// no frame of the system's, behind the content, which showed through a
+// translucent caption; the border covers it, and is a border all round
+// rather than a line at the top alone. A maximized window has its edges
+// beyond the screen: no line, and no border.
+func (f *frame) layoutBorder(gtx layout.Context, size image.Point) {
+	if !f.shown || f.maximized {
 		return
 	}
-	// Over the fill, which is there already. A gradient of Gio's is linear,
-	// and the rows are few.
-	for y := range height {
-		paint.FillShape(gtx.Ops, withAlpha(fill, edgeAlpha(y, height)), clip.Rect{Min: image.Pt(0, y), Max: image.Pt(size.X, y+1)}.Op())
+	line := wdk.GetMaterialTheme(gtx).Scheme.OutlineVariant.AsNRGBA()
+	line.A = 0xff
+	for _, r := range [4]image.Rectangle{
+		{Max: image.Pt(size.X, 1)},
+		{Min: image.Pt(0, size.Y-1), Max: size},
+		{Min: image.Pt(0, 1), Max: image.Pt(1, size.Y-1)},
+		{Min: image.Pt(size.X-1, 1), Max: image.Pt(size.X, size.Y-1)},
+	} {
+		paint.FillShape(gtx.Ops, line, clip.Rect(r).Op())
 	}
 }
 

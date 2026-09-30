@@ -298,50 +298,24 @@ func TestOwnFrameIsDrawn(t *testing.T) {
 	}
 }
 
-// TestTranslucentCaptionIsOpaqueAtTheTop checks what covers the line the
-// system draws behind the top of the window: the top row of a translucent
-// caption is opaque, the rows below lead down to its fill, further down the
-// more it lets through, and a maximized window or an opaque caption has
-// nothing of it.
-func TestTranslucentCaptionIsOpaqueAtTheTop(t *testing.T) {
+// TestOwnFrameHasABorder checks the line around the window: a pixel of the
+// theme's outline on every side, opaque, which covers the line the system
+// draws behind the top of the window, with the content inside left as it
+// is; and none around a maximized window or one with the system's frame.
+func TestOwnFrameHasABorder(t *testing.T) {
 	ownFrames(t, true)
-	gtx := layout.Context{Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
-	opaque := color.NRGBA{R: 0x20, G: 0x40, B: 0x60, A: 0xff}
-	half, clear := opaque, opaque
-	half.A, clear.A = 0x80, 0
-	if h := edgeHeight(gtx, opaque); h != 0 {
-		t.Errorf("an opaque caption has an edge of %d pixels", h)
-	}
-	// It is the upper half of the caption, however much the caption lets
-	// through: that changes how much is seen of it, not how far it goes.
-	if h, all := edgeHeight(gtx, half), edgeHeight(gtx, clear); h != 15 || all != 15 {
-		t.Errorf("the edge is %d pixels at half and %d for a caption that is all through, want 15 of 31", h, all)
-	}
-	// Opaque at the top, nothing at the end, never rising on the way, and
-	// slowing down as it arrives: no step where it ends.
-	if top, end := edgeAlpha(0, 15), edgeAlpha(15, 15); top != 0xff || end != 0 {
-		t.Errorf("the edge is %#x at the top and %#x past its end", top, end)
-	}
-	for y := 1; y < 15; y++ {
-		if edgeAlpha(y, 15) >= edgeAlpha(y-1, 15) {
-			t.Errorf("the edge does not fade at row %d: %#x after %#x", y, edgeAlpha(y, 15), edgeAlpha(y-1, 15))
-		}
-	}
-	if first, last := edgeAlpha(0, 15)-edgeAlpha(1, 15), edgeAlpha(13, 15)-edgeAlpha(14, 15); last*4 > first || edgeAlpha(14, 15) > 4 {
-		t.Errorf("the edge ends with a step: it falls by %d at the top and by %d at the end, to %d", first, last, edgeAlpha(14, 15))
-	}
-
-	size := image.Pt(480, 120)
+	size := image.Pt(200, 120)
 	window, err := headless.NewWindow(size.X, size.Y)
 	if err != nil {
 		t.Skipf("no headless window: %v", err)
 	}
 	defer window.Release()
-	alphas := func(mode app.WindowMode, fill color.NRGBA) (top, below, low uint32) {
+	draw := func(cnf app.Config) (*image.RGBA, color.NRGBA) {
 		var f frame
-		f.configure(app.Config{Mode: mode})
+		f.configure(cnf)
 		ops := new(op.Ops)
-		f.layout(frameContext(ops, size, false), "", filled{fill: fill, on: color.NRGBA{A: 0xff}})
+		gtx := frameContext(ops, size, false)
+		f.layoutBorder(gtx, size)
 		if err := window.Frame(ops); err != nil {
 			t.Fatal(err)
 		}
@@ -349,17 +323,34 @@ func TestTranslucentCaptionIsOpaqueAtTheTop(t *testing.T) {
 		if err := window.Screenshot(img); err != nil {
 			t.Fatal(err)
 		}
-		at := func(y int) uint32 { _, _, _, a := img.At(100, y).RGBA(); return a >> 8 }
-		return at(0), at(3), at(28)
+		line := wdk.GetMaterialTheme(gtx).Scheme.OutlineVariant.AsNRGBA()
+		line.A = 0xff
+		return img, line
 	}
-	top, below, low := alphas(app.Windowed, half)
-	if top != 0xff || below <= low || below >= top || low < 0x78 || low > 0x88 {
-		t.Errorf("a translucent caption: alpha %#x at the top, %#x below it, %#x low in it", top, below, low)
+	img, line := draw(app.Config{})
+	for name, at := range map[string]image.Point{
+		"the top": {X: 100, Y: 0}, "the bottom": {X: 100, Y: 119}, "the left": {X: 0, Y: 60}, "the right": {X: 199, Y: 60},
+		"a corner": {X: 0, Y: 0}, "the opposite corner": {X: 199, Y: 119},
+	} {
+		if got := color.NRGBAModel.Convert(img.At(at.X, at.Y)); got != line {
+			t.Errorf("%s of the window is %v, want the border's %v", name, got, line)
+		}
 	}
-	if top, _, low := alphas(app.Maximized, half); top != low {
-		t.Errorf("a maximized window has an edge: alpha %#x at the top, %#x low", top, low)
+	for name, at := range map[string]image.Point{
+		"below the top": {X: 100, Y: 1}, "above the bottom": {X: 100, Y: 118}, "beside the left": {X: 1, Y: 60}, "beside the right": {X: 198, Y: 60}, "the middle": {X: 100, Y: 60},
+	} {
+		if _, _, _, a := img.At(at.X, at.Y).RGBA(); a != 0 {
+			t.Errorf("the border is painted %s: %v", name, img.At(at.X, at.Y))
+		}
 	}
-	if top, below, low := alphas(app.Windowed, opaque); top != 0xff || below != 0xff || low != 0xff {
-		t.Errorf("an opaque caption: alpha %#x, %#x, %#x", top, below, low)
+	for name, cnf := range map[string]app.Config{
+		"a maximized window":         {Mode: app.Maximized},
+		"a window the system frames": {Decorated: true},
+		"a fullscreen window":        {Mode: app.Fullscreen},
+	} {
+		img, _ := draw(cnf)
+		if _, _, _, a := img.At(100, 0).RGBA(); a != 0 {
+			t.Errorf("%s has a border: %v", name, img.At(100, 0))
+		}
 	}
 }

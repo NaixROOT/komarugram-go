@@ -524,7 +524,7 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 			if actions := w.frame.layout(gtx, title, content); actions != 0 {
 				w.Perform(actions)
 			}
-			caption := w.frame.height(gtx)
+			caption, window := w.frame.height(gtx), gtx.Constraints.Max
 			gtx.Constraints.Max.Y = max(gtx.Constraints.Max.Y-caption, 0)
 			gtx.Constraints.Min.Y = min(gtx.Constraints.Min.Y, gtx.Constraints.Max.Y)
 			below := op.Offset(image.Pt(0, caption)).Push(gtx.Ops)
@@ -563,6 +563,7 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				below := op.Offset(image.Pt(0, caption)).Push(gtx.Ops)
 				fallback.layout(gtx, p)
 				below.Pop()
+				w.frame.layoutBorder(gtx, window)
 				if recovered {
 					gtx.Execute(op.InvalidateCmd{})
 				}
@@ -574,6 +575,7 @@ func run(w *Window, opts Options, build func(w *Window) Content, activated func(
 				phase = time.Now()
 			}
 			below.Pop()
+			w.frame.layoutBorder(gtx, window)
 			area.Pop()
 			e.Frame(gtx.Ops)
 			if trace != nil {
