@@ -128,6 +128,7 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 	size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(captionHeight))
 	button := image.Pt(gtx.Dp(captionButton), size.Y)
 	paint.FillShape(gtx.Ops, fill, clip.Rect{Max: size}.Op())
+	f.layoutEdge(gtx, fill, size)
 
 	// The caption moves the window, and the system maximizes it on a double
 	// click there. The buttons are beside it and not over it: where the
@@ -171,6 +172,47 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 		at.Pop()
 	}
 	return actions
+}
+
+// captionEdge is how far down a wholly transparent caption thickens towards
+// its top edge.
+const captionEdge = unit.Dp(16)
+
+// edgeHeight is the height of the edge of a caption of the fill given: the
+// more the caption lets through, the longer the way to its opaque top. An
+// opaque caption has none.
+func edgeHeight(gtx layout.Context, fill color.NRGBA) int {
+	if fill.A == 0xff {
+		return 0
+	}
+	through := 1 - float32(fill.A)/0xff
+	return 1 + int(float32(gtx.Dp(captionEdge))*through+0.5)
+}
+
+// layoutEdge thickens a translucent caption towards the top of the window,
+// where it is opaque. The system draws a white line of a pixel along the top
+// of a window that has the blur and no frame of the system's, behind the
+// content: it shows through the caption, the more the more transparent the
+// caption is. The top row of the caption covers it, and the rows below lead
+// from it to the caption's own fill. A maximized window has its top beyond
+// the screen, and no line.
+func (f *frame) layoutEdge(gtx layout.Context, fill color.NRGBA, size image.Point) {
+	height := edgeHeight(gtx, fill)
+	if f.maximized || height == 0 {
+		return
+	}
+	paint.FillShape(gtx.Ops, withAlpha(fill, 0xff), clip.Rect{Max: image.Pt(size.X, 1)}.Op())
+	if height <= 1 {
+		return
+	}
+	// Over the fill, which is there already: what is added fades to nothing.
+	paint.LinearGradientOp{
+		Stop1: f32.Pt(0, 1), Color1: withAlpha(fill, 0xff),
+		Stop2: f32.Pt(0, float32(height)), Color2: withAlpha(fill, 0),
+	}.Add(gtx.Ops)
+	area := clip.Rect{Min: image.Pt(0, 1), Max: image.Pt(size.X, height)}.Push(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	area.Pop()
 }
 
 // light moves how far the buttons are lit towards what the pointer says,

@@ -297,3 +297,54 @@ func TestOwnFrameIsDrawn(t *testing.T) {
 		}
 	}
 }
+
+// TestTranslucentCaptionIsOpaqueAtTheTop checks what covers the line the
+// system draws behind the top of the window: the top row of a translucent
+// caption is opaque, the rows below lead down to its fill, further down the
+// more it lets through, and a maximized window or an opaque caption has
+// nothing of it.
+func TestTranslucentCaptionIsOpaqueAtTheTop(t *testing.T) {
+	ownFrames(t, true)
+	gtx := layout.Context{Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
+	opaque := color.NRGBA{R: 0x20, G: 0x40, B: 0x60, A: 0xff}
+	half, clear := opaque, opaque
+	half.A, clear.A = 0x80, 0
+	if h := edgeHeight(gtx, opaque); h != 0 {
+		t.Errorf("an opaque caption has an edge of %d pixels", h)
+	}
+	if h, all := edgeHeight(gtx, half), edgeHeight(gtx, clear); h < 2 || all <= h || all >= 31 {
+		t.Errorf("the edge is %d pixels at half and %d for a caption that is all through", h, all)
+	}
+
+	size := image.Pt(480, 120)
+	window, err := headless.NewWindow(size.X, size.Y)
+	if err != nil {
+		t.Skipf("no headless window: %v", err)
+	}
+	defer window.Release()
+	alphas := func(mode app.WindowMode, fill color.NRGBA) (top, below, low uint32) {
+		var f frame
+		f.configure(app.Config{Mode: mode})
+		ops := new(op.Ops)
+		f.layout(frameContext(ops, size, false), "", filled{fill: fill, on: color.NRGBA{A: 0xff}})
+		if err := window.Frame(ops); err != nil {
+			t.Fatal(err)
+		}
+		img := image.NewRGBA(image.Rectangle{Max: size})
+		if err := window.Screenshot(img); err != nil {
+			t.Fatal(err)
+		}
+		at := func(y int) uint32 { _, _, _, a := img.At(100, y).RGBA(); return a >> 8 }
+		return at(0), at(3), at(28)
+	}
+	top, below, low := alphas(app.Windowed, half)
+	if top != 0xff || below <= low || below >= top || low < 0x78 || low > 0x88 {
+		t.Errorf("a translucent caption: alpha %#x at the top, %#x below it, %#x low in it", top, below, low)
+	}
+	if top, _, low := alphas(app.Maximized, half); top != low {
+		t.Errorf("a maximized window has an edge: alpha %#x at the top, %#x low", top, low)
+	}
+	if top, below, low := alphas(app.Windowed, opaque); top != 0xff || below != 0xff || low != 0xff {
+		t.Errorf("an opaque caption: alpha %#x, %#x, %#x", top, below, low)
+	}
+}
