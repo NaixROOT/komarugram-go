@@ -348,6 +348,11 @@ func (p *chatPage) bubbleContent(gtx layout.Context, r *messageRow, m model.Mess
 							p.askLink(b.URL)
 						}
 						return textButton(gtx, &r.buttons[y][x], b.Text+" ↗")
+					case "webview", "simple_webview":
+						if r.buttons[y][x].Clicked(gtx) {
+							p.pressWebView(gtx, p.chat, m, b)
+						}
+						return textButton(gtx, &r.buttons[y][x], b.Text)
 					case "callback", "copy":
 						if r.buttons[y][x].Clicked(gtx) {
 							p.pressButton(gtx, m, y, x, b, l)

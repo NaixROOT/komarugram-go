@@ -296,3 +296,48 @@ func TestWindowBlurIndependent(t *testing.T) {
 		}
 	}
 }
+
+func TestChatWallpapersArePrunedWhenUnused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.SaveWallpaper([]byte("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.SaveWallpaper([]byte("second"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	look := ChatLook{Day: ChatMode{Theme: "classic", Wallpaper: &Wallpaper{File: first, Blur: true}}, Night: ChatMode{Theme: "night", Wallpaper: &Wallpaper{File: second}}}
+	if err := s.SetChats(look); err != nil {
+		t.Fatal(err)
+	}
+	look.Night.Wallpaper = nil
+	if err := s.SetChats(look); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := s.LoadWallpaper(first); err != nil || string(data) != "first" {
+		t.Fatal(string(data), err)
+	}
+	if _, err := s.LoadWallpaper(second); !os.IsNotExist(err) {
+		t.Fatal("unused wallpaper kept", err)
+	}
+	reopened, err := OpenPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := reopened.Global().Chats.Day.Wallpaper; w == nil || w.File != first || !w.Blur {
+		t.Fatal(reopened.Global().Chats)
+	}
+	for _, bad := range []ChatLook{{Day: ChatMode{Theme: "sepia"}}, {Night: ChatMode{Wallpaper: &Wallpaper{File: "../settings.json"}}}} {
+		if err := s.SetChats(bad); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+	if _, err := s.LoadWallpaper("../settings.json"); err == nil {
+		t.Fatal("read outside the wallpapers")
+	}
+}

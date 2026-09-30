@@ -62,6 +62,9 @@ const (
 	settingsPremium
 	settingsIntegrations
 	settingsDevices
+	// settingsChats is the theme and the wallpaper of the chats, the composer
+	// and how messages look, as Telegram Desktop's Chat Settings.
+	settingsChats
 )
 
 func settingsTitles(l localization.Catalog) map[settingsSection]string {
@@ -69,7 +72,7 @@ func settingsTitles(l localization.Catalog) map[settingsSection]string {
 		settingsMain: l.T("settings.title"), settingsAppearance: l.T("settings.appearance"),
 		settingsPrivacy: l.T("settings.privacy"), settingsPower: l.T("settings.power"),
 		settingsPremium: l.T("premium.title"), settingsIntegrations: l.T("settings.integrations"),
-		settingsDevices: l.T("settings.devices"),
+		settingsDevices: l.T("settings.devices"), settingsChats: l.T("settings.chats"),
 	}
 }
 
@@ -81,6 +84,7 @@ var settingsIcons = map[settingsSection]wdk.IconWidget{
 	// The section holds what the app hands over to other programs.
 	settingsIntegrations: iconIntegrations,
 	settingsDevices:      iconDevices,
+	settingsChats:        iconChats,
 }
 
 func storageShort(l localization.Catalog) map[miniapp.Storage]string {
@@ -191,7 +195,10 @@ type settingsPage struct {
 	players  *playerSettings
 	decoders *decoderSettings
 	// sessions are the account's devices; nil hides the section.
-	sessions   *sessionsView
+	sessions *sessionsView
+	// chats is the theme and the wallpaper of every chat; hidden without
+	// its functions.
+	chats      *chatsSettings
 	browser    *programSetting
 	invalidate func()
 }
@@ -209,6 +216,7 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 			settingsPremium:      new(settingsItem),
 			settingsIntegrations: new(settingsItem),
 			settingsDevices:      new(settingsItem),
+			settingsChats:        new(settingsItem),
 		},
 		back:          button.Text(),
 		motion:        m,
@@ -252,6 +260,8 @@ func newSettingsPage(m *motion.Settings, miniapps *miniappprefs.Settings, protec
 	})
 	p.filtersView = newFilterSettings()
 	p.lookView = newLookSettings()
+	p.chats = newChatsSettings(invalidate)
+	p.chats.toast = &p.toast
 	p.keepOpts = toggle.NewToggle([]string{"deleted", "edits"}, nil, func(values []string) {
 		if p.setKeep != nil {
 			p.setKeep(preferences.Keep{Deleted: slices.Contains(values, "deleted"), Edits: slices.Contains(values, "edits")})
@@ -450,8 +460,9 @@ func (p *settingsPage) Update(gtx layout.Context, mode themeMode, language strin
 		p.security.UpdateSettings(gtx)
 		p.filtersView.Update(gtx)
 	}
-	if p.section == settingsAppearance {
+	if p.section == settingsChats {
 		p.lookView.Update(gtx)
+		p.chats.Update(gtx)
 	}
 }
 
@@ -535,6 +546,8 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 			content = func(gtx layout.Context) layout.Dimensions { return p.layoutIntegrations(gtx, l) }
 		case settingsDevices:
 			content = func(gtx layout.Context) layout.Dimensions { return p.sessions.Layout(gtx, l) }
+		case settingsChats:
+			content = func(gtx layout.Context) layout.Dimensions { return p.layoutChats(gtx, l) }
 		default:
 			content = func(gtx layout.Context) layout.Dimensions {
 				return p.layoutMain(gtx, mode, dark, l)
@@ -628,6 +641,7 @@ func (p *settingsPage) layoutMain(gtx layout.Context, mode themeMode, dark bool,
 		settingsPremium:      p.premiumText(l),
 		settingsIntegrations: p.players.subtitle(l),
 		settingsDevices:      l.T("settings.devices_hint"),
+		settingsChats:        p.chats.subtitle(l),
 	}
 	if n := p.sessions.count(); n > 0 {
 		subtitles[settingsDevices] = l.Count("sessions.count", n, nil)
@@ -696,7 +710,11 @@ func (p *settingsPage) layoutMain(gtx layout.Context, mode themeMode, dark bool,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return card(gtx, func(gtx layout.Context) layout.Dimensions {
 				var rows []layout.FlexChild
-				sections := []settingsSection{settingsAppearance, settingsPrivacy, settingsPower}
+				sections := []settingsSection{settingsAppearance}
+				if p.chats.available() || p.composerStyle != nil || p.lookView.look != nil {
+					sections = append(sections, settingsChats)
+				}
+				sections = append(sections, settingsPrivacy, settingsPower)
 				if p.sessions != nil {
 					sections = append(sections, settingsDevices)
 				}
@@ -794,8 +812,21 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 			})
 		}),
 	}
+	if p.composerBlur != nil {
+		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutOverlays(gtx, l) }))
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, cards...)
+}
+
+// layoutChats draws the section of the chats: their theme and wallpaper,
+// the composer and how messages look.
+func (p *settingsPage) layoutChats(gtx layout.Context, l localization.Catalog) layout.Dimensions {
+	var cards []layout.FlexChild
+	if p.chats.available() {
+		cards = append(cards, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.chats.Layout(gtx, l) }), vspace(12))
+	}
 	if p.composerStyle != nil {
-		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		cards = append(cards, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return settingsChoiceCard(gtx, l.T("settings.composer"), "", func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -822,9 +853,6 @@ func (p *settingsPage) layoutAppearance(gtx layout.Context, mode themeMode, syst
 				)
 			})
 		}))
-	}
-	if p.composerBlur != nil {
-		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutOverlays(gtx, l) }))
 	}
 	if p.lookView.look != nil {
 		cards = append(cards, vspace(12), layout.Rigid(func(gtx layout.Context) layout.Dimensions {

@@ -34,11 +34,11 @@ type render struct {
 
 func renders() []render {
 	var all []render
-	for _, view := range []string{"emoji", "stickers", "gif", "featured-stickers", "featured-emoji", "floating", "classic", "blur", "avatars", "voice", "files", "files-one", "files-documents", "files-many", "files-caption", "tasks", "toast", "toast-classic"} {
+	for _, view := range []string{"emoji", "stickers", "gif", "featured-stickers", "featured-emoji", "emoji-search", "floating", "classic", "blur", "avatars", "voice", "files", "files-one", "files-documents", "files-many", "files-caption", "tasks", "toast", "toast-classic"} {
 		all = append(all, render{"composer-" + view, "TestRenderComposer", []string{"COMPOSER_VIEW=" + view, "COMPOSER_PNG={out}/composer-" + view + ".png"}})
 	}
 	all = append(all, render{"composer-motion", "TestRenderComposerMotion", []string{"COMPOSER_MOTION_PNG={out}/composer-motion"}})
-	for _, section := range []string{"main", "appearance", "privacy", "premium", "integrations"} {
+	for _, section := range []string{"main", "appearance", "chats", "wallpapers", "privacy", "premium", "integrations"} {
 		all = append(all, render{"settings-" + section, "TestRenderSettingsAccounts", []string{"SETTINGS_SECTION=" + section, "SETTINGS_PNG={out}/settings-" + section + ".png"}})
 	}
 	return append(all,
@@ -57,6 +57,7 @@ func renders() []render {
 		render{"forum", "TestRenderForum", []string{"FORUM_PNG={out}/forum.png"}},
 		render{"unwrapped", "TestRenderUnwrapped", []string{"UNWRAPPED_PNG={out}/unwrapped.png"}},
 		render{"service", "TestRenderService", []string{"SERVICE_PNG={out}/service.png"}},
+		render{"jump-buttons", "TestRenderJumpButtons", []string{"JUMP_PNG_DIR={out}"}},
 		render{"pinned", "TestRenderPinned", []string{"PINNED_PNG={out}/pinned.png"}},
 		render{"chat-search", "TestRenderChatSearch", []string{"CHAT_SEARCH_PNG={out}/chat-search.png"}},
 		render{"snapshot", "TestRenderSnapshotDialog", []string{"SHOT_PNG={out}/snapshot.png"}},

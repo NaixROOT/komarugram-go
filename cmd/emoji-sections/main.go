@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: Unlicense OR MIT
+
+// Command emoji-sections writes, into internal/messenger/ui, the data of the
+// picker's emoji: emoji_sections.go, the emoji of its static sections, and
+// emoji_keywords.go, their names and keywords for the search.
+//
+//	go run ./cmd/emoji-sections -unicode emoji-test.txt -cldr cldr/common
+//
+// emoji-test.txt is at https://unicode.org/Public/emoji/16.0/. Its groups and
+// subgroups are put in the seven sections that Telegram Desktop has, in
+// Unicode's order, one emoji of each kind: the fully qualified ones, without
+// skin tones. The keywords are CLDR's annotations, of the release that goes
+// with that Unicode's (https://github.com/unicode-org/cldr, release-46), the
+// files annotations/ and annotationsDerived/ of languages in keywordLanguages.
+package main
+
+import (
+	"bufio"
+	"encoding/xml"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// keywordLanguages are the languages of the search: the client's own, and
+// English, which is searched with any of them.
+var keywordLanguages = []string{"en", "ru"}
+
+// Sections of the picker, as Telegram Desktop numbers them after Recent.
+const (
+	people = iota
+	nature
+	food
+	activity
+	travel
+	objects
+	symbols
+	sectionCount
+)
+
+// groupSection is the section of a whole group. The subgroups Telegram
+// Desktop puts elsewhere are in subgroupSection.
+var groupSection = map[string]int{
+	"Smileys & Emotion": people,
+	"People & Body":     people,
+	"Animals & Nature":  nature,
+	"Food & Drink":      food,
+	"Travel & Places":   travel,
+	"Activities":        activity,
+	"Objects":           objects,
+	"Symbols":           symbols,
+	"Flags":             symbols,
+}
+
+// subgroupSection holds the subgroups that go to another section than their
+// group's, or whose group is split: the ones Telegram Desktop's own sections
+// have mostly in another one.
+var subgroupSection = map[string]int{
+	"monkey-face":        nature,
+	"heart":              symbols,
+	"emotion":            symbols,
+	"person-sport":       activity,
+	"person-resting":     activity,
+	"clothing":           people,
+	"musical-instrument": activity,
+	"hotel":              objects,
+	"time":               symbols,
+	"sky & weather":      nature,
+	"event":              objects,
+	"game":               activity,
+	"sound":              symbols,
+}
+
+var line = regexp.MustCompile(`^([0-9A-F ]+?)\s*; fully-qualified\s*#`)
+
+func main() {
+	unicode := flag.String("unicode", "", "Unicode's emoji-test.txt")
+	cldr := flag.String("cldr", "", "the common directory of CLDR")
+	out := flag.String("out", "internal/messenger/ui", "where the files are written")
+	flag.Parse()
+	if *unicode == "" || *cldr == "" {
+		flag.Usage()
+		os.Exit(2)
+	}
+	if err := run(*unicode, *cldr, *out); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(unicode, cldr, out string) error {
+	sections, version, err := readSections(unicode)
+	if err != nil {
+		return err
+	}
+	if err := writeSections(filepath.Join(out, "emoji_sections.go"), sections, version); err != nil {
+		return err
+	}
+	return writeKeywords(filepath.Join(out, "emoji_keywords.go"), cldr, sections, version)
+}
+
+// readSections reads the emoji of the sections and the version of the file.
+func readSections(in string) (sections [sectionCount][]string, version string, err error) {
+	f, err := os.Open(in)
+	if err != nil {
+		return sections, "", err
+	}
+	defer f.Close()
+	var group, subgroup string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		text := scanner.Text()
+		switch {
+		case strings.HasPrefix(text, "# Version: "):
+			version = strings.TrimPrefix(text, "# Version: ")
+		case strings.HasPrefix(text, "# group: "):
+			group = strings.TrimPrefix(text, "# group: ")
+		case strings.HasPrefix(text, "# subgroup: "):
+			subgroup = strings.TrimPrefix(text, "# subgroup: ")
+		}
+		m := line.FindStringSubmatch(text)
+		if m == nil || group == "Component" {
+			continue
+		}
+		var emoji []rune
+		toned := false
+		for _, hex := range strings.Fields(m[1]) {
+			r, err := strconv.ParseUint(hex, 16, 32)
+			if err != nil {
+				return sections, "", err
+			}
+			toned = toned || r >= 0x1F3FB && r <= 0x1F3FF
+			emoji = append(emoji, rune(r))
+		}
+		if toned {
+			continue
+		}
+		section, ok := groupSection[group]
+		if !ok {
+			return sections, "", fmt.Errorf("unknown group %q", group)
+		}
+		if s, ok := subgroupSection[subgroup]; ok {
+			section = s
+		}
+		sections[section] = append(sections[section], string(emoji))
+	}
+	if err := scanner.Err(); err != nil {
+		return sections, "", err
+	}
+	if version == "" {
+		return sections, "", fmt.Errorf("%s has no version", in)
+	}
+	return sections, version, nil
+}
+
+func writeSections(path string, sections [sectionCount][]string, version string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, `// SPDX-License-Identifier: Unlicense OR MIT
+
+// Code generated by cmd/emoji-sections from Unicode's emoji-test.txt %s; DO NOT EDIT.
+//
+// Emoji data files, © Unicode®, Inc.: https://www.unicode.org/terms_of_use.html
+
+package ui
+
+// emojiSections are the emoji of the picker's static sections, separated by
+// spaces: people, nature, food, activity, travel, objects, symbols and flags.
+var emojiSections = [%d]string{
+`, version, sectionCount)
+	for _, s := range sections {
+		fmt.Fprintf(&b, "\t%q,\n", strings.Join(s, " "))
+	}
+	b.WriteString("}\n")
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// annotations are the annotations of one CLDR file.
+type annotations struct {
+	Items []struct {
+		Emoji string `xml:"cp,attr"`
+		Type  string `xml:"type,attr"`
+		Text  string `xml:",chardata"`
+	} `xml:"annotations>annotation"`
+}
+
+// writeKeywords writes the names and the keywords of the emoji in sections:
+// per language, a line of the emoji, a tab and the name and the keywords
+// between bars.
+func writeKeywords(path, cldr string, sections [sectionCount][]string, version string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, `// SPDX-License-Identifier: Unlicense OR MIT
+
+// Code generated by cmd/emoji-sections from CLDR's annotations, for Unicode %s; DO NOT EDIT.
+//
+// CLDR data, © Unicode®, Inc.: https://www.unicode.org/terms_of_use.html
+
+package ui
+
+// emojiKeywords are the names and the keywords of the emoji, per language:
+// a line has the emoji, a tab, and the name and the keywords between bars.
+var emojiKeywords = map[string][]string{
+`, version)
+	for _, lang := range keywordLanguages {
+		names := map[string]string{}
+		words := map[string][]string{}
+		for _, dir := range []string{"annotations", "annotationsDerived"} {
+			data, err := os.ReadFile(filepath.Join(cldr, dir, lang+".xml"))
+			if err != nil {
+				return err
+			}
+			var file annotations
+			if err := xml.Unmarshal(data, &file); err != nil {
+				return fmt.Errorf("%s/%s.xml: %w", dir, lang, err)
+			}
+			for _, a := range file.Items {
+				key := strings.ReplaceAll(a.Emoji, "\ufe0f", "")
+				if a.Type == "tts" {
+					names[key] = strings.TrimSpace(a.Text)
+					continue
+				}
+				for _, w := range strings.Split(a.Text, "|") {
+					if w = strings.TrimSpace(w); w != "" {
+						words[key] = append(words[key], w)
+					}
+				}
+			}
+		}
+		fmt.Fprintf(&b, "\t%q: {\n", lang)
+		found := 0
+		for _, section := range sections {
+			for _, emoji := range section {
+				key := strings.ReplaceAll(emoji, "\ufe0f", "")
+				parts := append([]string{names[key]}, words[key]...)
+				if names[key] == "" && len(words[key]) == 0 {
+					continue
+				}
+				found++
+				fmt.Fprintf(&b, "\t\t%q,\n", emoji+"\t"+strings.Join(parts, "|"))
+			}
+		}
+		b.WriteString("\t},\n")
+		fmt.Fprintf(os.Stderr, "%s: %d emoji with keywords\n", lang, found)
+	}
+	b.WriteString("}\n")
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}

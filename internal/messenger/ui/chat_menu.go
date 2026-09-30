@@ -27,6 +27,8 @@ type chatMenuAction int
 const (
 	chatMenuSearch chatMenuAction = iota
 	chatMenuInfo
+	// chatMenuTheme is Telegram Desktop's Change Colors: the chat's theme.
+	chatMenuTheme
 	chatMenuBeginning
 	chatMenuFiltered
 	chatMenuActions
@@ -55,6 +57,9 @@ func (p *chatPage) chatMenuActions() []chatMenuAction {
 		out = append(out, chatMenuSearch)
 	}
 	out = append(out, chatMenuInfo)
+	if p.appearance != nil && p.appearance.source != nil && p.threadRoot == 0 {
+		out = append(out, chatMenuTheme)
+	}
 	if _, ok := p.source.(model.MessageRevealer); ok && p.threadRoot == 0 {
 		out = append(out, chatMenuBeginning)
 	}
@@ -76,6 +81,8 @@ func (p *chatPage) chatMenuLabel(a chatMenuAction, l localization.Catalog) strin
 			return l.T("chat_menu.channel")
 		}
 		return l.T("chat_menu.profile")
+	case chatMenuTheme:
+		return l.T("chat_theme.title")
 	case chatMenuBeginning:
 		return l.T("chat_menu.beginning")
 	case chatMenuFiltered:
@@ -95,6 +102,8 @@ func chatMenuIcon(a chatMenuAction) wdk.IconWidget {
 		return iconInfo
 	case chatMenuFiltered:
 		return iconFilter
+	case chatMenuTheme:
+		return iconPalette
 	}
 	return iconToTop
 }
@@ -184,6 +193,8 @@ func (p *chatPage) chatMenuUpdate(gtx layout.Context) {
 			p.openChatSearch(gtx)
 		case chatMenuInfo:
 			p.infoAsked = true
+		case chatMenuTheme:
+			p.infoAsked, p.themeAsked = true, true
 		case chatMenuBeginning:
 			// The chat's first message, or the history around where it was.
 			p.jumpTo(1)
@@ -203,6 +214,7 @@ func (p *chatPage) chatMenuUpdate(gtx layout.Context) {
 func (p *chatPage) takeInfoAsked() bool {
 	asked := p.infoAsked
 	p.infoAsked = false
+	p.themeShown, p.themeAsked = p.themeAsked, false
 	return asked
 }
 
