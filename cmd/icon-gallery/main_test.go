@@ -3,9 +3,17 @@
 package main
 
 import (
+	"image"
 	"strings"
 	"testing"
 
+	"gio-mw/exp/appearance"
+	"gio-mw/wdk"
+	"gio-mw/widget/button"
+
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/unit"
 	"gioui.org/widget"
 )
 
@@ -46,6 +54,25 @@ func TestSearchMatchesHoweverTheNameIsWritten(t *testing.T) {
 	}
 }
 
+func TestThemeModeOverridesTheSystem(t *testing.T) {
+	for _, c := range []struct {
+		mode   themeMode
+		system appearance.Scheme
+		dark   bool
+	}{
+		{themeSystem, appearance.Light, false},
+		{themeSystem, appearance.Dark, true},
+		{themeSystem, appearance.Unknown, false},
+		{themeLight, appearance.Dark, false},
+		{themeDark, appearance.Light, true},
+		{themeDark, appearance.Unknown, true},
+	} {
+		if got := c.mode.isDark(c.system); got != c.dark {
+			t.Errorf("%s with the system's scheme %d: dark is %v, want %v", themeLabels[c.mode], c.system, got, c.dark)
+		}
+	}
+}
+
 func TestRowsKeepCategoriesApart(t *testing.T) {
 	g := &gallery{lower: make([]string, len(allIcons))}
 	for i, ic := range allIcons {
@@ -71,5 +98,37 @@ func TestRowsKeepCategoriesApart(t *testing.T) {
 	}
 	if icons != len(allIcons) {
 		t.Errorf("rows hold %d of %d icons", icons, len(allIcons))
+	}
+}
+
+// The button is measured once, in the theme of its first frame: whichever
+// that is, the room must be that of the widest label in either theme.
+func TestThemeButtonKeepsItsWidth(t *testing.T) {
+	for _, darkFirst := range []bool{false, true} {
+		checkThemeButtonWidth(t, []bool{darkFirst, !darkFirst})
+	}
+}
+
+func checkThemeButtonWidth(t *testing.T, themes []bool) {
+	g := &gallery{themeButton: button.Text(), themeMeasure: button.Text()}
+	width := -1
+	for _, dark := range themes {
+		for mode := range themeModes {
+			gtx := layout.Context{
+				Ops:         new(op.Ops),
+				Metric:      unit.Metric{PxPerDp: 1.5, PxPerSp: 1.5},
+				Constraints: layout.Constraints{Max: image.Pt(1000, 200)},
+				Values:      map[string]any{},
+			}
+			wdk.InitMaterialThemeInContext(gtx, g.theme(gtx, dark))
+			g.mode = mode
+			w := g.layoutThemeButton(gtx).Size.X
+			if width == -1 {
+				width = w
+			}
+			if w != width {
+				t.Errorf("%s, dark %v: %d px wide, not %d", themeLabels[mode], dark, w, width)
+			}
+		}
 	}
 }

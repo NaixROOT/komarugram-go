@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"maps"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"gio-mw/token"
 	"gio-mw/wdk"
 	"gio-mw/wdk/block"
+	"gio-mw/widget/button"
 	"gio-mw/widget/overlay"
 	"gio-mw/widget/scroll"
 	"gio-mw/widget/search"
@@ -66,6 +68,31 @@ func main() {
 	})
 }
 
+// themeMode is the theme the window is shown in.
+type themeMode int
+
+const (
+	themeSystem themeMode = iota
+	themeLight
+	themeDark
+	themeModes
+)
+
+var (
+	themeLabels = [themeModes]string{"System theme", "Light theme", "Dark theme"}
+	themeIcons  = [themeModes]wdk.IconWidget{
+		wdk.RequireIconWidget(icons.DeviceBrightnessAuto),
+		wdk.RequireIconWidget(icons.ImageWBSunny),
+		wdk.RequireIconWidget(icons.ImageBrightness2),
+	}
+)
+
+// isDark reports whether mode shows the dark theme while the system has
+// the scheme system.
+func (mode themeMode) isDark(system appearance.Scheme) bool {
+	return mode == themeDark || mode == themeSystem && system == appearance.Dark
+}
+
 // row is a line of the gallery: the heading of a category, or up to a
 // row's worth of the icons shown from first on.
 type row struct {
@@ -78,6 +105,14 @@ type row struct {
 type gallery struct {
 	window      *appwindow.Window
 	light, dark *token.Theme
+	// mode is the theme chosen with themeButton, which cycles through them.
+	mode        themeMode
+	themeButton *button.Button
+	// themeMeasure lays out every label of themeButton, unseen, to find
+	// the widest, themeWidth, at the scale themeMetric.
+	themeMeasure *button.Button
+	themeWidth   int
+	themeMetric  unit.Metric
 
 	search  *search.Search
 	focused bool
@@ -106,12 +141,14 @@ func newGallery(w *appwindow.Window) *gallery {
 	s.TrailingIcon.Icon = wdk.RequireIconWidget(icons.ContentClear)
 	s.SupportingText = "Search icons"
 	g := &gallery{
-		window:  w,
-		search:  s,
-		lower:   make([]string, len(allIcons)),
-		cells:   make([]widget.Clickable, len(allIcons)),
-		widgets: make([]wdk.IconWidget, len(allIcons)),
-		list:    scroll.List{List: layout.List{Axis: layout.Vertical}},
+		window:       w,
+		themeButton:  button.Text(),
+		themeMeasure: button.Text(),
+		search:       s,
+		lower:        make([]string, len(allIcons)),
+		cells:        make([]widget.Clickable, len(allIcons)),
+		widgets:      make([]wdk.IconWidget, len(allIcons)),
+		list:         scroll.List{List: layout.List{Axis: layout.Vertical}},
 	}
 	for i, ic := range allIcons {
 		g.lower[i] = strings.ToLower(ic.name)
@@ -120,9 +157,13 @@ func newGallery(w *appwindow.Window) *gallery {
 	return g
 }
 
-// Theme follows the system between light and dark.
+// Theme is the one chosen, or follows the system between light and dark.
 func (g *gallery) Theme(gtx layout.Context) *token.Theme {
-	if g.window.Appearance.Scheme() == appearance.Dark {
+	return g.theme(gtx, g.mode.isDark(g.window.Appearance.Scheme()))
+}
+
+func (g *gallery) theme(gtx layout.Context, dark bool) *token.Theme {
+	if dark {
 		if g.dark == nil {
 			g.dark = defaults.NewTheme(gtx, schemes.SchemeBaselineDark())
 		}
@@ -179,6 +220,11 @@ func (g *gallery) Update(gtx layout.Context) {
 		g.focused = true
 		g.search.Focus(gtx)
 	}
+	if g.themeButton.Clicked(gtx) {
+		// The window takes the new theme from Theme on its next frame.
+		g.mode = (g.mode + 1) % themeModes
+		g.window.Invalidate()
+	}
 	if g.search.TrailingIcon.Clickable.Clicked(gtx) {
 		g.search.ClearText()
 	}
@@ -218,7 +264,16 @@ func (g *gallery) layoutHeader(gtx layout.Context) layout.Dimensions {
 	return layout.UniformInset(padding).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(g.search.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				// The search takes the room the button leaves, up to its own
+				// widest, and the two are centered together.
+				gtx.Constraints.Min.X = 0
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, g.search.Layout),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(g.layoutThemeButton),
+				)
+			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				count := fmt.Sprintf("%d icons", len(allIcons))
@@ -229,6 +284,37 @@ func (g *gallery) layoutHeader(gtx layout.Context) layout.Dimensions {
 			}),
 		)
 	})
+}
+
+// layoutThemeButton takes the room of the button's widest label whatever
+// the label is, so that the search centered with it stays in place when
+// the theme changes.
+func (g *gallery) layoutThemeButton(gtx layout.Context) layout.Dimensions {
+	if g.themeWidth == 0 || g.themeMetric != gtx.Metric {
+		g.themeWidth, g.themeMetric = g.widestThemeLabel(gtx), gtx.Metric
+	}
+	dims := g.themeButton.LayoutWithIcon(gtx, themeLabels[g.mode], themeIcons[g.mode])
+	dims.Size.X = max(dims.Size.X, g.themeWidth)
+	return dims
+}
+
+// widestThemeLabel measures the theme button with each label in each
+// theme: a dark theme sets emphasized text in a lighter weight, which is
+// narrower.
+func (g *gallery) widestThemeLabel(gtx layout.Context) int {
+	widest := 0
+	macro := op.Record(gtx.Ops)
+	for _, dark := range []bool{false, true} {
+		mgtx := gtx
+		mgtx.Constraints.Min = image.Point{}
+		mgtx.Values = maps.Clone(gtx.Values)
+		wdk.InitMaterialThemeInContext(mgtx, g.theme(gtx, dark))
+		for mode := range themeModes {
+			widest = max(widest, g.themeMeasure.LayoutWithIcon(mgtx, themeLabels[mode], themeIcons[mode]).Size.X)
+		}
+	}
+	macro.Stop()
+	return widest
 }
 
 func (g *gallery) layoutGrid(gtx layout.Context) layout.Dimensions {
