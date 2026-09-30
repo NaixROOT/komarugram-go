@@ -20,8 +20,10 @@ import (
 	"gio-mw/widget/scroll"
 
 	"gioui.org/io/clipboard"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
+	"gioui.org/widget"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
@@ -36,6 +38,8 @@ type chatInfo struct {
 	loader            loadingIndicator
 	giftGeneration    uint64
 	drawAvatar        avatarLayout
+	openAvatar        func(chat int64)
+	avatar            widget.Clickable
 	gift              *giftDialog
 	giftRows          map[model.MessageKey]*giftRow
 	linkRows          map[model.MessageKey]*sharedLinkRow
@@ -304,6 +308,9 @@ func (p *chatInfo) Layout(gtx layout.Context, l localization.Catalog, animate bo
 			p.selectSection(k)
 		}
 	}
+	if p.avatar.Clicked(gtx) && p.openAvatar != nil {
+		p.openAvatar(p.chat.ID)
+	}
 	if name := p.chatUsername(); name != "" {
 		if p.username.click.Clicked(gtx) {
 			gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader("@" + name))})
@@ -431,6 +438,7 @@ func (p *chatInfo) layoutInfo(gtx layout.Context, l localization.Catalog) layout
 	return p.list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 		return layout.Inset{Top: 8, Bottom: 16, Left: 16, Right: 16}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutAvatar(gtx) }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return label(gtx, p.renderer.chatStatusOnline(p.chat, gtx.Now, l), token.TypestyleBodyMedium, scheme(gtx).SurfaceVariant.OnColor, 2)
 				}),
@@ -672,4 +680,21 @@ func (p *chatInfo) detailTexts(l localization.Catalog) (registration, dataCenter
 		}
 	}
 	return registration, dataCenter
+}
+
+// layoutAvatar draws the chat's avatar over its info, centered; a click on
+// it shows the photo in the viewer.
+func (p *chatInfo) layoutAvatar(gtx layout.Context) layout.Dimensions {
+	if p.drawAvatar == nil || p.chat.Kind == model.KindSaved {
+		return layout.Dimensions{}
+	}
+	return layout.Inset{Bottom: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min = image.Point{}
+			return p.avatar.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				return p.drawAvatar(gtx, p.chat.ID, p.chat.Kind, p.chat.Title, pageAvatarSize)
+			})
+		})
+	})
 }

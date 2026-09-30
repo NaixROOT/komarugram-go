@@ -9,9 +9,11 @@ import (
 	"gio-mw/widget/button"
 	"gio-mw/widget/scroll"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
+	"gioui.org/widget"
 
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
@@ -112,6 +114,9 @@ func layoutChatPageHead(gtx layout.Context, c model.Chat, l localization.Catalog
 		hgtx := gtx
 		hgtx.Constraints = layout.Exact(header)
 		selection.header.Layout(hgtx, func(layout.Context) layout.Dimensions { return layout.Dimensions{Size: header} })
+		if c.Kind != model.KindSaved {
+			layoutAvatarTarget(gtx, &selection.headAvatar)
+		}
 		selection.layoutHeadActions(gtx, header, size.X-gtx.Dp(8), l)
 	}
 	if head != nil {
@@ -178,4 +183,18 @@ func (p *scrollPage) layout(gtx layout.Context, content layout.Widget) layout.Di
 	})
 	p.toast.Layout(gtx, image.Rectangle{Max: size})
 	return layout.Dimensions{Size: size}
+}
+
+// layoutAvatarTarget lays out, over the avatar of a chat's header, the click
+// that opens its photo; laid out after the header's own, it takes the
+// clicks on the avatar from it.
+func layoutAvatarTarget(gtx layout.Context, click *widget.Clickable) {
+	side := gtx.Dp(chatHeaderImage)
+	offset(gtx, image.Pt(gtx.Dp(16), (gtx.Dp(chatHeaderSize)-side)/2), func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints = layout.Exact(image.Pt(side, side))
+		return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		})
+	})
 }

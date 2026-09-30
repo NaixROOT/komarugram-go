@@ -14,7 +14,9 @@ import (
 	"gio-mw/token"
 	"gio-mw/widget/button"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/widget"
 
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
@@ -36,6 +38,10 @@ type profilePage struct {
 	badges badgesLayout
 	// frozen, when the account is frozen, is shown instead of the form.
 	frozen *frozenView
+	// openAvatar shows the photos of the account's profile; avatar is the
+	// click on its avatar.
+	openAvatar func(chat int64)
+	avatar     widget.Clickable
 
 	edit, save, cancel               *button.Button
 	editing, saving                  bool
@@ -67,6 +73,9 @@ func (p *profilePage) open() {
 }
 
 func (p *profilePage) Update(gtx layout.Context, me model.Profile, invalidate func()) {
+	if p.avatar.Clicked(gtx) && p.openAvatar != nil {
+		p.openAvatar(me.ID)
+	}
 	select {
 	case err := <-p.result:
 		p.saving, p.problem = false, err
@@ -143,7 +152,10 @@ func (p *profilePage) Layout(gtx layout.Context, me model.Profile, l localizatio
 	return p.layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		header := layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return drawAvatar(gtx, me.ID, model.KindUser, me.Name(), pageAvatarSize)
+				return p.avatar.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return drawAvatar(gtx, me.ID, model.KindUser, me.Name(), pageAvatarSize)
+				})
 			}),
 			vspace(12),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

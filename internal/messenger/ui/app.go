@@ -225,6 +225,11 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.connectionFailed = newConnectionFailedDialog()
 	a.frozen = newFrozenView(store)
 	a.profile.frozen = a.frozen
+	a.profile.openAvatar = func(chat int64) {
+		if a.viewer != nil {
+			a.viewer.OpenProfile(chat)
+		}
+	}
 	a.settings = newSettingsPage(w.Motion, services.MiniApps, services.Security, w.Invalidate, services.Accounts, currentAccount, themeMode(global.Theme), global.Language, a.setThemeMode, a.setLanguage)
 	a.settings.security.SetPreferences(services.Preferences)
 	a.settings.images = &a.images
@@ -457,6 +462,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 			a.comments.audio = a.history.audio
 		}
 		a.info.renderer.openPhoto = func(m model.Message) { a.viewer.Open(m.Key.ChatID, m, a.info.messages) }
+		a.info.openAvatar = func(chat int64) { a.viewer.OpenProfile(chat) }
 		if services.OpenWindow != nil {
 			a.openWindow = services.OpenWindow
 			a.viewer.popout = a.openPhotoWindow
@@ -885,6 +891,11 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	a.history.filter = a.messageFilter()
 	if a.comments != nil {
 		a.comments.filter = a.history.filter
+	}
+	if a.viewer != nil && (a.history.headAvatar.Clicked(gtx) || a.forum != nil && a.forum.avatar.Clicked(gtx)) {
+		if c, ok := a.selectedChat(); ok {
+			a.viewer.OpenProfile(c.ID)
+		}
 	}
 	if a.info != nil && (a.history.header.Clicked(gtx) || a.history.takeInfoAsked() || a.forum != nil && a.forum.header.Clicked(gtx)) {
 		if c, ok := a.selectedChat(); ok {

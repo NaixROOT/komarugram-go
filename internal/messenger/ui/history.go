@@ -104,6 +104,7 @@ type chatPage struct {
 	messageMenu               messageMenu
 	composer                  *messageComposer
 	header                    widget.Clickable
+	headAvatar                widget.Clickable
 	appearance                *chatThemeController
 	files                     *attachmentFiles
 	trace                     *diagnostics.Trace

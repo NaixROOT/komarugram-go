@@ -29,6 +29,8 @@ import (
 // and saves a screenshot, for looking at it rather than asserting:
 //
 //	VIEWER_PNG=/tmp/viewer.png go test ./internal/messenger/ui -run RenderPhotoViewer
+//
+// With VIEWER_PROFILE set it shows the photos of a chat's profile.
 func TestRenderPhotoViewer(t *testing.T) {
 	out := os.Getenv("VIEWER_PNG")
 	if out == "" {
@@ -55,7 +57,13 @@ func TestRenderPhotoViewer(t *testing.T) {
 	})
 	defer v.Destroy()
 	v.popout = func(int64, model.Message, []model.Message) {}
-	v.Open(2, start, nil)
+	if os.Getenv("VIEWER_PROFILE") != "" {
+		// The photos of the chat's profile, as its avatar opens them.
+		start, _ = store.ProfilePhoto(2)
+		v.OpenProfile(2)
+	} else {
+		v.Open(2, start, nil)
+	}
 	size := image.Pt(1280, 800)
 	win, err := headless.NewWindow(size.X, size.Y)
 	if err != nil {
