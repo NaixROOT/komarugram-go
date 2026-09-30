@@ -170,8 +170,10 @@ The history is drawn as materialgram draws it:
   off; the close button is red with a white glyph. A translucent caption
   thickens towards the top of the window, where its first row is opaque
   (`layoutEdge`): the system draws a white line of a pixel along the top of
-  such a window behind the content, which would show through. The more the
-  caption lets through, the longer the way down to its own fill. A maximized
+  such a window behind the content, which would show through. The edge is
+  the upper half of the caption and falls off as a shadow does, quickly at
+  the top and slowly where it ends; the more the caption lets through, the
+  more of it is seen. A maximized
   window has no line and no edge. `TestOwnFrameIsDrawn`
   draws the frame, and saves both themes with `FRAME_PNG_DIR`.
 - **Mini Apps** (`webapp.go`, `internal/messenger/miniapps`): the window's

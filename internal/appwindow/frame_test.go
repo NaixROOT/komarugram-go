@@ -312,8 +312,23 @@ func TestTranslucentCaptionIsOpaqueAtTheTop(t *testing.T) {
 	if h := edgeHeight(gtx, opaque); h != 0 {
 		t.Errorf("an opaque caption has an edge of %d pixels", h)
 	}
-	if h, all := edgeHeight(gtx, half), edgeHeight(gtx, clear); h < 2 || all <= h || all >= 31 {
-		t.Errorf("the edge is %d pixels at half and %d for a caption that is all through", h, all)
+	// It is the upper half of the caption, however much the caption lets
+	// through: that changes how much is seen of it, not how far it goes.
+	if h, all := edgeHeight(gtx, half), edgeHeight(gtx, clear); h != 15 || all != 15 {
+		t.Errorf("the edge is %d pixels at half and %d for a caption that is all through, want 15 of 31", h, all)
+	}
+	// Opaque at the top, nothing at the end, never rising on the way, and
+	// slowing down as it arrives: no step where it ends.
+	if top, end := edgeAlpha(0, 15), edgeAlpha(15, 15); top != 0xff || end != 0 {
+		t.Errorf("the edge is %#x at the top and %#x past its end", top, end)
+	}
+	for y := 1; y < 15; y++ {
+		if edgeAlpha(y, 15) >= edgeAlpha(y-1, 15) {
+			t.Errorf("the edge does not fade at row %d: %#x after %#x", y, edgeAlpha(y, 15), edgeAlpha(y-1, 15))
+		}
+	}
+	if first, last := edgeAlpha(0, 15)-edgeAlpha(1, 15), edgeAlpha(13, 15)-edgeAlpha(14, 15); last*4 > first || edgeAlpha(14, 15) > 4 {
+		t.Errorf("the edge ends with a step: it falls by %d at the top and by %d at the end, to %d", first, last, edgeAlpha(14, 15))
 	}
 
 	size := image.Pt(480, 120)

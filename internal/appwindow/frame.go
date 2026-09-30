@@ -174,45 +174,44 @@ func (f *frame) layout(gtx layout.Context, title string, content Content) system
 	return actions
 }
 
-// captionEdge is how far down a wholly transparent caption thickens towards
-// its top edge.
-const captionEdge = unit.Dp(16)
-
 // edgeHeight is the height of the edge of a caption of the fill given: the
-// more the caption lets through, the longer the way to its opaque top. An
-// opaque caption has none.
+// upper half of it. An opaque caption has none.
 func edgeHeight(gtx layout.Context, fill color.NRGBA) int {
 	if fill.A == 0xff {
 		return 0
 	}
-	through := 1 - float32(fill.A)/0xff
-	return 1 + int(float32(gtx.Dp(captionEdge))*through+0.5)
+	return max(gtx.Dp(captionHeight)/2, 1)
+}
+
+// edgeAlpha is how opaque the edge is in row y of height: opaque in the top
+// row, and nothing at the end, leaving the top quickly and arriving slowly,
+// as a shadow does.
+func edgeAlpha(y, height int) uint8 {
+	if y < 0 || y >= height {
+		return 0
+	}
+	left := 1 - float32(y)/float32(height)
+	return uint8(left*left*0xff + 0.5)
 }
 
 // layoutEdge thickens a translucent caption towards the top of the window,
-// where it is opaque. The system draws a white line of a pixel along the top
-// of a window that has the blur and no frame of the system's, behind the
-// content: it shows through the caption, the more the more transparent the
-// caption is. The top row of the caption covers it, and the rows below lead
-// from it to the caption's own fill. A maximized window has its top beyond
-// the screen, and no line.
+// where it is opaque, as a shadow cast from the edge. The system draws a
+// white line of a pixel along the top of a window that has the blur and no
+// frame of the system's, behind the content: it shows through the caption,
+// the more the more transparent the caption is. The top row of the caption
+// covers it, and the rows of the upper half lead from it to the caption's
+// own fill: the more the caption lets through, the more there is to see of
+// them. A maximized window has its top beyond the screen, and no line.
 func (f *frame) layoutEdge(gtx layout.Context, fill color.NRGBA, size image.Point) {
 	height := edgeHeight(gtx, fill)
-	if f.maximized || height == 0 {
+	if f.maximized {
 		return
 	}
-	paint.FillShape(gtx.Ops, withAlpha(fill, 0xff), clip.Rect{Max: image.Pt(size.X, 1)}.Op())
-	if height <= 1 {
-		return
+	// Over the fill, which is there already. A gradient of Gio's is linear,
+	// and the rows are few.
+	for y := range height {
+		paint.FillShape(gtx.Ops, withAlpha(fill, edgeAlpha(y, height)), clip.Rect{Min: image.Pt(0, y), Max: image.Pt(size.X, y+1)}.Op())
 	}
-	// Over the fill, which is there already: what is added fades to nothing.
-	paint.LinearGradientOp{
-		Stop1: f32.Pt(0, 1), Color1: withAlpha(fill, 0xff),
-		Stop2: f32.Pt(0, float32(height)), Color2: withAlpha(fill, 0),
-	}.Add(gtx.Ops)
-	area := clip.Rect{Min: image.Pt(0, 1), Max: image.Pt(size.X, height)}.Push(gtx.Ops)
-	paint.PaintOp{}.Add(gtx.Ops)
-	area.Pop()
 }
 
 // light moves how far the buttons are lit towards what the pointer says,
