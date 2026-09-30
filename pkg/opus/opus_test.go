@@ -9,6 +9,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"komarugram/pkg/audio"
 )
 
 // testdata/tone.ogg is 2.5 s of 440 Hz then 2.5 s of 660 Hz, mono Opus at
@@ -50,9 +52,10 @@ func frequency(pcm []int16) float64 {
 	return float64(crossings) / 2 / (float64(len(pcm)) / Rate)
 }
 
+// read reads n frames of r, as their left channel, which is the sound.
 func read(t *testing.T, r *Reader, n int) []int16 {
 	t.Helper()
-	out := make([]int16, n)
+	out := make([]audio.Frame, n)
 	got := 0
 	for got < n {
 		m, err := r.Read(out[got:])
@@ -64,7 +67,14 @@ func read(t *testing.T, r *Reader, n int) []int16 {
 			t.Fatal(err)
 		}
 	}
-	return out[:got]
+	pcm := make([]int16, got)
+	for i := range pcm {
+		if out[i][0] != out[i][1] {
+			t.Fatalf("frame %d has %d on the left and %d on the right", i, out[i][0], out[i][1])
+		}
+		pcm[i] = out[i][0]
+	}
+	return pcm
 }
 
 func TestToneDecodes(t *testing.T) {
@@ -90,7 +100,7 @@ func TestToneDecodes(t *testing.T) {
 			t.Errorf("at %v: %.0f Hz, want %.0f", c.at, f, c.want)
 		}
 	}
-	if _, err := r.Read(make([]int16, 10)); err != io.EOF {
+	if _, err := r.Read(make([]audio.Frame, 10)); err != io.EOF {
 		t.Fatalf("after the end: %v", err)
 	}
 }

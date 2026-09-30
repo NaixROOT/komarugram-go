@@ -16,13 +16,13 @@ package aac
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"time"
 
+	"komarugram/pkg/audio"
 	"komarugram/pkg/mp4"
 	"komarugram/pkg/sandbox"
 
@@ -73,7 +73,7 @@ func NewRuntime(ctx context.Context, module []byte) (*Runtime, error) {
 func (r *Runtime) Close(ctx context.Context) error { return r.sandbox.Close(ctx) }
 
 // Decoder is the sound track of one M4A file in its own sandbox, read as
-// mono samples at the rate the decoder puts out: see audio.Resample.
+// stereo frames at the rate the decoder puts out: see audio.Resample.
 type Decoder struct {
 	ctx       context.Context
 	runtime   *Runtime
@@ -90,8 +90,8 @@ type Decoder struct {
 	// skip, how many of the samples to come fall before pos.
 	pos, skip int64
 	next      int
-	ready     []int16
-	mono      []int16
+	ready     []audio.Frame
+	pcm       []audio.Frame
 	// unit is where access units are read into, from the file.
 	unit []byte
 }
@@ -115,7 +115,7 @@ func (r *Runtime) OpenAt(ctx context.Context, file io.ReaderAt, size int64) (*De
 	if err != nil {
 		return nil, fmt.Errorf("instantiate fdk-aac: %w", err)
 	}
-	d := &Decoder{ctx: ctx, runtime: r, module: module, track: track, mono: make([]int16, maxOut)}
+	d := &Decoder{ctx: ctx, runtime: r, module: module, track: track, pcm: make([]audio.Frame, maxOut)}
 	if err := d.open(); err != nil {
 		_ = module.Close(ctx)
 		return nil, err
@@ -197,9 +197,9 @@ func (d *Decoder) SeekSample(pos int64) error {
 	return nil
 }
 
-// Read fills out with the next samples, the channels mixed down, and
-// returns io.EOF at the end of the track.
-func (d *Decoder) Read(out []int16) (int, error) {
+// Read fills out with the next frames, folded to stereo, and returns
+// io.EOF at the end of the track.
+func (d *Decoder) Read(out []audio.Frame) (int, error) {
 	n := 0
 	for n < len(out) && d.pos < d.Frames() {
 		if len(d.ready) == 0 {
@@ -213,7 +213,7 @@ func (d *Decoder) Read(out []int16) (int, error) {
 			d.next++
 			drop := min(d.skip, int64(frames))
 			d.skip -= drop
-			d.ready = d.mono[drop:frames]
+			d.ready = d.pcm[drop:frames]
 			continue
 		}
 		m := copy(out[n:], d.ready[:min(int64(len(d.ready)), d.Frames()-d.pos)])
@@ -227,7 +227,7 @@ func (d *Decoder) Read(out []int16) (int, error) {
 	return n, nil
 }
 
-// decode decodes unit i into mono and returns its frames. A unit the
+// decode decodes unit i into stereo and returns its frames. A unit the
 // decoder cannot take, a broken one, decodes to silence of its length, as
 // players conceal it.
 func (d *Decoder) decode(i int) (int, error) {
@@ -255,7 +255,7 @@ func (d *Decoder) decode(i int) (int, error) {
 		if i+1 < len(d.starts) && d.starts != nil {
 			frames = int(min(int64(maxOut), max(0, d.starts[i+1]-d.starts[i])))
 		}
-		clear(d.mono[:frames])
+		clear(d.pcm[:frames])
 		return frames, nil
 	}
 	if d.channels == 0 {
@@ -271,13 +271,7 @@ func (d *Decoder) decode(i int) (int, error) {
 	if !ok {
 		return 0, errors.New("aac: samples lie outside sandbox memory")
 	}
-	for f := range frames {
-		sum := 0
-		for c := range channels {
-			sum += int(int16(binary.LittleEndian.Uint16(raw[2*(f*channels+c):])))
-		}
-		d.mono[f] = int16(sum / channels)
-	}
+	audio.Downmix(d.pcm[:frames], raw, channels)
 	return frames, nil
 }
 

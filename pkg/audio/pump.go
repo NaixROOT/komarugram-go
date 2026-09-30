@@ -47,7 +47,7 @@ type pump struct {
 // pumpChunk is samples of the sound put out by the source between the
 // positions from and to, of which taken have gone to the output.
 type pumpChunk struct {
-	pcm      []int16
+	pcm      []Frame
 	from, to int64
 	taken    int
 }
@@ -84,7 +84,7 @@ func (p *pump) run() {
 		case p.err == nil && !p.eof && p.queued < pumpAhead:
 			gen := p.gen
 			p.mu.Unlock()
-			pcm := make([]int16, pumpSize)
+			pcm := make([]Frame, pumpSize)
 			from := p.src.Position()
 			n, err := p.src.Read(pcm)
 			to := p.src.Position()
@@ -114,7 +114,7 @@ func (p *pump) run() {
 // being moved or slow, it takes none: the output, which asks again a
 // millisecond later, plays silence, which is no time of the sound, so that
 // the position stays where it is.
-func (p *pump) read(out []int16) (int, error) {
+func (p *pump) read(out []Frame) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := 0

@@ -6,14 +6,16 @@ import (
 	"context"
 	"io"
 	"sort"
+
+	"komarugram/pkg/audio"
 )
 
 // preRoll is how much a decoder is given before the point it starts at, as
 // RFC 7845 recommends: it converges after 80 ms.
 const preRoll = Rate * 80 / 1000
 
-// Reader decodes a stream from any point of it, on demand, into 48 kHz mono
-// samples: a voice message costs its packets and one decoder, whatever its
+// Reader decodes a stream from any point of it, on demand, into 48 kHz
+// frames, the mono sound in both channels: a voice message costs its packets and one decoder, whatever its
 // length, and moving through it decodes a few packets.
 type Reader struct {
 	ctx     context.Context
@@ -53,8 +55,8 @@ func (r *Reader) SeekSample(pos int64) error {
 	return nil
 }
 
-// Read fills out with samples, and returns io.EOF at the end of the sound.
-func (r *Reader) Read(out []int16) (int, error) {
+// Read fills out with frames, and returns io.EOF at the end of the sound.
+func (r *Reader) Read(out []audio.Frame) (int, error) {
 	n := 0
 	for n < len(out) {
 		if left := r.stream.length - r.pos; left <= 0 {
@@ -79,7 +81,10 @@ func (r *Reader) Read(out []int16) (int, error) {
 			r.ready = pcm[drop:]
 			continue
 		}
-		m := copy(out[n:], r.ready[:min(int64(len(r.ready)), r.stream.length-r.pos)])
+		m := int(min(int64(len(out)-n), int64(len(r.ready)), r.stream.length-r.pos))
+		for i, v := range r.ready[:m] {
+			out[n+i] = audio.Dual(v)
+		}
 		r.ready = r.ready[m:]
 		r.pos += int64(m)
 		n += m

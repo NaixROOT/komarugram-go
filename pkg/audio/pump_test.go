@@ -27,7 +27,7 @@ func (s *slow) SeekSample(pos int64) error {
 	return err
 }
 
-func (s *slow) Read(pcm []int16) (int, error) {
+func (s *slow) Read(pcm []Frame) (int, error) {
 	for s.stall.Load() {
 		time.Sleep(time.Millisecond)
 	}
@@ -52,7 +52,7 @@ func TestPumpDoesNotWaitForASlowMove(t *testing.T) {
 	p := newPump(src)
 	defer p.close()
 	ready(t, p)
-	buf := make([]int16, 100)
+	buf := make([]Frame, 100)
 	within(t, "the move", 50*time.Millisecond, func() { p.seek(20000) })
 	within(t, "the position", 50*time.Millisecond, func() {
 		if at := p.position(); at != 20000 {
@@ -85,8 +85,8 @@ func TestPumpDoesNotWaitForASlowMove(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	n, err := p.read(buf)
-	if err != nil || n == 0 || buf[0] != 10000 {
-		t.Fatalf("after the move: %d samples from %d, %v", n, buf[0], err)
+	if err != nil || n == 0 || buf[0][0] != 10000 {
+		t.Fatalf("after the move: %d samples from %d, %v", n, buf[0][0], err)
 	}
 	if at := p.position(); at != 10000+int64(n) {
 		t.Fatalf("position %d, want %d", at, 10000+int64(n))
@@ -101,7 +101,7 @@ func TestPumpDoesNotWaitForAStall(t *testing.T) {
 	ready(t, p)
 	// Take what is ahead, then stall the source.
 	src.stall.Store(true)
-	buf := make([]int16, 1000)
+	buf := make([]Frame, 1000)
 	for {
 		p.mu.Lock()
 		queued := p.queued
@@ -125,7 +125,7 @@ func TestPumpTellsTheEndAndFailures(t *testing.T) {
 	p := newPump(&ramp{n: 5000})
 	defer p.close()
 	var got int
-	buf := make([]int16, 700)
+	buf := make([]Frame, 700)
 	for deadline := time.Now().Add(5 * time.Second); ; {
 		n, err := p.read(buf)
 		if errors.Is(err, io.EOF) {
@@ -134,9 +134,7 @@ func TestPumpTellsTheEndAndFailures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n > 0 && buf[0] != 0 || n > 0 {
-			got += n
-		}
+		got += n
 		if time.Now().After(deadline) {
 			t.Fatal("no end")
 		}
@@ -167,7 +165,7 @@ type failAt struct {
 	at int64
 }
 
-func (f *failAt) Read(pcm []int16) (int, error) {
+func (f *failAt) Read(pcm []Frame) (int, error) {
 	if f.pos >= f.at {
 		return 0, errBroken
 	}

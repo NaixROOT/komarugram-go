@@ -426,10 +426,14 @@ func waveformOf(ctx context.Context, m model.Message, f *audioFile) ([]byte, err
 	}
 	defer release()
 	loudness := voice.NewLoudness(samples)
-	pcm := make([]int16, audio.Rate/10)
+	pcm := make([]audio.Frame, audio.Rate/10)
+	mono := make([]int16, len(pcm))
 	for ctx.Err() == nil {
 		n, err := reader.Read(pcm)
-		loudness.Add(pcm[:n])
+		for i, f := range pcm[:n] {
+			mono[i] = f.Mono()
+		}
+		loudness.Add(mono[:n])
 		if errors.Is(err, io.EOF) {
 			return loudness.Waveform(), nil
 		}
@@ -542,7 +546,7 @@ type audioSource struct {
 	closed bool
 }
 
-func (s *audioSource) Read(pcm []int16) (int, error) {
+func (s *audioSource) Read(pcm []audio.Frame) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {

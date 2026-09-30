@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// silence is n samples of silence: a test that plays it on the system's
+// silence is n frames of silence: a test that plays it on the system's
 // output is not heard.
 type silence struct{ n, pos int64 }
 
-func (s *silence) Read(pcm []int16) (int, error) {
+func (s *silence) Read(pcm []Frame) (int, error) {
 	m := min(int64(len(pcm)), s.n-s.pos)
 	if m <= 0 {
 		return 0, io.EOF
@@ -25,19 +25,20 @@ func (s *silence) Read(pcm []int16) (int, error) {
 func (s *silence) SeekSample(pos int64) error { s.pos = max(0, min(pos, s.n)); return nil }
 func (s *silence) Position() int64            { return s.pos }
 
-// counter puts out its own positions, to see where a read starts.
+// counter puts out its own positions, left as they are and right negated,
+// to see where a read starts.
 type counter struct{ silence }
 
-func (c *counter) Read(pcm []int16) (int, error) {
+func (c *counter) Read(pcm []Frame) (int, error) {
 	from := c.pos
 	n, err := c.silence.Read(pcm)
 	for i := range n {
-		pcm[i] = int16(from + int64(i))
+		pcm[i] = Frame{int16(from + int64(i)), -int16(from + int64(i))}
 	}
 	return n, err
 }
 
-func TestStereoDoublesAndSeeks(t *testing.T) {
+func TestStereoKeepsTheChannelsAndSeeks(t *testing.T) {
 	s := newStereo(&counter{silence{n: 1000}})
 	defer s.pump.close()
 	ready(t, s.pump)
@@ -47,7 +48,7 @@ func TestStereoDoublesAndSeeks(t *testing.T) {
 	}
 	for i := range 3 {
 		l, r := binary.LittleEndian.Uint16(b[4*i:]), binary.LittleEndian.Uint16(b[4*i+2:])
-		if l != uint16(i) || r != uint16(i) {
+		if l != uint16(i) || r != uint16(-i) {
 			t.Fatalf("frame %d: %d %d", i, l, r)
 		}
 	}
@@ -56,8 +57,8 @@ func TestStereoDoublesAndSeeks(t *testing.T) {
 	}
 	ready(t, s.pump)
 	s.Read(b)
-	if v := binary.LittleEndian.Uint16(b); v != 500 {
-		t.Fatalf("after the seek, sample %d", v)
+	if l, r := binary.LittleEndian.Uint16(b), binary.LittleEndian.Uint16(b[2:]); l != 500 || r != uint16(-500&0xffff) {
+		t.Fatalf("after the seek, frame %d %d", l, r)
 	}
 }
 

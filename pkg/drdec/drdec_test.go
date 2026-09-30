@@ -5,6 +5,7 @@ package drdec
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 	"math"
 	"os"
@@ -56,9 +57,10 @@ func pitch(pcm []int16) float64 {
 	return float64(crossings) / 2 / (float64(len(pcm)) / audio.Rate)
 }
 
+// read reads n frames of src, as the mean of their channels.
 func read(t *testing.T, src audio.Source, n int) []int16 {
 	t.Helper()
-	out := make([]int16, n)
+	out := make([]audio.Frame, n)
 	got := 0
 	for got < n {
 		k, err := src.Read(out[got:])
@@ -70,7 +72,11 @@ func read(t *testing.T, src audio.Source, n int) []int16 {
 			t.Fatal(err)
 		}
 	}
-	return out[:got]
+	mono := make([]int16, got)
+	for i := range mono {
+		mono[i] = out[i].Mono()
+	}
+	return mono
 }
 
 func duration(r *audio.Resampled) time.Duration {
@@ -156,7 +162,7 @@ func TestRejects(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		pcm := make([]int16, 8192)
+		pcm := make([]audio.Frame, 8192)
 		for range 100 {
 			if _, err := d.Read(pcm); err != nil {
 				break
@@ -265,7 +271,7 @@ func TestSlowReadsAreNotSlowDecoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Read(make([]int16, 1024)); err != nil {
+	if _, err := d.Read(make([]audio.Frame, 1024)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -300,14 +306,7 @@ func TestMP3WithoutTableIsMovedInSteps(t *testing.T) {
 			if err := d.SeekSample(pos); err != nil || d.Position() != pos {
 				t.Fatalf("span %v: seek to %v: at %d, %v", span, c.at, d.Position(), err)
 			}
-			pcm := make([]int16, d.Rate()/10)
-			for n := 0; n < len(pcm); {
-				k, err := d.Read(pcm[n:])
-				if err != nil {
-					t.Fatal(err)
-				}
-				n += k
-			}
+			pcm := read(t, d, int(d.Rate()/10))
 			if f := pitch(pcm); math.Abs(f*float64(d.Rate())/float64(audio.Rate)-c.want) > 15 {
 				t.Errorf("span %v, after a seek to %v: %.0f Hz, want %.0f", span, c.at, f, c.want)
 			}
@@ -316,6 +315,63 @@ func TestMP3WithoutTableIsMovedInSteps(t *testing.T) {
 		// the ones forward from the start, from 0 to 2.2 s and to 2.6 s, are.
 		if short := span < time.Second; short != (d.moves > 8) {
 			t.Errorf("span %v: %d calls of the module", span, d.moves)
+		}
+	}
+}
+
+// A stereo file keeps its channels: they are not mixed into one.
+func TestStereoIsKept(t *testing.T) {
+	const rate, n = 22050, 22050
+	data := make([]byte, 44, 44+4*n)
+	copy(data, "RIFF")
+	binary.LittleEndian.PutUint32(data[4:], uint32(36+4*n))
+	copy(data[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(data[16:], 16)
+	binary.LittleEndian.PutUint16(data[20:], 1)
+	binary.LittleEndian.PutUint16(data[22:], 2)
+	binary.LittleEndian.PutUint32(data[24:], rate)
+	binary.LittleEndian.PutUint32(data[28:], 4*rate)
+	binary.LittleEndian.PutUint16(data[32:], 4)
+	binary.LittleEndian.PutUint16(data[34:], 16)
+	copy(data[36:], "data")
+	binary.LittleEndian.PutUint32(data[40:], 4*n)
+	for i := range n {
+		left := int16(10000 * math.Sin(2*math.Pi*440*float64(i)/rate))
+		right := int16(-10000 * math.Sin(2*math.Pi*1100*float64(i)/rate))
+		data = binary.LittleEndian.AppendUint16(data, uint16(left))
+		data = binary.LittleEndian.AppendUint16(data, uint16(right))
+	}
+	ctx := context.Background()
+	rt, err := NewRuntime(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+	d, err := rt.Open(ctx, WAV, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := make([]audio.Frame, 0, n)
+	buf := make([]audio.Frame, 1000)
+	for {
+		k, err := d.Read(buf)
+		frames = append(frames, buf[:k]...)
+		if err != nil {
+			break
+		}
+	}
+	if len(frames) != n {
+		t.Fatalf("%d frames of %d", len(frames), n)
+	}
+	for c, want := range []float64{440, 1100} {
+		crossings := 0
+		for i := 1; i < len(frames); i++ {
+			if (frames[i-1][c] < 0) != (frames[i][c] < 0) {
+				crossings++
+			}
+		}
+		if hz := float64(crossings) / 2 * rate / float64(len(frames)); math.Abs(hz-want) > 10 {
+			t.Errorf("channel %d: %.0f Hz, want %.0f", c, hz, want)
 		}
 	}
 }

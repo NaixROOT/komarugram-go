@@ -20,13 +20,13 @@ import (
 // Rate is the sample rate of the output and of every Source.
 const Rate = 48000
 
-// Source is mono sound at Rate that can move to any of its samples.
+// Source is stereo sound at Rate that can move to any of its frames.
 type Source interface {
-	// Read fills pcm with the next samples, and returns io.EOF at the end.
-	Read(pcm []int16) (int, error)
-	// SeekSample moves to sample pos.
+	// Read fills pcm with the next frames, and returns io.EOF at the end.
+	Read(pcm []Frame) (int, error)
+	// SeekSample moves to frame pos.
 	SeekSample(pos int64) error
-	// Position is the next sample Read puts out.
+	// Position is the next frame Read puts out.
 	Position() int64
 }
 
@@ -199,9 +199,9 @@ func (p *Playback) Close() {
 type stereo struct {
 	pump *pump
 	// mu guards mono and ended.
-	mu    sync.Mutex
-	mono  []int16
-	ended bool
+	mu     sync.Mutex
+	frames []Frame
+	ended  bool
 }
 
 func newStereo(src Source) *stereo { return &stereo{pump: newPump(src)} }
@@ -210,13 +210,13 @@ func (s *stereo) Read(b []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	want := len(b) / 4
-	if cap(s.mono) < want {
-		s.mono = make([]int16, want)
+	if cap(s.frames) < want {
+		s.frames = make([]Frame, want)
 	}
-	n, err := s.pump.read(s.mono[:want])
-	for i, v := range s.mono[:n] {
-		binary.LittleEndian.PutUint16(b[4*i:], uint16(v))
-		binary.LittleEndian.PutUint16(b[4*i+2:], uint16(v))
+	n, err := s.pump.read(s.frames[:want])
+	for i, f := range s.frames[:n] {
+		binary.LittleEndian.PutUint16(b[4*i:], uint16(f[0]))
+		binary.LittleEndian.PutUint16(b[4*i+2:], uint16(f[1]))
 	}
 	return 4 * n, err
 }
