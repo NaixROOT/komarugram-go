@@ -476,8 +476,11 @@ func (d *stickerSetDialog) canChoose(p *chatPage) bool {
 	if p.composer == nil || p.frozen.Frozen() {
 		return false
 	}
-	rights, ok := p.source.(model.RightsSource)
-	return !ok || rights.CanSend(d.chat)
+	kind := model.SendSticker
+	if d.pack != nil && d.pack.Emoji {
+		kind = model.SendText
+	}
+	return p.composer.permissions(d.chat).Allows(kind)
 }
 
 func (d *stickerSetDialog) grid(gtx layout.Context, p *chatPage) layout.Dimensions {

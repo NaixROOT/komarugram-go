@@ -65,6 +65,12 @@ type featuredPackResult struct {
 	err        error
 }
 type messageComposer struct {
+	join              surface
+	mute, discussion  surface
+	muted             map[int64]bool
+	discussions       chan discussionResult
+	discussionLoading bool
+	nextRights        time.Time
 	// confirmations tells whether a sticker and a GIF are sent only once
 	// confirmed; sendConfirm is the dialog that asks.
 	confirmations func() (sticker, gif bool)
@@ -162,6 +168,8 @@ func newMessageComposer(source model.ConversationStore, invalidate func()) *mess
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &messageComposer{invalidate: invalidate, ctx: ctx, cancel: cancel, drafts: map[int64]*messageDraft{}, results: make(chan pickerResult, 8), featuredResults: make(chan featuredPackResult, 8), sends: make(chan composerResult, 8), fileResults: make(chan fileChoice, 1), files: newFilesBox(), chooser: chooseFiles, voice: ffmpegVoice, voiceResults: make(chan voiceResult, 2), voicePicks: make(chan voicePick, 1), recorded: map[string]bool{}, packClicks: map[int64]*surface{}, itemClicks: map[string]*surface{}}
 	c.source, _ = source.(model.ComposerStore)
+	c.muted = map[int64]bool{}
+	c.discussions = make(chan discussionResult, 2)
 	c.search.SingleLine = true
 	c.path.SingleLine = true
 	c.title.SingleLine = true
@@ -256,6 +264,10 @@ func randomMessageID() int64 {
 }
 func (c *messageComposer) submit(chat int64, msg model.OutgoingMessage) {
 	d := c.draft(chat)
+	if err := c.checkMessage(chat, msg); err != nil {
+		d.err = err
+		return
+	}
 	if d.sending || c.source == nil {
 		return
 	}
@@ -313,10 +325,20 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 	if c.chat != chat {
 		c.cancelFeatured()
 		c.chat = chat
+		c.nextRights = time.Time{}
 		c.pickerOpen = false
 		c.attachOpen = false
 		c.form = 0
 		c.files.close()
+	}
+	if c.nextRights.IsZero() || !gtx.Now.Before(c.nextRights) {
+		c.nextRights = gtx.Now.Add(time.Minute)
+		if source, ok := c.source.(model.SendPermissionsRefresher); ok {
+			go func() { _ = source.RefreshSendPermissions(c.ctx, chat) }()
+		}
+	}
+	if _, ok := c.source.(model.SendPermissionsRefresher); ok {
+		gtx.Execute(op.InvalidateCmd{At: c.nextRights})
 	}
 	for {
 		select {
@@ -424,6 +446,8 @@ func (c *messageComposer) update(gtx layout.Context, chat int64, l localization.
 		}
 	}
 drained:
+	c.enforcePermissions(gtx)
+	permissions := c.permissions(chat)
 	d := c.draft(chat)
 	c.updateRecording(gtx, l)
 	for {
@@ -431,13 +455,13 @@ drained:
 		if !ok {
 			break
 		}
-		if !d.sending && c.source != nil {
+		if !d.sending && c.source != nil && permissions.Allows(model.SendText) {
 			gtx.Execute(key.FocusCmd{Tag: &d.editor})
 		}
 		c.attachOpen = false
 	}
 	for i := range c.attachmentActions {
-		if c.attachmentActions[i].Clicked(gtx) {
+		if c.attachmentActions[i].Clicked(gtx) && permissions.Any(model.SendAttachments) && (i != 2 || permissions.Allows(model.SendText)) {
 			c.attachOpen = false
 			c.pickerOpen = false
 			if i < 2 {
@@ -451,7 +475,7 @@ drained:
 		}
 	}
 
-	if !d.sending {
+	if !d.sending && permissions.Allows(model.SendText) {
 		for {
 			ev, ok := d.editor.Update(gtx)
 			if !ok {
@@ -497,7 +521,7 @@ drained:
 		c.selectedPack = 0
 		c.list.Position = layout.Position{}
 	}
-	if c.smile.Clicked(gtx) {
+	if c.smile.Clicked(gtx) && permissions.Any(model.SendText|model.SendSticker|model.SendGIF) {
 		c.pickerOpen = !c.pickerOpen
 		if c.pickerOpen {
 			gtx.Execute(key.FocusCmd{Tag: &c.search})
@@ -508,7 +532,7 @@ drained:
 			c.request(l, false)
 		}
 	}
-	if c.attach.Clicked(gtx) {
+	if c.attach.Clicked(gtx) && permissions.Any(model.SendAttachments) {
 		c.attachOpen = !c.attachOpen
 		if c.attachOpen {
 			gtx.Execute(key.FocusCmd{Tag: &d.editor})
@@ -524,7 +548,7 @@ drained:
 		c.attachOpen = false
 		c.form = 0
 	}
-	if i, ok := c.tabs.Clicked(gtx, int(c.tab), 3); ok {
+	if i, ok := c.tabs.Clicked(gtx, int(c.tab), 3); ok && c.pickerAllowed(model.PickerTab(i)) {
 		c.cancelFeatured()
 		c.tab = model.PickerTab(i)
 		c.search.SetText("")
@@ -657,6 +681,11 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		rect = image.Rect(0, max(0, size.Y-height), size.X, size.Y)
 	}
 	c.top = rect.Min.Y
+	d := c.draft(chat)
+	if d.err != nil && d.err != d.told {
+		p.toast.Show(composerErrorText(d.err, l))
+	}
+	d.told = d.err
 	if p.frozen.Frozen() {
 		// A frozen account cannot send: the bar tells why, as Telegram
 		// Desktop's does.
@@ -676,12 +705,24 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 		return layout.Dimensions{Size: size}
 	}
+	if !c.permissions(chat).Any(model.SendText | model.SendAttachments | model.SendVoice | model.SendSticker) {
+		inRect(gtx, rect, func(gtx layout.Context) layout.Dimensions {
+			s := gtx.Constraints.Max
+			radius := s.Y / 2
+			if classic {
+				radius = 0
+			}
+			defer clip.UniformRRect(image.Rectangle{Max: s}, radius).Push(gtx.Ops).Pop()
+			overlayFill(gtx, backdrop, s, rect.Min, scheme(gtx).SurfaceContainerHigh, radius)
+			return c.layoutReadOnly(gtx, p, l)
+		})
+		return layout.Dimensions{Size: size}
+	}
 	if p.bot.empty {
 		// An empty chat with a bot starts it, as Telegram Desktop's does.
 		p.layoutStart(gtx, chat, rect, classic, backdrop, l)
 		return layout.Dimensions{Size: size}
 	}
-	d := c.draft(chat)
 	if c.pickerOpen || c.attachOpen || c.form != 0 {
 		c.dismiss.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: size} })
 	}
@@ -697,10 +738,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 	c.replyLayout(gtx, chat, rect.Sub(image.Pt(0, kb)), classic, backdrop, l, p)
 	above := rect.Min.Y - kb - c.replyHeight(gtx, chat, classic)
 	c.top = above
-	if d.err != nil && d.err != d.told {
-		p.toast.Show(mediaErrorText(d.err))
-	}
-	d.told = d.err
+
 	inRect(gtx, rect, func(gtx layout.Context) layout.Dimensions {
 		sc := scheme(gtx)
 		s := gtx.Constraints.Max
@@ -721,11 +759,19 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		button := func(x int, click *surface, icon wdk.IconWidget, label string) {
 			inRect(gtx, image.Rect(x, 0, x+iconWidth, s.Y), func(gtx layout.Context) layout.Dimensions {
 				size := gtx.Constraints.Max
+				rights := c.permissions(chat)
+				disabled := click == &c.attach && !rights.Any(model.SendAttachments) || click == &c.smile && !rights.Any(model.SendText|model.SendSticker|model.SendGIF) || click == &c.micClick && !rights.Allows(model.SendVoice)
+				if disabled {
+					gtx = gtx.Disabled()
+				}
 				// The whole slot takes clicks; the state layer and the ripple
 				// are a circle around the icon, as on Material icon buttons.
 				d := min(gtx.Dp(40), size.X, size.Y)
 				circle := image.Rectangle{Max: image.Pt(d, d)}.Add(size.Sub(image.Pt(d, d)).Div(2))
 				content := sc.SurfaceVariant.OnColor
+				if disabled {
+					content = content.SetOpacity(0.38)
+				}
 				style := surfaceStyle{area: circle, radius: d / 2, background: content.SetOpacity(0), content: content, button: label}
 				return click.Layout(gtx, size, style, func(gtx layout.Context) layout.Dimensions {
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, content) })
@@ -748,7 +794,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		// clip.
 		menuWidth := p.layoutBotMenu(gtx, chat, image.Rect(iconWidth, 0, s.X-2*iconWidth, s.Y), l)
 		sendWidth := 0
-		if c.canRecord(d) {
+		if c.canRecord(d) || !c.permissions(chat).Allows(model.SendVoice) && !d.sending && d.pending == nil && d.editor.Text() == "" {
 			// With nothing written, the microphone takes the far right, as
 			// in Telegram Desktop, and the emoji button moves left of it.
 			sendWidth = iconWidth
@@ -758,7 +804,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 			sendWidth = min(gtx.Dp(92), s.X/3)
 			inRect(gtx, image.Rect(s.X-iconWidth-sendWidth, 0, s.X-iconWidth, s.Y), func(gtx layout.Context) layout.Dimensions {
-				if d.sending {
+				if d.sending || !c.permissions(chat).Allows(model.SendText) {
 					gtx = gtx.Disabled()
 				}
 				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -776,6 +822,11 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			button(s.X-iconWidth, &c.smile, iconEmoji, l.T("composer.emoji"))
 		}
 		inRect(gtx, image.Rect(iconWidth+menuWidth, 0, max(iconWidth+menuWidth, s.X-iconWidth-sendWidth), s.Y), func(gtx layout.Context) layout.Dimensions {
+			if !c.permissions(chat).Allows(model.SendText) {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return label(gtx, restrictionText(c.permissions(chat), model.SendText, l), token.TypestyleBodySmall, sc.SurfaceVariant.OnColor, 2)
+				})
+			}
 			if d.sending || c.source == nil {
 				gtx = gtx.Disabled()
 			}
@@ -836,6 +887,9 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			for i, k := range []string{"photo", "file", "tasks"} {
 				inRect(gtx, image.Rect(0, i*h/3, w, (i+1)*h/3), func(gtx layout.Context) layout.Dimensions {
 					row := gtx.Constraints.Max
+					if i == 2 && !c.permissions(chat).Allows(model.SendText) {
+						gtx = gtx.Disabled()
+					}
 					style := surfaceStyle{background: sc.Surface.OnColor.SetOpacity(0), content: sc.Surface.OnColor}
 					return c.attachmentActions[i].Layout(gtx, row, style, func(gtx layout.Context) layout.Dimensions {
 						if i > 0 {

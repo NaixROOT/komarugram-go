@@ -65,6 +65,9 @@ type messageRow struct {
 	tileSize image.Point
 }
 type chatPage struct {
+	membership membershipControl
+	// membershipNotice reports outcomes in the chat list after the dialog is removed.
+	membershipNotice func(string)
 	// pinned is the bar of the chat's pinned messages.
 	pinned pinnedBar
 	// reacted lists who reacted to a message; edits, the versions of an
@@ -384,6 +387,7 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 func (p *chatPage) layoutHistory(gtx layout.Context, c model.Chat, l localization.Catalog, animate bool) layout.Dimensions {
 	p.animate = animate
 	p.updateDelete(c.ID, l)
+	p.updateMembership(c.ID, l)
 	p.trace = diagnostics.From(gtx.Values)
 	if p.trace != nil {
 		p.trace.History = diagnostics.History{Window: p.trace.Window, Chat: c.ID}
@@ -665,6 +669,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 		p.linkDialog(gtx, l)
 	}
 	p.deleteDialog(gtx, l)
+	p.membershipDialog(gtx, l)
 	p.playerDialog(gtx, l)
 	p.forwardDialog(gtx, l)
 	p.emojiPacks.layout(gtx, p, l)

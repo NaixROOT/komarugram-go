@@ -16,26 +16,15 @@ import (
 
 // channelRights are the account's rights in a channel or supergroup.
 func channelRights(ch *tg.Channel) peerRights {
-	r := peerRights{NoForwards: ch.Noforwards, Broadcast: ch.Broadcast, Delete: ch.Creator, Post: ch.Creator}
-	if admin, ok := ch.GetAdminRights(); ok {
-		r.Delete = r.Delete || admin.DeleteMessages
-		r.Post = r.Post || admin.PostMessages
-	}
-	r.Muted = ch.Left
-	r.Left = ch.Left
-	r.JoinToSend = ch.JoinToSend
-	if ch.Broadcast {
-		r.Muted = r.Muted || !r.Post
-	} else if !ch.Creator {
-		if banned, ok := ch.GetBannedRights(); ok && banned.SendMessages {
-			r.Muted, r.Banned = true, true
-		}
-		if banned, ok := ch.GetDefaultBannedRights(); ok && banned.SendMessages {
-			if _, admin := ch.GetAdminRights(); !admin {
-				r.Muted, r.Banned = true, true
-			}
-		}
-	}
+	r := peerRights{Known: !ch.Min, Creator: ch.Creator, NoForwards: ch.Noforwards, Broadcast: ch.Broadcast, Delete: ch.Creator, Post: ch.Creator, Left: ch.Left, JoinToSend: ch.JoinToSend, Gigagroup: ch.Gigagroup, HasDiscussion: ch.HasLink}
+	_, admin := ch.GetAdminRights()
+	r.Admin = ch.Creator || admin
+	r.Delete = r.Delete || ch.AdminRights.DeleteMessages
+	r.Post = r.Post || ch.AdminRights.PostMessages
+	r.Default, r.Personal = bannedKinds(ch.DefaultBannedRights), bannedKinds(ch.BannedRights)
+	r.Until = int64(ch.BannedRights.UntilDate)
+	r.Muted = ch.Left || ch.Broadcast && !r.Post
+	r.Banned = !r.Admin && (r.Default|r.Personal)&model.SendText != 0
 	return r
 }
 
@@ -84,18 +73,7 @@ func (s *Store) MessageRights(chat int64, msgs []model.Message) model.MessageRig
 
 // CanSend implements model.RightsSource.
 func (s *Store) CanSend(chat int64) bool {
-	thread := isThread(chat)
-	chat = s.realChat(chat)
-	s.history.mu.Lock()
-	peer, known := s.history.peers[chat]
-	s.history.mu.Unlock()
-	muted := peer.Rights.Muted
-	if thread {
-		// Comments may come from anyone the discussion group does not
-		// ban, unless it takes them only from members.
-		muted = peer.Rights.Banned || peer.Rights.Left && peer.Rights.JoinToSend
-	}
-	return known && !muted && s.Freeze() == (model.Freeze{})
+	return s.SendPermissions(chat).Any(model.SendAll &^ model.SendLinkPreview)
 }
 
 // userUsername is a user's username, or its first active one.

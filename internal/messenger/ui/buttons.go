@@ -15,7 +15,10 @@ import (
 
 // textButton draws a flat button of txt, which a surface makes react.
 func textButton(gtx layout.Context, s *surface, txt string) layout.Dimensions {
-	col := scheme(gtx).Primary.Color
+	return textButtonColor(gtx, s, txt, scheme(gtx).Primary.Color)
+}
+
+func textButtonColor(gtx layout.Context, s *surface, txt string, col token.MatColor) layout.Dimensions {
 	macro := op.Record(gtx.Ops)
 	dims := layout.Inset{Top: 7, Bottom: 7, Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return label(gtx, txt, token.TypestyleLabelLarge, col, 1)

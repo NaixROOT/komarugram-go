@@ -257,6 +257,13 @@ func TestRenderComposer(t *testing.T) {
 	h := newComposerHarness(t)
 	h.p.composer.pickerOpen = true
 	switch os.Getenv("COMPOSER_VIEW") {
+	case "channel-readonly":
+		restrictComposer(h, model.SendPermissions{Unavailable: true, Broadcast: true, DiscussionID: 9})
+	case "restricted-text":
+		restrictComposer(h, model.SendPermissions{Personal: model.SendText, Until: 1800000000})
+	case "restricted-media":
+		restrictComposer(h, model.SendPermissions{Default: model.SendVoice | model.SendSticker | model.SendGIF})
+
 	case "stickers":
 		h.p.composer.tab = model.PickerStickers
 	case "featured-stickers", "featured-emoji":

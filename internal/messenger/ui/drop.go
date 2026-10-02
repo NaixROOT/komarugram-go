@@ -111,8 +111,7 @@ func (p *chatPage) takesFiles() bool {
 	if p == nil || p.composer == nil || p.composer.source == nil || p.frozen.Frozen() {
 		return false
 	}
-	rights, ok := p.source.(model.RightsSource)
-	return !ok || rights.CanSend(p.chat)
+	return p.composer.permissions(p.chat).Any(model.SendAttachments)
 }
 
 // layout draws the areas of a drag over the chat, over the window, whose

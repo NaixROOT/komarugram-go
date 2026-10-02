@@ -53,9 +53,10 @@ type boxFile struct {
 	sendfiles.File
 	// thumb is the picture the file shows, nil for a file without one or
 	// until it is read; ready is set once the file has been looked at.
-	thumb  *image.RGBA
-	ready  bool
-	remove surface
+	thumb           *image.RGBA
+	ready           bool
+	restrictionTold bool
+	remove          surface
 }
 
 // boxResult is what looking at a file found.
@@ -244,6 +245,12 @@ func (c *messageComposer) sendFiles(l localization.Catalog) {
 		paths[i] = f.Path
 	}
 	way := b.way
+	for _, f := range b.files {
+		if err := c.permissions(c.chat).Check(sendfiles.Permission(f.File, way.Documents)); err != nil {
+			b.modal.Toast(composerErrorText(err, l))
+			return
+		}
+	}
 	c.submit(c.chat, model.OutgoingMessage{Text: caption, Files: &model.OutgoingFiles{Paths: paths, Documents: way.Documents, Group: way.Group, HighQuality: way.HighQuality}})
 	b.modal.Close()
 }
@@ -252,6 +259,18 @@ func (c *messageComposer) sendFiles(l localization.Catalog) {
 func (c *messageComposer) layoutFilesBox(gtx layout.Context, p *chatPage, l localization.Catalog) {
 	b := &c.files
 	b.take(l)
+	for _, f := range b.files {
+		if f.ready {
+			if err := c.permissions(c.chat).Check(sendfiles.Permission(f.File, b.way.Documents)); err != nil {
+				if !f.restrictionTold {
+					b.modal.Toast(composerErrorText(err, l))
+					f.restrictionTold = true
+				}
+			} else {
+				f.restrictionTold = false
+			}
+		}
+	}
 	if !b.modal.Shown() {
 		return
 	}

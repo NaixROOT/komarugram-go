@@ -31,6 +31,7 @@ const (
 	chatMenuTheme
 	chatMenuBeginning
 	chatMenuFiltered
+	chatMenuLeave
 	chatMenuActions
 )
 
@@ -66,11 +67,19 @@ func (p *chatPage) chatMenuActions() []chatMenuAction {
 	if p.filtered > 0 {
 		out = append(out, chatMenuFiltered)
 	}
+	if p.canLeaveChat() {
+		out = append(out, chatMenuLeave)
+	}
 	return out
 }
 
 func (p *chatPage) chatMenuLabel(a chatMenuAction, l localization.Catalog) string {
 	switch a {
+	case chatMenuLeave:
+		if p.kind == model.KindChannel {
+			return l.T("membership.leave_channel")
+		}
+		return l.T("membership.leave_group")
 	case chatMenuSearch:
 		return l.T("chat_menu.search")
 	case chatMenuInfo:
@@ -96,6 +105,8 @@ func (p *chatPage) chatMenuLabel(a chatMenuAction, l localization.Catalog) strin
 
 func chatMenuIcon(a chatMenuAction) wdk.IconWidget {
 	switch a {
+	case chatMenuLeave:
+		return iconLogOut
 	case chatMenuSearch:
 		return iconSearch
 	case chatMenuInfo:
@@ -189,6 +200,8 @@ func (p *chatPage) chatMenuUpdate(gtx layout.Context) {
 		}
 		m.open = false
 		switch a {
+		case chatMenuLeave:
+			p.askLeave()
 		case chatMenuSearch:
 			p.openChatSearch(gtx)
 		case chatMenuInfo:
@@ -247,16 +260,20 @@ func (p *chatPage) layoutChatMenu(gtx layout.Context, l localization.Catalog) {
 			inRect(gtx, image.Rect(0, y, size.X, y+height), func(gtx layout.Context) layout.Dimensions {
 				row := gtx.Constraints.Max
 				text := p.chatMenuLabel(a, l)
-				style := surfaceStyle{background: sc.Surface.OnColor.SetOpacity(0), content: sc.Surface.OnColor, button: text}
+				content, iconColor := sc.Surface.OnColor, sc.SurfaceVariant.OnColor
+				if a == chatMenuLeave {
+					content, iconColor = sc.Error.Color, sc.Error.Color
+				}
+				style := surfaceStyle{background: content.SetOpacity(0), content: content, button: text}
 				return m.items[a].Layout(gtx, row, style, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Left: 16, Right: 16}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return chatMenuIcon(a)(gtx, sc.SurfaceVariant.OnColor) }),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return chatMenuIcon(a)(gtx, iconColor) }),
 							layout.Rigid(layout.Spacer{Width: 12}.Layout),
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 								return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									gtx.Constraints.Min = image.Point{}
-									return label(gtx, text, token.TypestyleBodyMedium, sc.Surface.OnColor, 1)
+									return label(gtx, text, token.TypestyleBodyMedium, content, 1)
 								})
 							}),
 						)

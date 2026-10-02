@@ -207,7 +207,7 @@ func (c *messageComposer) choose(gtx layout.Context, item model.PickerItem) {
 // items, which a sticker set's dialog shows too. It reports whether it did.
 func (c *messageComposer) chooseIn(gtx layout.Context, tab model.PickerTab, item model.PickerItem) bool {
 	d := c.draft(c.chat)
-	if d.sending {
+	if d.sending || !c.pickerAllowed(tab) {
 		return false
 	}
 	if tab == model.PickerEmoji {
@@ -263,6 +263,7 @@ func (c *messageComposer) pickerLayout(gtx layout.Context, l localization.Catalo
 	footer := min(gtx.Dp(48), max(0, size.Y-tabHeight-searchHeight))
 	pad := gtx.Dp(10)
 	inRect(gtx, image.Rect(0, 0, size.X, tabHeight), func(gtx layout.Context) layout.Dimensions {
+		c.tabs.disabled = func(i int) bool { return !c.pickerAllowed(model.PickerTab(i)) }
 		return c.tabs.Layout(gtx, []string{l.T("composer.emoji"), l.T("composer.stickers"), l.T("composer.gif")}, int(c.tab))
 	})
 	inRect(gtx, image.Rect(pad, tabHeight+gtx.Dp(4), max(pad, size.X-pad), tabHeight+searchHeight-gtx.Dp(4)), func(gtx layout.Context) layout.Dimensions {

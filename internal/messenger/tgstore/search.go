@@ -283,30 +283,23 @@ func (s *Store) searchLocal(ctx context.Context, q model.SearchQuery) ([]model.F
 // chatFor is the chat of id as the chat list has it, or else as l or the
 // peers seen make it.
 func (s *Store) chatFor(id int64, l *list) model.Chat {
+	s.history.mu.Lock()
+	p := s.history.peers[id]
+	s.history.mu.Unlock()
 	for _, c := range s.Chats() {
 		if c.ID == id {
-			return c
+			return p.withMetadata(c)
 		}
 	}
 	if l != nil {
 		if peer := chatPeer(id); peer != nil {
 			c, _ := l.chat(&tg.Dialog{Peer: peer})
 			if c.Title != "" {
-				return c
+				return p.withMetadata(c)
 			}
 		}
 	}
-	s.history.mu.Lock()
-	p := s.history.peers[id]
-	s.history.mu.Unlock()
-	c := model.Chat{ID: id, Title: p.Name}
-	switch p.Kind {
-	case "channel":
-		c.Kind = model.KindChannel
-	case "chat":
-		c.Kind = model.KindGroup
-	}
-	return c
+	return p.withMetadata(model.Chat{ID: id})
 }
 
 // chatPeer is the peer of a chat id: see peerID.

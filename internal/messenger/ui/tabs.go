@@ -28,6 +28,7 @@ const (
 // to slides in from its side: see Slide. The caller keeps which tab is
 // active.
 type tabRow struct {
+	disabled  func(int) bool
 	tabs      []surface
 	colors    []wdk.ColorTween
 	indicator wdk.FloatTween
@@ -49,7 +50,7 @@ func (r *tabRow) grow(n int) {
 func (r *tabRow) Clicked(gtx layout.Context, active, n int) (int, bool) {
 	r.grow(n)
 	for i := range n {
-		if r.tabs[i].Clicked(gtx) && i != active {
+		if r.tabs[i].Clicked(gtx) && i != active && (r.disabled == nil || !r.disabled(i)) {
 			r.Switch(active, i)
 			return i, true
 		}
@@ -85,6 +86,10 @@ func (r *tabRow) Layout(gtx layout.Context, labels []string, active int) layout.
 		area := image.Rect(i*size.X/n, 0, (i+1)*size.X/n, size.Y)
 		inRect(gtx, area, func(gtx layout.Context) layout.Dimensions {
 			tab := gtx.Constraints.Max
+			if r.disabled != nil && r.disabled(i) {
+				gtx = gtx.Disabled()
+				col = col.SetOpacity(0.38)
+			}
 			style := surfaceStyle{background: col.SetOpacity(0), content: col}
 			return r.tabs[i].Layout(gtx, tab, style, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints = layout.Exact(tab)
