@@ -60,11 +60,18 @@ func TestChatHeaderAvatarOpensPhoto(t *testing.T) {
 }
 
 // The viewer opens the photo a chat shows at once, and has the older ones
-// of its profile after them when the store has told them.
+// of its profile after them, page by page as the strip comes to its end,
+// placed among all of them as Telegram counts them.
 func TestViewerOpensProfilePhotos(t *testing.T) {
 	store := mockstore.New(time.Now(), 0)
 	var images imageOps
-	v := newPhotoViewer(store, &images, func() {})
+	changed := make(chan struct{}, 1)
+	v := newPhotoViewer(store, &images, func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})
 	defer v.Destroy()
 	if !v.OpenProfile(2) || !v.open {
 		t.Fatal("the viewer did not open")
@@ -72,27 +79,90 @@ func TestViewerOpensProfilePhotos(t *testing.T) {
 	if v.current != model.ProfilePhotoID(0) {
 		t.Fatalf("shows %d, not the photo the chat shows", v.current)
 	}
-	until := time.Now().Add(3 * time.Second)
-	for {
-		items, _, _, _, _ := v.snapshot()
-		if len(items) == 3 {
-			for i, m := range items {
-				if m.Key.MessageID != model.ProfilePhotoID(i) {
-					t.Fatalf("photo %d has id %d", i, m.Key.MessageID)
-				}
+	var router input.Router
+	frame := func() {
+		gtx := sharedContext(new(op.Ops), image.Pt(800, 600))
+		gtx.Source = router.Source()
+		images.BeginFrame()
+		v.Layout(gtx, localization.For("en"), false)
+		images.EndFrame()
+	}
+	until := func(what string, cond func([]model.Message) bool) []model.Message {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			frame()
+			items, _, _, _, _ := v.snapshot()
+			if cond(items) {
+				return items
 			}
-			break
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s: %d photos", what, len(items))
+			}
+			select {
+			case <-changed:
+			case <-time.After(10 * time.Millisecond):
+			}
 		}
-		if time.Now().After(until) {
-			t.Fatalf("%d photos of the profile", len(items))
+	}
+	items := until("the first page", func(items []model.Message) bool { return len(items) > 1 })
+	if len(items) != viewerPage {
+		t.Fatalf("%d photos in the first page", len(items))
+	}
+	if n, amount, ok := v.place(items, 0); !ok || n != 1 || amount != 150 {
+		t.Fatalf("the photo the chat shows is %d of %d (%v)", n, amount, ok)
+	}
+	// Going to the last photo known asks for the next page, until all are.
+	for len(items) < 150 {
+		before := len(items)
+		v.current = items[len(items)-1].Key.MessageID
+		items = until("the next page", func(items []model.Message) bool { return len(items) > before })
+	}
+	for i, m := range items {
+		if m.Key.MessageID != model.ProfilePhotoID(i) {
+			t.Fatalf("photo %d has id %d", i, m.Key.MessageID)
 		}
-		time.Sleep(time.Millisecond)
+	}
+	if n, amount, ok := v.place(items, len(items)-1); !ok || n != 150 || amount != 150 {
+		t.Fatalf("the last photo is %d of %d (%v)", n, amount, ok)
+	}
+	_, _, exhausted, _, _ := v.snapshot()
+	if !exhausted[0] || !exhausted[1] {
+		t.Fatalf("all photos known, yet paging on: %v", exhausted)
 	}
 	// A store that has no profile photos opens nothing.
 	plain := newPhotoViewer(newGalleryStore(), &images, func() {})
 	defer plain.Destroy()
 	if plain.OpenProfile(2) || plain.open {
 		t.Fatal("a viewer without profile photos opened")
+	}
+}
+
+// The viewer of a window of their own goes on paging the photos of a
+// profile from where the one that opened it stopped.
+func TestProfilePhotosGoOnInWindow(t *testing.T) {
+	store := mockstore.New(time.Now(), 0)
+	var images imageOps
+	v := newPhotoViewer(store, &images, func() {})
+	defer v.Destroy()
+	page, err := store.ProfilePhotos(t.Context(), 2, "", viewerPage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.openList(2, page.Messages[0], photoList{items: page.Messages, total: page.Total, ended: [2]bool{true, false}, profile: true, offset: page.Next})
+	deadline := time.Now().Add(3 * time.Second)
+	// Opening asks for the page after those it was given.
+	for ; ; time.Sleep(time.Millisecond) {
+		items, loading, _, _, _ := v.snapshot()
+		if !loading[1] {
+			if len(items) != 2*viewerPage || items[viewerPage].Key.MessageID != model.ProfilePhotoID(viewerPage) {
+				t.Fatalf("%d photos after the next page", len(items))
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the next page")
+		}
 	}
 }
 

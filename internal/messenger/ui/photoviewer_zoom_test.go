@@ -198,7 +198,7 @@ func TestPhotoViewerOpensInWindow(t *testing.T) {
 	s := h.store
 	var popped []model.Message
 	var current model.Message
-	h.viewer.popout = func(chat int64, m model.Message, known []model.Message) { current, popped = m, known }
+	h.viewer.popout = func(chat int64, m model.Message, known photoList) { current, popped = m, known.items }
 	h.viewer.Open(1, s.photos[14], s.photos)
 	h.frame()
 	h.click(720, 28)

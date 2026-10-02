@@ -56,7 +56,7 @@ func TestRenderPhotoViewer(t *testing.T) {
 		}
 	})
 	defer v.Destroy()
-	v.popout = func(int64, model.Message, []model.Message) {}
+	v.popout = func(int64, model.Message, photoList) {}
 	if os.Getenv("VIEWER_PROFILE") != "" {
 		// The photos of the chat's profile, as its avatar opens them.
 		start, _ = store.ProfilePhoto(2)

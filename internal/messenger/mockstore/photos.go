@@ -116,33 +116,67 @@ func mix(a, b, k float64) float64 { return a + (b-a)*k }
 
 func clampByte(v float64) uint8 { return uint8(max(0, min(255, v))) }
 
+var (
+	_ model.PhotoGallery       = (*Store)(nil)
+	_ model.ProfilePhotoSource = (*Store)(nil)
+)
+
 // ChatPhotos implements model.PhotoGallery over the demo history.
-func (s *Store) ChatPhotos(ctx context.Context, chat int64, anchor model.MessageID, dir, limit int) ([]model.Message, error) {
+func (s *Store) ChatPhotos(ctx context.Context, chat int64, anchor model.MessageID, dir, limit int) (model.PhotoPage, error) {
 	var photos []model.Message
+	total := 0
 	for _, m := range s.History(chat).Messages {
-		if m.Kind == model.MessagePhoto && m.Media != nil && (dir < 0 && m.Key.MessageID < anchor || dir > 0 && m.Key.MessageID > anchor) {
+		if m.Kind != model.MessagePhoto || m.Media == nil {
+			continue
+		}
+		total++
+		if dir < 0 && m.Key.MessageID < anchor || dir > 0 && m.Key.MessageID > anchor {
 			photos = append(photos, m)
 		}
 	}
+	page := model.PhotoPage{Total: total, More: len(photos) > limit}
 	if dir < 0 {
-		return photos[max(0, len(photos)-limit):], ctx.Err()
+		page.Messages = photos[max(0, len(photos)-limit):]
+	} else {
+		page.Messages = photos[:min(len(photos), limit)]
 	}
-	return photos[:min(len(photos), limit)], ctx.Err()
+	return page, ctx.Err()
 }
 
-// ProfilePhoto implements model.ProfilePhotoSource: every chat of the demo
-// has three photos, drawn as the photos of its history are.
+// demoProfilePhotos is how many photos the profile of a chat of the demo
+// has: Анна Смирнова's more than Telegram gives at once, so that they are
+// paged, three each of the others.
+func demoProfilePhotos(chat int64) int {
+	if chat == 2 {
+		return 150
+	}
+	return 3
+}
+
+// ProfilePhoto implements model.ProfilePhotoSource: the photos of a chat of
+// the demo are drawn as the photos of its history are.
 func (s *Store) ProfilePhoto(chat int64) (model.Message, bool) {
 	return s.profilePhoto(chat, 0), true
 }
 
-// ProfilePhotos implements model.ProfilePhotoSource.
-func (s *Store) ProfilePhotos(ctx context.Context, chat int64) ([]model.Message, error) {
-	var photos []model.Message
-	for i := range 3 {
-		photos = append(photos, s.profilePhoto(chat, i))
+// ProfilePhotos implements model.ProfilePhotoSource; offset is the place of
+// the page's first photo.
+func (s *Store) ProfilePhotos(ctx context.Context, chat int64, offset string, limit int) (model.PhotoPage, error) {
+	from := 0
+	if offset != "" {
+		if _, err := fmt.Sscan(offset, &from); err != nil {
+			return model.PhotoPage{}, err
+		}
 	}
-	return photos, ctx.Err()
+	total := demoProfilePhotos(chat)
+	page := model.PhotoPage{Total: total}
+	for i := from; i < min(total, from+limit); i++ {
+		page.Messages = append(page.Messages, s.profilePhoto(chat, i))
+	}
+	if end := from + len(page.Messages); end < total {
+		page.More, page.Next = true, fmt.Sprint(end)
+	}
+	return page, ctx.Err()
 }
 
 func (s *Store) profilePhoto(chat int64, i int) model.Message {
@@ -152,7 +186,7 @@ func (s *Store) profilePhoto(chat int64, i int) model.Message {
 		Key:        model.MessageKey{ChatID: chat, MessageID: model.ProfilePhotoID(i)},
 		Media:      demoPhoto(n),
 		SenderName: s.chatTitle(chat),
-		Date:       time.Date(2024, 3, 1+i, 12, 0, 0, 0, time.UTC),
+		Date:       time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC).AddDate(0, 0, -i),
 	}
 }
 

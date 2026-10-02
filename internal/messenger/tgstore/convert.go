@@ -32,6 +32,9 @@ type fileLocation struct {
 	Peer                       *peerRecord
 	// Big asks for the large picture of a peer's photo, not the small one.
 	Big bool `json:",omitempty"`
+	// ProfileMessage is the service message that tells a group's profile
+	// photo, by which its file reference is renewed.
+	ProfileMessage int `json:",omitempty"`
 }
 
 func (l fileLocation) input() tg.InputFileLocationClass {

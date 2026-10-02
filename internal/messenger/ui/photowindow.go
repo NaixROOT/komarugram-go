@@ -33,11 +33,11 @@ type photoWindow struct {
 	closing    bool
 }
 
-func newPhotoWindow(w *appwindow.Window, source model.ConversationStore, catalog localization.Catalog, chat int64, current model.Message, known []model.Message) *photoWindow {
+func newPhotoWindow(w *appwindow.Window, source model.ConversationStore, catalog localization.Catalog, chat int64, current model.Message, known photoList) *photoWindow {
 	p := &photoWindow{w: w, catalog: catalog}
 	p.viewer = newPhotoViewer(source, &p.images, w.Invalidate)
 	p.viewer.standalone = true
-	p.viewer.Open(chat, current, known)
+	p.viewer.openList(chat, current, known)
 	return p
 }
 
@@ -120,7 +120,7 @@ func (ws *photoWindows) closeAll() {
 }
 
 // openPhotoWindow shows photo m of chat in a new window.
-func (a *App) openPhotoWindow(chat int64, m model.Message, known []model.Message) {
+func (a *App) openPhotoWindow(chat int64, m model.Message, known photoList) {
 	catalog := a.catalog()
 	title := catalog.T("viewer.window")
 	for _, c := range a.store.Chats() {

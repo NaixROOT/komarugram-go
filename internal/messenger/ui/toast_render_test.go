@@ -142,7 +142,7 @@ func TestRenderToasts(t *testing.T) {
 		}
 		images := &imageOps{}
 		v := newPhotoViewer(store, images, func() {})
-		v.popout = func(int64, model.Message, []model.Message) {}
+		v.popout = func(int64, model.Message, photoList) {}
 		v.Open(2, start, nil)
 		v.toast.Show("Фото сохранено: /home/user/Изображения/photo.jpg")
 		renderToast(t, name("photo-viewer"), image.Pt(1100, 720), dark, func(gtx layout.Context) {
