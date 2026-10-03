@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/godbus/dbus/v5"
+
+	"komarugram/internal/appicon"
 )
 
 // The icon is a StatusNotifierItem, the protocol of KDE Plasma, LXQt, Xfce's
@@ -137,8 +139,8 @@ type tooltip struct {
 
 func pixmaps() []pixmap {
 	var out []pixmap
-	for _, size := range []int{16, 22, 24, 32, 48, 64} {
-		im := Icon(size)
+	for _, im := range appicon.Images(16, 22, 24, 32, 48, 64) {
+		size := im.Rect.Dx()
 		data := make([]byte, 0, size*size*4)
 		for i := 0; i < len(im.Pix); i += 4 {
 			data = append(data, im.Pix[i+3], im.Pix[i], im.Pix[i+1], im.Pix[i+2])

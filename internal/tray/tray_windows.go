@@ -11,6 +11,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"komarugram/internal/appicon"
 )
 
 var (
@@ -267,7 +269,7 @@ func (t *Tray) createMenu() (windows.Handle, error) {
 
 // createIcon makes an icon of size pixels square with an alpha channel.
 func createIcon(size int) (windows.Handle, error) {
-	im := Icon(size)
+	im := appicon.Image(size)
 	header := bitmapInfoHeader{
 		Width:    int32(size),
 		Height:   -int32(size), // top-down rows

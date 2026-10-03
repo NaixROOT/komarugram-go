@@ -27,7 +27,7 @@ Russian; code, comments and docs are in English.
 | `internal/messenger/mockstore` | Demo store for `-demo` |
 | `pkg/*` | Reusable parts: `dcpool` (download connections), `tdata`, media decoders |
 | `third_party/gio`, `third_party/gio-mw` | Forks, wired with `replace`; changes to Gio go in `third_party/gio/LOCAL_CHANGES.md` |
-| `tdesktop`, `ayugram`, `materialgram` | Not in the repository, and ignored by git: local clones of Telegram Desktop and two of its forks, made when needed (see "Telegram Desktop sources") |
+| `tdesktop`, `ayugram`, `materialgram`, `telegram-android` | Not in the repository, and ignored by git: local clones of Telegram Desktop, two of its forks and Telegram for Android, made when needed (see "Telegram sources") |
 
 ## Read before
 
@@ -39,8 +39,11 @@ Russian; code, comments and docs are in English.
 - Telegram behavior (errors, limits, flows): how Telegram Desktop and the
   forks do it, in `*/Telegram/SourceFiles`, widgets in `*/Telegram/lib_ui`,
   and https://core.telegram.org/api. Clone what you need first, without
-  asking: see "Telegram Desktop sources". Look at both forks for a feature
+  asking: see "Telegram sources". Look at both forks for a feature
   to port: it may be one fork's own, as AyuGram's snapshots are.
+  Telegram for Android is the second reference, for what Telegram Desktop
+  lacks or does differently (`TMessagesProj/src/main/java/org/telegram`;
+  its strings in `TMessagesProj/src/main/res/values/strings.xml`).
   Texts shown to the user map to tdesktop's `lng_…` keys in
   `internal/messenger/localization` (`TelegramKeys`).
 - Performance or memory: `docs/PROFILING.md`; README "Pitfalls".
@@ -183,28 +186,38 @@ On Linux under X11 (XFCE here):
 - The instance socket is `$XDG_RUNTIME_DIR/komarugram-go.sock`; a path over 107
   bytes fails, so point `XDG_RUNTIME_DIR` at a short symlink when needed.
 
-## Telegram Desktop sources
+## Telegram sources
 
 Telegram Desktop is the reference for Telegram's behavior, texts and UI,
-and AyuGram and materialgram are the forks features are ported from
-(`docs/PLAN.md`). They are not in the repository. When a task needs one,
-clone it into the root under the name below, without asking, and without
-its history: a shallow clone, then remove every `.git` in it. `.gitignore`
-keeps these directories out of KomaruGram's commits. Only the submodules
-`Telegram/lib_ui`, `lib_base` and `lib_tl` are needed; the others, and
-`ThirdParty`, are large and can stay empty.
+AyuGram and materialgram are the forks features are ported from
+(`docs/PLAN.md`), and Telegram for Android is the second reference, for
+what Telegram Desktop lacks or does differently. They are not in the
+repository. When a task needs one, clone it into the root under the name
+below, without asking, and without its history: a shallow clone, then
+remove every `.git` in it. `.gitignore` keeps these directories out of
+KomaruGram's commits. Of Telegram Desktop and its forks only the
+submodules `Telegram/lib_ui`, `lib_base` and `lib_tl` are needed; the
+others, and `ThirdParty`, are large and can stay empty.
 
 | Directory | Repository |
 |---|---|
 | `tdesktop` | https://github.com/telegramdesktop/tdesktop |
 | `ayugram` | https://github.com/AyuGram/AyuGramDesktop (adds features such as message snapshots, `ayu/features/message_shot`) |
 | `materialgram` | https://github.com/kukuruzka165/materialgram (restyles the UI) |
+| `telegram-android` | https://github.com/DrKLO/Telegram (Telegram for Android) |
 
 ```sh
 git clone --depth 1 https://github.com/AyuGram/AyuGramDesktop ayugram
 git -C ayugram submodule update --init --depth 1 Telegram/lib_ui Telegram/lib_base Telegram/lib_tl
 # then delete ayugram/.git and the .git of each submodule
 ```
+
+Of Telegram for Android only the code is kept: after the clone, delete
+`TMessagesProj/src/main/assets`, everything in `TMessagesProj/src/main/res`
+but `values*` and `xml`, `TMessagesProj_AppTests`, the native libraries
+in `TMessagesProj/jni` (`prebuild`, `voip`, `third_party`, `sqlite`,
+`openssl`; `tgnet` stays), and images, fonts, sounds and archives
+(about 77 MB left of 350).
 
 A clone that is there already may be old: pull a new one when the code it
 describes has to be current.

@@ -1,5 +1,5 @@
 <div align="center">
-<img src="./assets/logo.svg" width="140" align="center" alt="KomaruGram">
+<img src="./assets/logo_round.png" width="140" align="center" alt="KomaruGram">
 
 # KomaruGram Go
 
@@ -13,15 +13,15 @@ Telegram Desktop client written from scratch in Go. Feature-rich and security-en
 
 ## Why does this exist?
 
-The official Telegram Desktop and its forks have many issues: heavy reliance on the C++ codebase and libraries (TDLib, Qt), a build process that is time-consuming and resource-intensive, and a high barrier to entry for developing your own modifications. In addition, it uses a copyleft license — our repository is completely free in terms of how you distribute it.
+The official Telegram Desktop and its forks have many issues: heavy reliance on the C++ codebase and libraries ([TDLib](https://github.com/tdlib/td), Qt), a build process that is time-consuming and resource-intensive, and a high barrier to entry for developing your own modifications. In addition, it uses a copyleft license — our repository is completely free in terms of how you distribute it.
 
 ## What's inside?
 
-Gio handles the UI. It is a cross-platform, immediate-mode GUI library. It was chosen because it eliminates the typical limitations of frameworks, has no dependencies, doesn't break cross-platform builds, is fully compatible with Wayland, and can be ported to other platforms without any issues.
+[Gio](https://gioui.org/) handles the UI. It is a cross-platform, immediate-mode GUI library. It was chosen because it eliminates the typical limitations of frameworks, has no dependencies, doesn't break cross-platform builds, is fully compatible with Wayland, and can be ported to other platforms without any issues.
 
-gotd/td implements MTProto and a little more, which serves as the foundation for all interactions with the Telegram protocol.
+[gotd/td](https://github.com/gotd/td) implements MTProto and a little more, which serves as the foundation for all interactions with the Telegram protocol.
 
-wazero is used as a high-performance WebAssembly sandbox for rendering stickers. It ensures cross-platform portability and guarantees code isolation without launching a separate process.
+[wazero](https://github.com/wazero/wazero) is used as a high-performance WebAssembly sandbox for rendering stickers. It ensures cross-platform portability and guarantees code isolation without launching a separate process.
 
 FFmpeg, mpv, VLC and Chromium are available as external integrations that you must provide yourself. However, the application will work even without them, if the user is satisfied with that.
 
@@ -31,31 +31,50 @@ Voice messages and music play in the application itself, with no FFmpeg or exter
 
 ## How to get started
 
-Make a copy of this repository. Ensure that **Go 1.27.1** is installed on your machine — it is the minimum required version. On Linux, Wayland and X11 development libraries may be required.
+Make a copy of this repository. Ensure that **[Go 1.27.1](https://go.dev/dl/)** is installed on your machine — it is the minimum required version. On Linux, Wayland and X11 development libraries may be required.
 
-**Change the directory to the entry point:**
+If you do not need to create an executable file, you can use this command to run it universally across different operating systems.
 ```
-cd cmd/messenger
+go run ./cmd/messenger
 ```
 
-### **Linux:**
+If you need to create an executable file with an icon, proceed as follows.
+
+### **Linux**:
 **Simply with go build:**
 ```
-GOOS=linux go build -ldflags="-s -w" -buildvcs=false -o komarugram
+GOOS=linux go build -ldflags="-s -w" -buildvcs=false -o komarugram ./cmd/messenger
 ```
 
 ### **Windows:**
 
-**Install Gio cmd tools:**:
+**Install Gio cmd tools:**
 ```
 go install gioui.org/cmd/gogio@latest
 ```
 **Building the application with an icon:**
 ```
-gogio -ldflags="-s -w" -icon=../../assets/logo_round.png -target=windows -o komarugram.exe .
+gogio -ldflags="-s -w" -icon=./assets/logo_round.png -target=windows -o komarugram.exe ./cmd/messenger
 ```
 
 The build process can consume up to 4 GB of RAM. Keep this in mind and close unnecessary applications during the initial build. All subsequent builds should run instantly.
+
+## Portability
+
+KomaruGram Go can be ported to a wide range of operating systems thanks to its architecture and minimal dependencies. Check out [PLATFORMS.md](./docs/PLATFORMS.md) if you are interested in platform-specific details.
+
+| OS | Status |
+|---|---|
+| Windows 10/11 | ✅ First-class support |
+| Linux (Wayland) | ✅ First-class support |
+| Linux (X11) | ✅ Supported, within X11 limitations |
+| MacOS | ⚠️ Should build; not tested in practice |
+| FreeBSD | ⚠️ Should build; not tested in practice |
+| OpenBSD | ⚠️ Should build in theory; not tested |
+| NetBSD | ❓ Porting possible, with some caveats |
+| Android | ❓ Porting possible, with some caveats |
+| Windows 7 | ❓ Porting possible, with some caveats |
+| Haiku OS | ❓ Porting possible, with significant caveats |
 
 ## Vibecoding
 
@@ -63,7 +82,11 @@ The code in this project was primarily written by the GPT-6 Astra and Claude Opu
 
 ## Thanks
 
-We thank the creator of gotd/td for the excellent library and Gio for an architecture that is both simple and scalable for large applications. Branding is provided free of charge by the [t.me/komarugram](https://t.me/komarugram) project. Thanks augustwise and SvatoshGPT for providing the Claude Code and Codex subscriptions for the needs of this project.
+We thank the creator of [gotd/td](https://github.com/gotd/td) for the excellent library and [Gio](https://gioui.org/) for an architecture that is both simple and scalable for large applications. Branding is provided free of charge by the [t.me/komarugram](https://t.me/komarugram) project. Thanks augustwise and SvatoshGPT for providing the Claude Code and Codex subscriptions for the needs of this project.
+
+## You Might Be Interested In
+
+If you were looking for the KomaruGram that is a fork of Telegram Desktop, [click here](https://github.com/svatoshgpt/komarugram). Our project has similar goals, but it was written from scratch in Go and is not a fork of Telegram Desktop
 
 ## License
 
