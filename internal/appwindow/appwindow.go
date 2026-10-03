@@ -31,6 +31,7 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/unit"
 
+	"komarugram/internal/appicon"
 	"komarugram/internal/motion"
 )
 
@@ -368,6 +369,7 @@ func (h *Host) Open(spec Spec) {
 	go func() {
 		opts := spec.Options
 		w.Option(app.Title(opts.Title), app.Size(opts.Width, opts.Height))
+		w.Option(windowIcon())
 		w.Option(effectOptions(opts.Transparent, opts.BlurBehind)...)
 		if opts.TopMost {
 			w.Option(app.TopMost(true))
@@ -662,4 +664,15 @@ func (h *Host) CloseAll() {
 	for _, w := range windows {
 		w.Perform(system.ActionClose)
 	}
+}
+
+// windowIcon is the application's icon for a window, at the sizes desktops
+// show it. Gio does not keep the images.
+func windowIcon() app.Option {
+	images := appicon.Images(appicon.WindowSizes...)
+	icons := make([]image.Image, len(images))
+	for i, im := range images {
+		icons[i] = im
+	}
+	return app.Icon(icons...)
 }

@@ -3,9 +3,14 @@
 .agents/
 .codex/
 profiles/
-# Local clones of Telegram Desktop and its forks, for reference: see
-# AGENTS.md, "Telegram Desktop sources".
+# Local clones of Telegram Desktop, its forks and Telegram for Android, for
+# reference: see AGENTS.md, "Telegram sources".
 /tdesktop/
 /ayugram/
 /materialgram/
 /telegram-android/
+# Binaries the README's build commands leave in the root, and the resource
+# file with the icon gogio leaves beside the package it builds.
+/komarugram
+/komarugram.exe
+/cmd/messenger/*.syso
