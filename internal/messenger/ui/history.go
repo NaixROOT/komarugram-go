@@ -50,6 +50,9 @@ type messageRow struct {
 	// reactions are the message's reaction chips, which choose or take
 	// back a reaction.
 	reactions []surface
+	// shownReactions are the message's reactions in the order of the
+	// chips.
+	shownReactions []model.Reaction
 	// comments is the bar that opens a channel post's comments.
 	comments surface
 	// reply is the quote of the message replied to, which shows it.

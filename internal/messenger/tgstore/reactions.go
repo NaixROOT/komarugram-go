@@ -3,8 +3,11 @@
 package tgstore
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -32,9 +35,11 @@ type reactionState struct {
 	// time.
 	toggling sync.Mutex
 	// all are Telegram's reactions (messages.getAvailableReactions), and
-	// premium the emoji among them only Premium may choose.
+	// premium the emoji among them only Premium may choose; rank is the
+	// place of each emoji in Telegram's list, the retired ones too.
 	all     []model.Reaction
 	premium map[string]bool
+	rank    map[string]int
 	// top are the account's top reactions (messages.getTopReactions), whose
 	// custom emoji a Premium account may choose where a chat allows them;
 	// favorite, the reaction of a double click (the config's
@@ -43,6 +48,8 @@ type reactionState struct {
 	favorite   model.Reaction
 	allLoaded  bool
 	allLoading bool
+	// allRetry is when ReactionRank may ask for all again after it failed.
+	allRetry time.Time
 	// chats are the reactions each chat allows; loading, the chats asked.
 	chats   map[int64]chatReactions
 	loading map[int64]bool
@@ -55,19 +62,44 @@ type chatReactions struct {
 	some        []model.Reaction
 }
 
-// convertReactions reads the reactions of a message.
+// convertReactions reads the reactions of a message. The account's own go
+// last, in the order it chose them, as model.ToggleReaction keeps them.
 func convertReactions(reactions tg.MessageReactions) []model.Reaction {
 	var out []model.Reaction
+	var order []int
 	for _, r := range reactions.Results {
 		reaction, ok := convertReaction(r.Reaction)
 		if !ok {
 			continue
 		}
 		reaction.Count = r.Count
-		_, reaction.Chosen = r.GetChosenOrder()
+		var chosen int
+		chosen, reaction.Chosen = r.GetChosenOrder()
 		out = append(out, reaction)
+		order = append(order, chosen)
 	}
+	chosenLast(out, order)
 	return out
+}
+
+// chosenLast moves the account's reactions to the end of list, by their
+// order; the others keep theirs.
+func chosenLast(list []model.Reaction, order []int) {
+	type entry struct {
+		r     model.Reaction
+		order int
+	}
+	entries := make([]entry, len(list))
+	for i, r := range list {
+		entries[i] = entry{r, order[i]}
+		if !r.Chosen {
+			entries[i].order = math.MinInt
+		}
+	}
+	slices.SortStableFunc(entries, func(a, b entry) int { return cmp.Compare(a.order, b.order) })
+	for i, e := range entries {
+		list[i] = e.r
+	}
 }
 
 func convertReaction(r tg.ReactionClass) (model.Reaction, bool) {
@@ -143,6 +175,34 @@ func (s *Store) ChatReactions(chat int64) ([]model.Reaction, int, bool) {
 	return list, s.reactionLimit(), true
 }
 
+// ReactionRank implements model.ReactionOrderer. Every history with
+// reactions asks it, so it asks Telegram for the list only when connected,
+// and not again soon after it failed.
+func (s *Store) ReactionRank(reaction model.Reaction) (int, bool) {
+	r := &s.reactions
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.allLoaded {
+		if !r.allLoading && time.Now().After(r.allRetry) && s.connected() {
+			r.allLoading = true
+			s.goReactions(func(ctx context.Context, api *tg.Client) { s.loadAvailableReactions(ctx, api) })
+		}
+		return 0, false
+	}
+	if reaction.DocumentID != 0 || reaction.Paid {
+		return 0, false
+	}
+	rank, ok := r.rank[reaction.Emoji]
+	return rank, ok
+}
+
+func (s *Store) connected() bool {
+	c := s.history
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.api != nil && !c.closing
+}
+
 // goReactions runs load with the API, off the frame.
 func (s *Store) goReactions(load func(context.Context, *tg.Client)) {
 	c := s.history
@@ -206,10 +266,12 @@ func (s *Store) loadAvailableReactions(ctx context.Context, api *tg.Client) {
 	r.favorite, r.top = favorite, top
 	list, ok := res.(*tg.MessagesAvailableReactions)
 	if err != nil || !ok {
+		r.allRetry = time.Now().Add(30 * time.Second)
 		return
 	}
-	r.all, r.premium = nil, map[string]bool{}
-	for _, one := range list.Reactions {
+	r.all, r.premium, r.rank = nil, map[string]bool{}, map[string]int{}
+	for i, one := range list.Reactions {
+		r.rank[one.Reaction] = i
 		if one.Inactive {
 			continue
 		}
@@ -357,14 +419,17 @@ func (s *Store) applyReactions(chat int64, id int, reactions tg.MessageReactions
 	next := convertReactions(reactions)
 	s.changeMessage(chat, id, func(m *model.Message) {
 		if reactions.Min {
+			// The account's keep their order too.
+			order := make([]int, len(next))
 			for i := range next {
 				next[i].Chosen = false
-				for _, old := range m.Reactions {
+				for j, old := range m.Reactions {
 					if old.Same(next[i]) {
-						next[i].Chosen = old.Chosen
+						next[i].Chosen, order[i] = old.Chosen, j
 					}
 				}
 			}
+			chosenLast(next, order)
 		}
 		m.Reactions = next
 		if !reactions.Min {

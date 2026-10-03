@@ -5,6 +5,7 @@ package tgstore
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -187,4 +188,96 @@ func TestChatReactions(t *testing.T) {
 func chosen(r tg.ReactionCount) tg.ReactionCount {
 	r.SetChosenOrder(0)
 	return r
+}
+
+// TestReactionsInChosenOrder checks that the account's reactions are kept in
+// the order it chose them, which model.ToggleReaction lets go by.
+func TestReactionsInChosenOrder(t *testing.T) {
+	order := func(r tg.ReactionCount, n int) tg.ReactionCount { r.SetChosenOrder(n); return r }
+	got := convertReactions(tg.MessageReactions{Results: []tg.ReactionCount{
+		order(tg.ReactionCount{Reaction: &tg.ReactionEmoji{Emoticon: "❤"}, Count: 9}, 2),
+		{Reaction: &tg.ReactionEmoji{Emoticon: "👍"}, Count: 5},
+		order(tg.ReactionCount{Reaction: &tg.ReactionEmoji{Emoticon: "🔥"}, Count: 3}, 1),
+		{Reaction: &tg.ReactionEmoji{Emoticon: "🎉"}, Count: 1},
+	}})
+	var emoji []string
+	for _, r := range got {
+		emoji = append(emoji, r.Emoji)
+	}
+	if want := []string{"👍", "🎉", "🔥", "❤"}; !slices.Equal(emoji, want) {
+		t.Errorf("got %v, want %v", emoji, want)
+	}
+
+	// An update that does not say which are the account's keeps their order.
+	s, msg := reactionStore(t, func(in bin.Encoder, out bin.Decoder) error { return errors.New("offline") })
+	s.changeMessage(msg.Key.ChatID, 4, func(m *model.Message) {
+		m.Reactions = []model.Reaction{{Emoji: "🔥", Count: 1, Chosen: true}, {Emoji: "❤", Count: 2, Chosen: true}}
+	})
+	s.applyReactions(msg.Key.ChatID, 4, tg.MessageReactions{Min: true, Results: []tg.ReactionCount{
+		{Reaction: &tg.ReactionEmoji{Emoticon: "❤"}, Count: 4},
+		{Reaction: &tg.ReactionEmoji{Emoticon: "👍"}, Count: 3},
+		{Reaction: &tg.ReactionEmoji{Emoticon: "🔥"}, Count: 2},
+	}})
+	emoji = nil
+	for _, r := range s.History(msg.Key.ChatID).Messages[0].Reactions {
+		emoji = append(emoji, r.Emoji)
+	}
+	if want := []string{"👍", "🔥", "❤"}; !slices.Equal(emoji, want) {
+		t.Errorf("min update: got %v, want %v", emoji, want)
+	}
+}
+
+// TestReactionRank checks that drawing a history asks Telegram for its list
+// of reactions once connected, and not while offline.
+func TestReactionRank(t *testing.T) {
+	asked := make(chan struct{}, 4)
+	s, _ := reactionStore(t, func(in bin.Encoder, out bin.Decoder) error {
+		switch in.(type) {
+		case *tg.MessagesGetAvailableReactionsRequest:
+			asked <- struct{}{}
+			out.(*tg.MessagesAvailableReactionsBox).AvailableReactions = &tg.MessagesAvailableReactions{Reactions: []tg.AvailableReaction{
+				{Reaction: "👍"}, {Reaction: "🙈", Inactive: true}, {Reaction: "❤"},
+			}}
+			return nil
+		}
+		return errors.New("not here")
+	})
+	s.history.mu.Lock()
+	api := s.history.api
+	s.history.api = nil
+	s.history.mu.Unlock()
+	if _, ok := s.ReactionRank(model.Reaction{Emoji: "❤"}); ok {
+		t.Fatal("ranked before the list loaded")
+	}
+	s.reactions.mu.Lock()
+	loading := s.reactions.allLoading
+	s.reactions.mu.Unlock()
+	if loading {
+		t.Fatal("asked while offline")
+	}
+	s.history.mu.Lock()
+	s.history.api = api
+	s.history.mu.Unlock()
+	s.ReactionRank(model.Reaction{Emoji: "❤"})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, ok := s.ReactionRank(model.Reaction{Emoji: "❤"}); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the list did not load")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(asked) != 1 {
+		t.Fatalf("asked %d times", len(asked))
+	}
+	for emoji, want := range map[string]int{"👍": 0, "🙈": 1, "❤": 2} {
+		if got, ok := s.ReactionRank(model.Reaction{Emoji: emoji}); !ok || got != want {
+			t.Errorf("%s: rank %d, %t; want %d", emoji, got, ok, want)
+		}
+	}
+	if _, ok := s.ReactionRank(model.Reaction{Emoji: "🍌"}); ok {
+		t.Error("ranked a reaction not in the list")
+	}
 }

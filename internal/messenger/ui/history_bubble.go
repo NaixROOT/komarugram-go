@@ -458,12 +458,17 @@ func shortCount(n int) string {
 	return strconv.Itoa(n)
 }
 
-// reactions draws the reactions to m as chips that wrap onto more lines; the
-// account's own are in the primary color. A click on a chip chooses the
-// reaction or takes it back, as in Telegram Desktop; the paid one is left to
-// clients that pay.
+// reactions draws the reactions to m as chips that wrap onto more lines, in
+// Telegram Desktop's order; the account's own are in the primary color. A
+// click on a chip chooses the reaction or takes it back, as in Telegram
+// Desktop; the paid one is left to clients that pay.
 func (p *chatPage) reactions(gtx layout.Context, r *messageRow, m model.Message, animate bool) layout.Dimensions {
-	reactions := m.Reactions
+	var rank func(model.Reaction) (int, bool)
+	if orderer, ok := p.source.(model.ReactionOrderer); ok {
+		rank = orderer.ReactionRank
+	}
+	r.shownReactions = model.ShownReactions(r.shownReactions, m.Reactions, rank)
+	reactions := r.shownReactions
 	sc := scheme(gtx)
 	maxWidth := gtx.Constraints.Max.X
 	gap := gtx.Dp(6)
