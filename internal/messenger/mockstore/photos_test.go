@@ -11,8 +11,9 @@ import (
 
 func TestDemoPhotosAndGallery(t *testing.T) {
 	s := New(time.Now(), 0)
-	photos, e := s.ChatPhotos(context.Background(), 2, 1<<30, -1, 100)
-	if e != nil || len(photos) < 10 {
+	page, e := s.ChatPhotos(context.Background(), 2, 1<<30, -1, 100)
+	photos := page.Messages
+	if e != nil || len(photos) < 10 || page.Total != len(photos) || page.More {
 		t.Fatalf("%d photos, %v", len(photos), e)
 	}
 	first := photos[0].Media
@@ -30,7 +31,7 @@ func TestDemoPhotosAndGallery(t *testing.T) {
 		}
 	}
 	newer, _ := s.ChatPhotos(context.Background(), 2, photos[2].Key.MessageID, 1, 2)
-	if len(newer) != 2 || newer[0].Key != photos[3].Key {
+	if len(newer.Messages) != 2 || newer.Messages[0].Key != photos[3].Key || !newer.More {
 		t.Fatal("newer page")
 	}
 }

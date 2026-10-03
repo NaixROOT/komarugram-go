@@ -477,6 +477,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 // window is.
 func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *appwindow.Window) *chatPage {
 	p := newChatPage(source, w.Invalidate)
+	p.membershipNotice = a.chats.toast.Show
 	p.frozen = a.frozen
 	p.chats = store.Chats
 	p.images = &a.images
@@ -890,6 +891,9 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 		a.updateMiniApps(a.history, a.catalog())
 	}
 	a.window.SetCaptureExcluded(a.preferences.Global().StreamerMode)
+	// Leaving can remove the selected dialog before its history is laid out.
+	// Drain the completed operation even when the right pane is now empty.
+	a.history.updateMembership(a.selected, a.catalog())
 	a.history.filter = a.messageFilter()
 	if a.comments != nil {
 		a.comments.filter = a.history.filter

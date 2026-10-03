@@ -63,10 +63,16 @@ func main() {
 	profileDir := flag.String("profile-dir", "profiles", "directory for explicitly exported profiler artifacts")
 	profileExport := flag.Duration("profile-export", 0, "automatically export JSON at this interval (e.g. 2s); enables collection without profiler UI")
 	profileCapture := flag.String("profile-capture", "", "capture profiles without GUI: comma-separated cpu,heap,allocs,trace,goroutine")
+	scrollLog := flag.String("scroll-log", "", "write every scroll event of the lists to this file, for measuring what the wheel and the touchpad send")
 	noIntegrations := flag.Bool("no-integrations", false, "do not look for FFmpeg, mpv, VLC or a browser on the system; only the paths set in the settings are used, as on a machine without them")
 	flag.Parse()
 	if *noIntegrations {
 		program.SetSearching(false)
+	}
+	if *scrollLog != "" {
+		if err := logScroll(*scrollLog); err != nil {
+			log.Printf("scroll log: %v", err)
+		}
 	}
 	// fail ends the process telling why: in the log and, as a program
 	// without a console shows no log, in a message box. -check is run from a

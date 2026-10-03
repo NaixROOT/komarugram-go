@@ -49,7 +49,7 @@ const (
 	viewerThumbGap  = unit.Dp(6)
 	viewerArrow     = unit.Dp(48)
 	viewerSide      = unit.Dp(72)
-	viewerPage      = 60 // photos read from the cache per request
+	viewerPage      = 60 // photos asked for per request
 	viewerPrefetch  = 8  // read more when this close to a loaded end
 	viewerFullLimit = 4  // decoded full-size photos: current, neighbours, the one before
 	// viewerRingDelay keeps a photo that decodes quickly from flashing a
@@ -59,10 +59,12 @@ const (
 
 // photoViewer shows a chat's photos over the whole window: the current one
 // at its own size, as far as the window allows, arrows to its neighbours and
-// a strip of thumbnails below. It reads only what the local cache has.
+// a strip of thumbnails below. It pages the chat's photos, or the photos of
+// its profile, as the strip comes near either end.
 type photoViewer struct {
 	source     model.ConversationStore
 	gallery    model.PhotoGallery
+	profiles   model.ProfilePhotoSource
 	images     *imageOps
 	invalidate func()
 	// full decodes the photo on screen for the space it has; thumbs decodes
@@ -87,7 +89,15 @@ type photoViewer struct {
 	cancel    context.CancelFunc
 	items     []model.Message // sorted by message ID
 	loading   [2]bool         // older, newer
-	exhausted [2]bool
+	exhausted [2]bool         // nothing more is asked for on that side
+	// ended tells the sides the gallery is known to end at, which, with
+	// total, the count of all its photos, places the photos shown in it.
+	ended [2]bool
+	total int
+	// profile tells that items are the photos of the chat's profile,
+	// paged from offset, not its photo messages.
+	profile bool
+	offset  string
 
 	backdrop, picture, prev, next, close, detach widget.Clickable
 	// save and copy keep the photo on screen; kept brings what they gave,
@@ -98,7 +108,7 @@ type photoViewer struct {
 	zoom       viewerZoom
 	// popout, when set, is what the button beside ✕ calls to show the
 	// photos in a window of their own; the viewer then closes.
-	popout func(chat int64, current model.Message, known []model.Message)
+	popout func(chat int64, current model.Message, known photoList)
 	// standalone is set in such a window: the background does not close it.
 	standalone bool
 	// backdrop is the colour under the photo; a translucent window lets
@@ -129,9 +139,20 @@ type stripDrag struct {
 	last, moved, rest float32
 }
 
+// photoList is what a viewer knows of the photos it shows, for another one
+// to go on from, such as the viewer of a window of their own.
+type photoList struct {
+	items   []model.Message
+	total   int
+	ended   [2]bool
+	profile bool
+	offset  string
+}
+
 func newPhotoViewer(source model.ConversationStore, images *imageOps, invalidate func()) *photoViewer {
 	v := &photoViewer{source: source, images: images, invalidate: invalidate, thumbState: map[model.MessageID]*viewerThumbState{}, backdropColor: viewerBackdrop}
 	v.gallery, _ = source.(model.PhotoGallery)
+	v.profiles, _ = source.(model.ProfilePhotoSource)
 	v.full = chatmedia.NewSized(source, invalidate, viewerFullLimit, 4096)
 	v.mid = chatmedia.NewSized(source, invalidate, 3, 1024)
 	v.thumbs = chatmedia.NewSized(source, invalidate, 96, 256)
@@ -143,13 +164,25 @@ func newPhotoViewer(source model.ConversationStore, images *imageOps, invalidate
 // as those of the loaded history, so that the strip is not empty while the
 // cache is read.
 func (v *photoViewer) Open(chat int64, m model.Message, known []model.Message) {
+	v.openList(chat, m, photoList{items: known, profile: model.IsProfilePhoto(m.Key.MessageID)})
+}
+
+// openList shows photo m of chat among what list tells of the others.
+func (v *photoViewer) openList(chat int64, m model.Message, list photoList) {
 	v.mu.Lock()
 	if v.cancel != nil {
 		v.cancel()
 	}
 	v.session++
-	v.items = mergePhotos(mergePhotos(nil, []model.Message{m}), known)
-	v.loading, v.exhausted = [2]bool{}, [2]bool{v.gallery == nil || m.Key.MessageID < 0, v.gallery == nil || m.Key.MessageID < 0}
+	v.items = mergePhotos(mergePhotos(nil, []model.Message{m}), list.items)
+	v.total, v.ended, v.profile, v.offset = list.total, list.ended, list.profile, list.offset
+	pageless := v.gallery == nil || m.Key.MessageID < 0
+	if v.profile {
+		// The photos of a profile start at the one it shows now.
+		v.ended[0] = true
+		pageless = v.profiles == nil
+	}
+	v.loading, v.exhausted = [2]bool{}, [2]bool{pageless || v.ended[0], pageless || v.ended[1]}
 	v.ctx, v.cancel = context.WithCancel(context.Background())
 	ctx, session := v.ctx, v.session
 	first, last := v.items[0].Key.MessageID, v.items[len(v.items)-1].Key.MessageID
@@ -167,29 +200,16 @@ func (v *photoViewer) Open(chat int64, m model.Message, known []model.Message) {
 // first: at once, from what is known, and with the older ones added when
 // Telegram has told them. It tells whether the store has a photo of the chat.
 func (v *photoViewer) OpenProfile(chat int64) bool {
-	source, ok := v.source.(model.ProfilePhotoSource)
+	if v.profiles == nil {
+		return false
+	}
+	current, ok := v.profiles.ProfilePhoto(chat)
 	if !ok {
 		return false
 	}
-	current, ok := source.ProfilePhoto(chat)
-	if !ok {
-		return false
-	}
-	v.Open(chat, current, nil)
-	v.mu.Lock()
-	ctx, session := v.ctx, v.session
-	v.mu.Unlock()
-	go func() {
-		defer crash.Recover("profile photos", func(*crash.Panic) {})
-		page, err := source.ProfilePhotos(ctx, chat)
-		v.mu.Lock()
-		defer v.invalidate()
-		defer v.mu.Unlock()
-		// The photo shown stays as it is, already decoded; the rest is added.
-		if v.session == session && err == nil {
-			v.items = mergePhotos(v.items, page)
-		}
-	}()
+	// The photo shown stays as it is, already decoded: the first page's
+	// photo of the same place is not merged.
+	v.openList(chat, current, photoList{profile: true})
 	return true
 }
 
@@ -200,7 +220,7 @@ func (v *photoViewer) Close() {
 		v.cancel = nil
 	}
 	v.session++
-	v.items = nil
+	v.items, v.total, v.offset = nil, 0, ""
 	v.mu.Unlock()
 	v.open = false
 	// A closed viewer keeps no decoded pixels.
@@ -226,7 +246,8 @@ func (v *photoViewer) Release() {
 	v.thumbs.Release()
 }
 
-// fetch reads the next gallery page past anchor in the background.
+// fetch reads the next gallery page past anchor in the background; the
+// photos of a profile are paged from where the last page ended.
 func (v *photoViewer) fetch(ctx context.Context, session, dir int, anchor model.MessageID) {
 	side := (dir + 1) / 2
 	v.mu.Lock()
@@ -235,7 +256,7 @@ func (v *photoViewer) fetch(ctx context.Context, session, dir int, anchor model.
 		return
 	}
 	v.loading[side] = true
-	chat := v.chat
+	chat, profile, offset := v.chat, v.profile, v.offset
 	v.mu.Unlock()
 	go func() {
 		defer crash.Recover("photo gallery", func(*crash.Panic) {
@@ -245,7 +266,13 @@ func (v *photoViewer) fetch(ctx context.Context, session, dir int, anchor model.
 			}
 			v.mu.Unlock()
 		})
-		page, err := v.gallery.ChatPhotos(ctx, chat, anchor, dir, viewerPage)
+		var page model.PhotoPage
+		var err error
+		if profile {
+			page, err = v.profiles.ProfilePhotos(ctx, chat, offset, viewerPage)
+		} else {
+			page, err = v.gallery.ChatPhotos(ctx, chat, anchor, dir, viewerPage)
+		}
 		v.mu.Lock()
 		defer v.invalidate()
 		defer v.mu.Unlock()
@@ -253,9 +280,18 @@ func (v *photoViewer) fetch(ctx context.Context, session, dir int, anchor model.
 			return
 		}
 		v.loading[side] = false
-		// A failed page ends the strip there; photos already known stay available.
-		v.exhausted[side] = err != nil || len(page) < viewerPage
-		v.items = mergePhotos(v.items, page)
+		if err != nil {
+			// A failed page ends the strip there; photos already known stay available.
+			v.exhausted[side] = true
+			return
+		}
+		v.ended[side] = !page.More
+		v.exhausted[side] = v.ended[side]
+		if page.Total > 0 {
+			v.total = page.Total
+		}
+		v.offset = page.Next
+		v.items = mergePhotos(v.items, page.Messages)
 	}()
 }
 
@@ -273,6 +309,33 @@ func mergePhotos(items, add []model.Message) []model.Message {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Key.MessageID < items[j].Key.MessageID })
 	return items
+}
+
+// place is where photo i of items is in the whole gallery, and how many
+// photos it has, when that is known: counted from the end the gallery is
+// known to end at, as Telegram Desktop does. Without a total from Telegram
+// only a gallery read to both ends is counted.
+func (v *photoViewer) place(items []model.Message, i int) (n, amount int, ok bool) {
+	v.mu.Lock()
+	total, ended := v.total, v.ended
+	v.mu.Unlock()
+	if total == 0 {
+		if !ended[0] || !ended[1] {
+			return 0, 0, false
+		}
+		total = len(items)
+	}
+	// Photos that came after Telegram counted them are counted too.
+	amount = max(total, len(items))
+	switch {
+	case ended[0]:
+		n = i + 1
+	case ended[1]:
+		n = amount - (len(items) - 1 - i)
+	default:
+		return 0, 0, false
+	}
+	return n, amount, n >= 1 && n <= amount
 }
 
 func (v *photoViewer) snapshot() (items []model.Message, loading, exhausted [2]bool, ctx context.Context, session int) {
@@ -358,7 +421,10 @@ func (v *photoViewer) Layout(gtx layout.Context, l localization.Catalog, animate
 	}
 	if v.detach.Clicked(gtx) && v.popout != nil {
 		i := indexOf(items, v.current)
-		v.popout(v.chat, items[i], items)
+		v.mu.Lock()
+		list := photoList{items: items, total: v.total, ended: v.ended, profile: v.profile, offset: v.offset}
+		v.mu.Unlock()
+		v.popout(v.chat, items[i], list)
 		v.Close()
 		return
 	}
@@ -643,7 +709,11 @@ func (v *photoViewer) layoutBar(gtx layout.Context, items []model.Message, i int
 					gtx.Constraints.Min = image.Point{}
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return label(gtx, l.Format("viewer.position", map[string]string{"n": fmt.Sprint(i + 1), "amount": fmt.Sprint(len(items))}), token.TypestyleTitleSmall, white, 1)
+							title := l.T("viewer.photo")
+							if n, amount, ok := v.place(items, i); ok {
+								title = l.Format("viewer.position", map[string]string{"n": fmt.Sprint(n), "amount": fmt.Sprint(amount)})
+							}
+							return label(gtx, title, token.TypestyleTitleSmall, white, 1)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							// A profile photo known only locally has no date yet.

@@ -1,6 +1,10 @@
 package mockstore
 
-import "komarugram/internal/messenger/model"
+import (
+	"slices"
+
+	"komarugram/internal/messenger/model"
+)
 
 // demoReactions are the reactions the demo chats allow.
 var demoReactions = []string{"👍", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🎉", "🤩", "🤮", "💩", "🙏", "👌", "🕊", "🤡", "🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭", "💯", "🤣", "⚡", "🍌", "🏆"}
@@ -13,6 +17,16 @@ func (s *Store) ChatReactions(chat int64) ([]model.Reaction, int, bool) {
 		out[i] = model.Reaction{Emoji: e}
 	}
 	return out, 1, true
+}
+
+// ReactionRank implements model.ReactionOrderer with the order of the demo
+// reactions.
+func (s *Store) ReactionRank(r model.Reaction) (int, bool) {
+	if r.DocumentID != 0 || r.Paid {
+		return 0, false
+	}
+	i := slices.Index(demoReactions, r.Emoji)
+	return i, i >= 0
 }
 
 // ToggleReaction implements model.Reactor on the demo history.

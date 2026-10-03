@@ -15,6 +15,7 @@ import (
 	"gio-mw/token"
 	"gio-mw/wdk"
 
+	"gioui.org/f32"
 	"gioui.org/gesture"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
@@ -29,8 +30,9 @@ const (
 	// A wheel notch scrolls by wheelStep pixels over wheelDuration.
 	wheelStep     = 100
 	wheelDuration = 200 * time.Millisecond
-	// Scroll events smaller than this are precise (touchpads) and are
-	// applied at once, as Chromium does.
+	// Where the platform does not tell a wheel from a touchpad
+	// (pointer.Event.Wheel), scroll events smaller than this are taken
+	// for a touchpad's.
 	preciseBelow = 40
 
 	// pageFraction of the viewport is scrolled by a click on the track. The
@@ -55,12 +57,85 @@ const (
 var WheelScale = defaultWheelScale()
 
 func defaultWheelScale() float32 {
-	if runtime.GOOS != "android" && (runtime.GOOS == "linux" || runtime.GOOS == "freebsd" || runtime.GOOS == "openbsd") &&
-		os.Getenv("WAYLAND_DISPLAY") == "" {
+	if unixDesktop() && os.Getenv("WAYLAND_DISPLAY") == "" {
 		return 5
 	}
 	return 1
 }
+
+// TouchpadScale converts the distances of a touchpad, and of the kinetic
+// scrolling after it, to pixels, after WheelScale. Gio passes on the axis
+// values of Wayland as they are, libinput's units, which scroll several
+// times slower than other programs: Chromium multiplies them by 10, or by
+// 2.5 with its WaylandUnscaledTouchpadScrolling; lists here by 2.5. On X11
+// Gio makes 20 of a unit of XInput 2's smooth scrolling, the scrolling of a
+// wheel's notch, and xf86-input-libinput makes such a unit of 15 of
+// libinput's units: 2.5 pixels each there too take 0.375 of the 100 pixels
+// of a notch. Other platforms send pixels.
+var TouchpadScale = defaultTouchpadScale()
+
+func defaultTouchpadScale() float32 {
+	if unixDesktop() {
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			return 2.5
+		}
+		return 2.5 * 15 / wheelStep
+	}
+	return 1
+}
+
+// ContinuousScale is TouchpadScale for continuous scrolling
+// (pointer.Event.Continuous), which Wayland tells apart: a trackpoint's, in
+// the same units as a touchpad's. A trackpoint's scrolling stops when the
+// stick is let go, with nothing like the kinetic scrolling that carries a
+// touchpad's swipe on, and with a touchpad's scale it took too long to go
+// far; it is twice as fast. The factor was chosen, not measured.
+var ContinuousScale = 2 * TouchpadScale
+
+func unixDesktop() bool {
+	return runtime.GOOS == "linux" || runtime.GOOS == "freebsd" || runtime.GOOS == "openbsd"
+}
+
+// wheelKnown tells whether Gio tells a wheel's notches from a touchpad on
+// this platform (pointer.Event.Wheel): it does on X11, Wayland and Windows.
+var wheelKnown = unixDesktop() || runtime.GOOS == "windows"
+
+// NotchPixels is how far a wheel's notch scrolls a list, and what Pixels
+// gives for one on X11 and on Windows; on Wayland the compositor chooses
+// (150 on KDE Plasma).
+const NotchPixels = wheelStep
+
+// IsWheel tells whether scroll event e is of a wheel's notches, which glide,
+// rather than of a touchpad or of kinetic scrolling, which follow the
+// fingers at once.
+func IsWheel(e pointer.Event) bool {
+	if wheelKnown {
+		return e.Wheel
+	}
+	return math.Abs(float64(e.Scroll.X*WheelScale)) >= preciseBelow || math.Abs(float64(e.Scroll.Y*WheelScale)) >= preciseBelow
+}
+
+// Pixels is how far scroll event e scrolls a list, in pixels, the same on
+// every platform: about NotchPixels a wheel's notch, which X11 sends as two
+// events, and as far as the fingers went on a touchpad.
+func Pixels(e pointer.Event) f32.Point {
+	d := e.Scroll.Mul(WheelScale)
+	switch {
+	case IsWheel(e):
+	case e.Continuous:
+		d = d.Mul(ContinuousScale)
+	default:
+		d = d.Mul(TouchpadScale)
+	}
+	return d
+}
+
+// Trace, when set, is told of every scroll event a List receives: the event
+// as the platform sent it, the distance in pixels it scrolls the list by,
+// and whether that distance is applied at once, as a touchpad's, or
+// animated, as a wheel notch's. It is for measuring what each platform sends, and is called
+// on the goroutine of the window the list is in.
+var Trace func(e pointer.Event, distance float32, precise bool)
 
 // List is a layout.List with smooth wheel scrolling and an overlay
 // scrollbar: at the right edge of vertical lists, at the bottom of
@@ -259,12 +334,18 @@ func (l *List) update(gtx layout.Context) {
 			l.hovered = false
 		case pointer.Scroll:
 			l.stopPageGlide()
-			distance := e.Scroll.Y
-			if l.Axis == layout.Horizontal && e.Scroll.X != 0 {
-				distance = e.Scroll.X
+			d := Pixels(e)
+			distance := d.Y
+			if l.Axis == layout.Horizontal && d.X != 0 {
+				distance = d.X
 			}
-			distance *= WheelScale
-			if math.Abs(float64(distance)) < preciseBelow {
+			// A touchpad scrolls along with the fingers, at once; a wheel's
+			// notch glides.
+			precise := !IsWheel(e)
+			if Trace != nil {
+				Trace(e, distance, precise)
+			}
+			if precise {
 				l.stopWheel()
 				l.addOffset(distance)
 				l.lastActive = gtx.Now

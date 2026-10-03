@@ -23,7 +23,8 @@ type ProfilePhotoSource interface {
 	// without asking Telegram: the size the chat list has among its
 	// variants, so that something shows at once.
 	ProfilePhoto(chat int64) (Message, bool)
-	// ProfilePhotos asks for the photos of the chat's profile, the one it
-	// shows now first.
-	ProfilePhotos(ctx context.Context, chat int64) ([]Message, error)
+	// ProfilePhotos asks for a page of the photos of the chat's profile,
+	// the one it shows now first: from offset, the Next of the page before
+	// it, or from the first photo when offset is empty.
+	ProfilePhotos(ctx context.Context, chat int64, offset string, limit int) (PhotoPage, error)
 }

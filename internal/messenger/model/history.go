@@ -329,7 +329,20 @@ type MessageButton struct {
 // Sources may use Telegram search or an offline cache. A page is oldest
 // first: before it when dir is negative, after it otherwise.
 type PhotoGallery interface {
-	ChatPhotos(ctx context.Context, chat int64, anchor MessageID, dir, limit int) ([]Message, error)
+	ChatPhotos(ctx context.Context, chat int64, anchor MessageID, dir, limit int) (PhotoPage, error)
+}
+
+// PhotoPage is a page of a chat's photos or of the photos of its profile.
+type PhotoPage struct {
+	Messages []Message
+	// Total counts the photos of the whole gallery, 0 when it is not known,
+	// as for a page read from the offline cache.
+	Total int
+	// More tells whether there are photos past the page, in its direction.
+	More bool
+	// Next, for the photos of a profile, is where the page after this one
+	// starts; empty after the last one.
+	Next string
 }
 
 // ChatWatcher learns which chats are on screen, so that a store can keep

@@ -3,7 +3,10 @@
 package model
 
 import (
+	"cmp"
 	"context"
+	"math"
+	"slices"
 	"time"
 )
 
@@ -28,7 +31,9 @@ func (r Reaction) Same(o Reaction) bool {
 // as Telegram Desktop does (MessageReactions::add and remove): a chosen
 // reaction is taken back; otherwise the account keeps the first limit-1 of
 // its own in their order and lets the rest go, and r is chosen and moves to
-// the end. reactions itself is not changed.
+// the end. The list thus keeps the account's reactions in the order it chose
+// them; a message shows them in the order of ShownReactions. reactions
+// itself is not changed.
 func ToggleReaction(reactions []Reaction, r Reaction, limit int) []Reaction {
 	for _, one := range reactions {
 		if one.Same(r) && one.Chosen {
@@ -72,6 +77,58 @@ func takeBack(reactions []Reaction, r Reaction) []Reaction {
 		}
 		out = append(out, one)
 	}
+	return out
+}
+
+// ReactionOrderer knows the order of Telegram's list of reactions
+// (messages.getAvailableReactions), which orders the reactions under a
+// message that have as many votes.
+type ReactionOrderer interface {
+	// ReactionRank is r's place in that list; ok is false when r is not
+	// in it, or the list is not known yet.
+	ReactionRank(r Reaction) (rank int, ok bool)
+}
+
+// ShownReactions returns reactions in the order a message shows them, as
+// Telegram Desktop does (InlineList::layoutButtons): the paid one first,
+// then by the votes of others, so that the account's own vote never moves
+// a reaction, then by rank (nil when unknown); those without a rank go
+// after the others, by their emoji. The result is appended to buf[:0], and
+// reactions itself is not changed.
+func ShownReactions(buf, reactions []Reaction, rank func(Reaction) (int, bool)) []Reaction {
+	out := append(buf[:0], reactions...)
+	others := func(r Reaction) int {
+		if r.Chosen {
+			return r.Count - 1
+		}
+		return r.Count
+	}
+	place := func(r Reaction) int {
+		if rank != nil {
+			if n, ok := rank(r); ok {
+				return n
+			}
+		}
+		return math.MaxInt
+	}
+	slices.SortStableFunc(out, func(a, b Reaction) int {
+		if a.Paid != b.Paid {
+			if a.Paid {
+				return -1
+			}
+			return 1
+		}
+		if c := cmp.Compare(others(b), others(a)); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(place(a), place(b)); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.Emoji, b.Emoji); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.DocumentID, b.DocumentID)
+	})
 	return out
 }
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -36,6 +37,56 @@ func TestToggleReaction(t *testing.T) {
 		}
 		if !reflect.DeepEqual(before, c.before) {
 			t.Errorf("%s: the list given was changed", c.name)
+		}
+	}
+}
+
+func TestShownReactions(t *testing.T) {
+	heart, like, fire, party := Reaction{Emoji: "❤"}, Reaction{Emoji: "👍"}, Reaction{Emoji: "🔥"}, Reaction{Emoji: "🎉"}
+	custom := Reaction{DocumentID: 7}
+	with := func(r Reaction, count int, chosen bool) Reaction { r.Count, r.Chosen = count, chosen; return r }
+	order := []Reaction{like, heart, fire, party}
+	rank := func(r Reaction) (int, bool) {
+		for i, one := range order {
+			if one.Same(r) {
+				return i, true
+			}
+		}
+		return 0, false
+	}
+	list := []Reaction{with(custom, 2, false), with(heart, 2, false), with(fire, 5, true), with(Reaction{Paid: true}, 1, false), with(like, 2, true), with(party, 4, false)}
+	want := []Reaction{with(Reaction{Paid: true}, 1, false), with(fire, 5, true), with(party, 4, false), with(heart, 2, false), with(custom, 2, false), with(like, 2, true)}
+	if got := ShownReactions(nil, list, rank); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	// Without ranks, by emoji.
+	if got := ShownReactions(nil, []Reaction{with(like, 1, false), with(heart, 1, false)}, nil); got[0].Emoji != "❤" {
+		t.Errorf("unranked: got %+v", got)
+	}
+
+	// The account's own vote never moves a reaction: the bug was a reaction
+	// that went to the end when chosen, and back when Telegram answered.
+	shown := func(list []Reaction) []Reaction {
+		out := ShownReactions(nil, list, rank)
+		for i := range out {
+			out[i].Count, out[i].Chosen = 0, false
+		}
+		return out
+	}
+	for _, limit := range []int{1, 3} {
+		before := []Reaction{with(heart, 3, false), with(like, 3, false), with(fire, 1, false), with(party, 2, true)}
+		for _, r := range []Reaction{heart, like, fire, party} {
+			after := ToggleReaction(before, r, limit)
+			if !reflect.DeepEqual(shown(after), shown(before)) {
+				t.Errorf("limit %d, toggling %s: %+v became %+v", limit, r.Emoji, shown(before), shown(after))
+			}
+			// And as Telegram sends it back, by votes.
+			server := append([]Reaction(nil), after...)
+			slices.SortStableFunc(server, func(a, b Reaction) int { return b.Count - a.Count })
+			if !reflect.DeepEqual(shown(server), shown(before)) {
+				t.Errorf("limit %d, toggling %s: Telegram's %+v shown as %+v", limit, r.Emoji, server, shown(server))
+			}
+			before = after
 		}
 	}
 }

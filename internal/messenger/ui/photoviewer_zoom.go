@@ -7,6 +7,8 @@ import (
 	"math"
 	"time"
 
+	"gio-mw/widget/scroll"
+
 	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
@@ -18,19 +20,12 @@ import (
 )
 
 const (
-	// zoomStep is the scale change of one wheel notch, which Gio reports as
-	// 10 units of scroll on X11 and Wayland.
-	zoomStep  = 1.25
-	wheelUnit = 10
-	zoomMax   = 8 // photo pixels shown 8 screen pixels wide at most
+	// zoomStep is the scale change of one wheel notch, scroll.NotchPixels.
+	zoomStep = 1.25
+	zoomMax  = 8 // photo pixels shown 8 screen pixels wide at most
 	// zoomTau is the time constant of the smooth zoom: the scale covers 63%
 	// of the way to its target in that time, 95% in three times that.
 	zoomTau = 70 * time.Millisecond
-	// wheelQuiet follows a switch by the wheel: scroll in that time is
-	// dropped, so that one flick of a touchpad does not skip several photos.
-	wheelQuiet = 200 * time.Millisecond
-	// wheelPan is how far one unit of scroll moves an enlarged photo.
-	wheelPan = 5
 )
 
 // viewerZoom places the photo on screen once it is zoomed. Scale is screen
@@ -51,12 +46,13 @@ type viewerZoom struct {
 		last              f32.Point
 		moved             float32
 	}
-	wheel      float32
-	wheelQuiet time.Time
+	// wheel is the scroll, in pixels, not yet turned into a switch of
+	// photos; it outlives the switch, as a touchpad goes on.
+	wheel float32
 }
 
 func (z *viewerZoom) reset() {
-	*z = viewerZoom{wheelQuiet: z.wheelQuiet}
+	*z = viewerZoom{wheel: z.wheel}
 }
 
 func (z *viewerZoom) active() bool { return z.scale > 0 }
@@ -231,37 +227,39 @@ func (v *photoViewer) zoomEvents(gtx layout.Context, items []model.Message, i in
 
 func (v *photoViewer) wheel(gtx layout.Context, e pointer.Event, items []model.Message, i int, center f32.Point, native, view image.Point, fit float32) {
 	z := &v.zoom
+	d := scroll.Pixels(e)
 	if e.Modifiers.Contain(key.ModShortcut) {
 		if native == (image.Point{}) {
 			return
 		}
-		factor := float32(math.Pow(zoomStep, float64(-e.Scroll.Y/wheelUnit)))
+		factor := float32(math.Pow(zoomStep, float64(-d.Y/scroll.NotchPixels)))
 		z.zoomBy(min(max(factor, .5), 2), e.Position.Sub(center), fit)
 		return
 	}
 	if z.overflows(native, view) {
-		z.panBy(e.Scroll.Mul(-wheelPan), native, view)
+		z.panBy(d.Mul(-1), native, view)
 		return
 	}
-	if gtx.Now.Before(z.wheelQuiet) {
-		return
+	// A photo for each notch of the wheel, at once however fast it turns, as
+	// in Telegram Desktop, and for each notch's distance on a touchpad.
+	step := d.Y
+	if math.Abs(float64(d.X)) > math.Abs(float64(step)) {
+		step = d.X
 	}
-	d := e.Scroll.Y
-	if math.Abs(float64(e.Scroll.X)) > math.Abs(float64(d)) {
-		d = e.Scroll.X
-	}
-	if d*z.wheel < 0 {
+	if step*z.wheel < 0 {
 		z.wheel = 0 // a change of direction starts over
 	}
-	z.wheel += d
-	if math.Abs(float64(z.wheel)) < wheelUnit {
+	z.wheel += step
+	n := int(z.wheel / scroll.NotchPixels)
+	if n == 0 {
 		return
 	}
-	step := 1
-	if z.wheel < 0 {
-		step = -1
+	if scroll.IsWheel(e) {
+		// A notch larger than NotchPixels, as on KDE Plasma, is one photo
+		// still; what is left of it would add up to skipped photos.
+		z.wheel = 0
+	} else {
+		z.wheel -= float32(n) * scroll.NotchPixels
 	}
-	z.wheel = 0
-	z.wheelQuiet = gtx.Now.Add(wheelQuiet)
-	v.show(items, i+step, true)
+	v.show(items, min(max(i+n, 0), len(items)-1), true)
 }

@@ -96,7 +96,7 @@ type voiceResult struct {
 // canRecord reports whether the composer offers to record: its text is
 // empty and nothing is on its way.
 func (c *messageComposer) canRecord(d *messageDraft) bool {
-	return c.voice.record != nil && c.source != nil && c.recording == nil && !d.sending && d.pending == nil && d.editor.Text() == ""
+	return c.permissions(c.chat).Allows(model.SendVoice) && c.voice.record != nil && c.source != nil && c.recording == nil && !d.sending && d.pending == nil && d.editor.Text() == ""
 }
 
 // ffmpegPath is the FFmpeg the user set, or "" for the one on PATH.
@@ -110,6 +110,9 @@ func (c *messageComposer) ffmpegPath() string {
 // startRecording starts recording a voice message for the open chat.
 // Without an FFmpeg, it asks for an audio file to send instead.
 func (c *messageComposer) startRecording(l localization.Catalog) {
+	if !c.permissions(c.chat).Allows(model.SendVoice) {
+		return
+	}
 	d := c.draft(c.chat)
 	rec, err := c.voice.record(c.ctx, c.ffmpegPath())
 	if errors.Is(err, voice.ErrNoFFmpeg) {

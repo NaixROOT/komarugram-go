@@ -38,6 +38,15 @@ type Event struct {
 	Position f32.Point
 	// Scroll is the scroll amount, if any.
 	Scroll f32.Point
+	// Wheel tells that Scroll comes from the notches of a mouse wheel,
+	// rather than from a touchpad or from kinetic scrolling, where the
+	// platform tells them apart: X11, Wayland and Windows do.
+	Wheel bool
+	// Continuous tells that Scroll comes from the motion of a device, not
+	// from fingers or a wheel: a trackpoint's, or a mouse's with a button
+	// held, which libinput calls continuous scrolling; or from the kinetic
+	// scrolling after it. Wayland tells it; other platforms leave it unset.
+	Continuous bool
 	// Modifiers is the set of active modifiers when
 	// the mouse button was pressed.
 	Modifiers key.Modifiers

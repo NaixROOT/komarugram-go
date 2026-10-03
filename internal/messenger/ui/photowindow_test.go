@@ -41,9 +41,10 @@ func TestPhotoWindowOpensAndClosesWithItsAccount(t *testing.T) {
 	if a.viewer.popout == nil {
 		t.Fatal("no window button with a host that opens windows")
 	}
-	photos, _ := store.ChatPhotos(t.Context(), 2, 1<<30, -1, 100)
+	page, _ := store.ChatPhotos(t.Context(), 2, 1<<30, -1, 100)
+	photos := page.Messages
 	a.history.chat = 2
-	a.viewer.popout(2, photos[3], photos)
+	a.viewer.popout(2, photos[3], photoList{items: photos})
 	if len(specs) != 1 || specs[0].Options.Title != "Фото — Анна Смирнова" {
 		t.Fatalf("opened %+v", specs)
 	}

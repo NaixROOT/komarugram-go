@@ -136,10 +136,7 @@ func (s *Store) refreshReference(ctx context.Context, m model.Message) error {
 		return nil
 	}
 	if model.IsProfilePhoto(m.Key.MessageID) {
-		// A profile photo is no message: asking for the photos again
-		// brings the file references of all of them.
-		_, err := s.ProfilePhotos(ctx, m.Key.ChatID)
-		return err
+		return s.refreshProfilePhoto(ctx, api, peer, ref)
 	}
 	if ref.Gift {
 		chat := ref.GiftChat
@@ -245,14 +242,16 @@ func (b *cappedFile) WriteAt(p []byte, off int64) (int, error) {
 }
 
 // ChatPhotos pages the server photo index; the local cache remains available offline.
-func (s *Store) ChatPhotos(ctx context.Context, chat int64, anchor model.MessageID, dir, limit int) ([]model.Message, error) {
+// A page of the cache tells no total, and has more photos when it is full.
+func (s *Store) ChatPhotos(ctx context.Context, chat int64, anchor model.MessageID, dir, limit int) (model.PhotoPage, error) {
 	page, err := s.searchMedia(ctx, chat, model.SharedPhotos, anchor, dir, limit)
 	if err == nil {
 		sort.Slice(page.Messages, func(i, j int) bool { return page.Messages[i].Key.MessageID < page.Messages[j].Key.MessageID })
-		return page.Messages, nil
+		return model.PhotoPage{Messages: page.Messages, Total: page.Total, More: page.More}, nil
 	}
 	if cache := s.Cache(); cache != nil {
-		return cache.Photos(ctx, chat, int(anchor), dir, limit)
+		photos, err := cache.Photos(ctx, chat, int(anchor), dir, limit)
+		return model.PhotoPage{Messages: photos, More: len(photos) >= limit}, err
 	}
-	return nil, err
+	return model.PhotoPage{}, err
 }

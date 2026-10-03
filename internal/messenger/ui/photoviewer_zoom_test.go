@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"gio-mw/widget/scroll"
+
 	"gioui.org/f32"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
@@ -82,9 +84,24 @@ func TestZoomOffsetKeepsPhotoOverView(t *testing.T) {
 	}
 }
 
-func (h *viewerHarness) scroll(pos f32.Point, dy float32, mods key.Modifiers) {
-	h.router.Queue(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: pos, Scroll: f32.Pt(0, dy), Modifiers: mods})
+// scroll turns the wheel by notches at pos, at once.
+func (h *viewerHarness) scroll(pos f32.Point, notches float32, mods key.Modifiers) {
+	h.router.Queue(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: pos, Scroll: f32.Pt(0, notches*scroll.NotchPixels), Modifiers: mods, Wheel: true})
 	h.frame()
+}
+
+// swipe scrolls a touchpad by dy pixels at pos.
+func (h *viewerHarness) swipe(pos f32.Point, dy float32) {
+	h.router.Queue(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: pos, Scroll: f32.Pt(0, dy)})
+	h.frame()
+}
+
+// fixedScrollScales makes a notch scroll.NotchPixels, and a touchpad's
+// pixels pixels, whatever the platform the test runs on.
+func fixedScrollScales(t *testing.T) {
+	wheel, touchpad := scroll.WheelScale, scroll.TouchpadScale
+	scroll.WheelScale, scroll.TouchpadScale = 1, 1
+	t.Cleanup(func() { scroll.WheelScale, scroll.TouchpadScale = wheel, touchpad })
 }
 
 func (h *viewerHarness) drag(from, to f32.Point, steps int) {
@@ -108,27 +125,49 @@ func (h *viewerHarness) settle() {
 // Layout at 800×600: the view spans y 56…516, the side zones x 0…72 and
 // 728…800, the ✕ is centred at 768, 28 and the window button at 720, 28.
 func TestPhotoViewerWheelZoomAndSides(t *testing.T) {
+	fixedScrollScales(t)
 	h := newViewerHarness(t)
 	s := h.store
 	h.viewer.Open(1, s.photos[14], s.photos)
 	h.frame()
 
-	// A notch of the wheel switches; the rest of a touchpad flick does not.
-	h.scroll(f32.Pt(400, 300), wheelUnit, 0)
+	// Each notch of the wheel switches at once, however fast they come, as
+	// in Telegram Desktop.
+	h.scroll(f32.Pt(400, 300), 1, 0)
 	if h.viewer.current != 160 {
 		t.Fatalf("wheel down showed %d", h.viewer.current)
 	}
-	for range 5 {
-		h.scroll(f32.Pt(400, 300), 4, 0)
+	h.scroll(f32.Pt(400, 300), 1, 0)
+	h.scroll(f32.Pt(400, 300), 1, 0)
+	if h.viewer.current != 180 {
+		t.Fatalf("two more notches at once showed %d, want 180", h.viewer.current)
 	}
+	// Windows joins the notches of a fast wheel into one event.
+	h.scroll(f32.Pt(400, 300), -2, 0)
 	if h.viewer.current != 160 {
-		t.Fatalf("one flick switched to %d", h.viewer.current)
+		t.Fatalf("two joined notches up showed %d, want 160", h.viewer.current)
 	}
-	h.now = h.now.Add(wheelQuiet)
-	h.scroll(f32.Pt(400, 300), -wheelUnit, 0)
-	if h.viewer.current != 150 {
-		t.Fatalf("wheel up showed %d", h.viewer.current)
+	// X11 sends a notch as two halves; KDE Plasma as one and a half notches,
+	// still one photo each.
+	h.scroll(f32.Pt(400, 300), .5, 0)
+	h.scroll(f32.Pt(400, 300), .5, 0)
+	h.scroll(f32.Pt(400, 300), 1.5, 0)
+	h.scroll(f32.Pt(400, 300), 1.5, 0)
+	if h.viewer.current != 190 {
+		t.Fatalf("two halves and two notches of KDE Plasma showed %d, want 190", h.viewer.current)
 	}
+	// A touchpad switches each notch's distance, what is left kept.
+	for range 7 {
+		h.swipe(f32.Pt(400, 300), -30)
+	}
+	if h.viewer.current != 170 {
+		t.Fatalf("a swipe of 210 px up showed %d, want 170", h.viewer.current)
+	}
+	h.swipe(f32.Pt(400, 300), -90)
+	if h.viewer.current != 160 {
+		t.Fatalf("90 px more showed %d, want 160", h.viewer.current)
+	}
+	h.scroll(f32.Pt(400, 300), -1, 0)
 
 	// Anywhere in the side zones switches, not only on the arrow.
 	h.click(20, 70)
@@ -143,7 +182,7 @@ func TestPhotoViewerWheelZoomAndSides(t *testing.T) {
 	// Ctrl with the wheel zooms around the pointer and decodes the original.
 	fit := fitScale(image.Pt(1600, 1200), image.Pt(656, 460))
 	for range 3 {
-		h.scroll(f32.Pt(500, 200), -wheelUnit, key.ModCtrl)
+		h.scroll(f32.Pt(500, 200), -1, key.ModCtrl)
 	}
 	h.settle()
 	if want := fit * zoomStep * zoomStep * zoomStep; math.Abs(float64(h.viewer.zoom.scale-want)) > 1e-4 || h.viewer.current != 150 {
@@ -165,7 +204,7 @@ func TestPhotoViewerWheelZoomAndSides(t *testing.T) {
 		t.Fatal("a drag closed or switched the viewer")
 	}
 	before = h.viewer.zoom.offset
-	h.scroll(f32.Pt(400, 300), wheelUnit, 0)
+	h.scroll(f32.Pt(400, 300), 1, 0)
 	if h.viewer.current != 150 || h.viewer.zoom.offset.Y >= before.Y {
 		t.Fatalf("wheel over an enlarged photo: current %d, offset %v → %v", h.viewer.current, before, h.viewer.zoom.offset)
 	}
@@ -198,7 +237,7 @@ func TestPhotoViewerOpensInWindow(t *testing.T) {
 	s := h.store
 	var popped []model.Message
 	var current model.Message
-	h.viewer.popout = func(chat int64, m model.Message, known []model.Message) { current, popped = m, known }
+	h.viewer.popout = func(chat int64, m model.Message, known photoList) { current, popped = m, known.items }
 	h.viewer.Open(1, s.photos[14], s.photos)
 	h.frame()
 	h.click(720, 28)

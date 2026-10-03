@@ -42,6 +42,8 @@ type galleryStore struct {
 	// hold, when set, keeps originals downloading until it is closed.
 	hold    chan struct{}
 	encoded map[image.Point][]byte
+	// cached pages tell no total, as those of the offline cache.
+	cached bool
 }
 
 func newGalleryStore() *galleryStore {
@@ -53,17 +55,23 @@ func newGalleryStore() *galleryStore {
 	return s
 }
 
-func (s *galleryStore) ChatPhotos(_ context.Context, chat int64, anchor model.MessageID, dir, limit int) ([]model.Message, error) {
+func (s *galleryStore) ChatPhotos(_ context.Context, chat int64, anchor model.MessageID, dir, limit int) (model.PhotoPage, error) {
 	var out []model.Message
 	for _, m := range s.photos {
 		if dir < 0 && m.Key.MessageID < anchor || dir > 0 && m.Key.MessageID > anchor {
 			out = append(out, m)
 		}
 	}
-	if dir < 0 {
-		return out[max(0, len(out)-limit):], nil
+	page := model.PhotoPage{Total: len(s.photos), More: len(out) > limit}
+	if s.cached {
+		page.Total = 0
 	}
-	return out[:min(len(out), limit)], nil
+	if dir < 0 {
+		page.Messages = out[max(0, len(out)-limit):]
+	} else {
+		page.Messages = out[:min(len(out), limit)]
+	}
+	return page, nil
 }
 
 func (s *galleryStore) Media(ctx context.Context, m model.Message) ([]byte, error) {
@@ -385,5 +393,69 @@ func TestPhotoViewerSavesAndCopies(t *testing.T) {
 	protected.NoForwards = true
 	if canKeep(protected) {
 		t.Fatal("a protected photo may be kept")
+	}
+}
+
+// The header places the photo in the whole gallery, as Telegram tells its
+// count, from the end the gallery is known to end at, as Telegram Desktop
+// does; until an end is reached it says only that this is a photo.
+func TestPhotoViewerPlacesPhotoInGallery(t *testing.T) {
+	h := newViewerHarness(t)
+	s := h.store
+	// 200 photos: more than one page past either side of the middle.
+	s.photos = nil
+	for id := 10; id <= 2000; id += 10 {
+		s.photos = append(s.photos, model.Message{Key: model.MessageKey{ChatID: 1, MessageID: model.MessageID(id)}, Kind: model.MessagePhoto, Media: &model.MessageMedia{ID: fmt.Sprintf("p%d/w", id), Width: 160, Height: 120}})
+	}
+	place := func() string {
+		items, _, _, _, _ := h.viewer.snapshot()
+		n, amount, ok := h.viewer.place(items, indexOf(items, h.viewer.current))
+		if !ok {
+			return "unknown"
+		}
+		return fmt.Sprintf("%d of %d", n, amount)
+	}
+
+	// The newest photo: its side ends at once, and the older pages count
+	// back from it.
+	h.viewer.Open(1, s.photos[199], nil)
+	h.until("the first pages", func() bool { return h.count() > 1 })
+	h.until("the newer side to end", func() bool { _, _, exhausted, _, _ := h.viewer.snapshot(); return exhausted[1] })
+	if got := place(); got != "200 of 200" {
+		t.Fatalf("newest photo: %s", got)
+	}
+	h.key(key.NameLeftArrow)
+	if got := place(); got != "199 of 200" {
+		t.Fatalf("the one before it: %s", got)
+	}
+
+	// A photo in the middle, neither end reached: no place yet.
+	h.viewer.Open(1, s.photos[99], nil)
+	h.until("the first pages", func() bool { return h.count() == 121 })
+	if got := place(); got != "unknown" {
+		t.Fatalf("middle photo: %s", got)
+	}
+	// Going to the oldest loaded photo reads the older end, and places it.
+	h.key(key.NameHome)
+	h.until("the older end", func() bool { _, _, exhausted, _, _ := h.viewer.snapshot(); return exhausted[0] })
+	h.key(key.NameHome)
+	if got := place(); got != "1 of 200" {
+		t.Fatalf("oldest photo: %s", got)
+	}
+
+	// Pages of the cache tell no total: only a gallery read to both ends is
+	// counted.
+	s.cached = true
+	h.viewer.Open(1, s.photos[199], nil)
+	h.until("the first pages", func() bool { return h.count() > 1 })
+	if got := place(); got != "unknown" {
+		t.Fatalf("cached newest photo: %s", got)
+	}
+	s.photos = s.photos[:30]
+	h.viewer.Open(1, s.photos[29], nil)
+	h.until("the whole gallery", func() bool { return h.count() == 30 })
+	h.until("both ends", func() bool { _, _, exhausted, _, _ := h.viewer.snapshot(); return exhausted[0] && exhausted[1] })
+	if got := place(); got != "30 of 30" {
+		t.Fatalf("cached gallery read whole: %s", got)
 	}
 }

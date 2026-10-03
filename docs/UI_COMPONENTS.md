@@ -413,3 +413,44 @@ new piece sits next to its neighbours.
 - **The app itself.** `go run ./cmd/messenger -demo` runs without an account.
   On Linux under X11, `xdotool` drives a window (`mousemove --window … click`)
   and `xfce4-screenshooter -w` saves the active one.
+
+## Composer permissions
+
+`model.SendPermissionsSource` separates default group bans from personal
+restrictions and their expiry. The Telegram store reads every sending flag of
+`chatBannedRights`, exempts group admins, and requires `post_messages` in
+broadcast channels. Full peer refreshes supply the linked discussion group and
+boost exemptions. Unknown group rights from old caches do not grant permission.
+
+The composer preserves drafts while permissions change, disables individual
+picker tabs and the microphone, and replaces forbidden text input with its
+restriction and expiry. Media captions remain available when only plain text is
+restricted. Files are checked in the selected upload mode (music remains music
+in document mode); errors appear in the file dialog's toast. `Store.Send` checks
+again before uploading anything. The channel bar has a local notification
+placeholder and opens the linked discussion without joining it.
+
+Render variants: `COMPOSER_VIEW=channel-readonly`, `restricted-text`, and
+`restricted-media`, with `COMPOSER_PNG`; included in `cmd/render-all`.
+
+`model.MembershipStore` tracks membership separately from send permissions. A
+nonmember channel shows Join instead of the local notification placeholder.
+The header menu offers a destructive Leave action for members of groups and
+channels, with a confirmation. Joining and leaving apply returned updates and
+change the dialog list only after server acceptance; cached history is retained.
+
+Before an owner leaves, `messages.getFutureChatCreatorAfterLeave` supplies the
+successor for the warning: transfer after seven days in channels/supergroups,
+immediately in basic groups. The store refreshes and rechecks this plan on
+confirmation. RPC errors from the preflight use Telegram's ordinary leave flow;
+transport errors do not bypass it. Choosing another successor requires the
+ownership-transfer flow in Telegram Desktop for now. Leaving never calls the
+methods that delete a group/channel or revoke history for everyone.
+
+Peer display metadata (badges, forum kind and known member count) is cached
+independently of membership. Joining, receiving a first message, or rebuilding
+a search result all use the same metadata conversion; an omitted count is not
+zero. Full peer refreshes can change or clear these facts without overwriting
+unread counts, pins, notification settings or message previews. Leave notices
+use the operation's captured channel/group kind and are delivered to the chat
+list, which remains visible after the dialog is removed.

@@ -31,13 +31,19 @@ type peerRecord struct {
 	Name     string
 	Photo    *avatarRecord
 	// Rights is what the account may do in a group or channel.
-	Rights peerRights `json:",omitempty"`
+	Rights   peerRights   `json:",omitempty"`
+	Metadata peerMetadata `json:",omitempty"`
 	// Username is a public channel's or supergroup's, for links.
 	Username string `json:",omitempty"`
 }
 
 // peerRights are what MessageRights and CanSend need of a peer.
 type peerRights struct {
+	Known, Admin, Gigagroup, Unrestricted bool
+	Creator                               bool
+	Default, Personal                     model.SendKind
+	Until, DiscussionID                   int64
+	HasDiscussion                         bool
 	// NoForwards: the chat protects its content.
 	NoForwards bool `json:",omitempty"`
 	// Broadcast: a channel, not a supergroup.
@@ -245,7 +251,7 @@ func (s *Store) rememberPeers(users []tg.UserClass, chats []tg.ChatClass) {
 		if u, ok := u.(*tg.User); ok {
 			key := peerID(&tg.PeerUser{UserID: u.ID})
 			if old, ok := c.peers[key]; !u.Min || !ok {
-				c.peers[key] = peerRecord{ID: u.ID, Hash: u.AccessHash, Kind: "user", Name: userName(u), Rights: peerRights{Bot: u.Bot, Self: u.Self, Muted: u.Deleted}, Username: userUsername(u)}
+				c.peers[key] = peerRecord{ID: u.ID, Hash: u.AccessHash, Kind: "user", Name: userName(u), Rights: peerRights{Known: true, Bot: u.Bot, Self: u.Self, Muted: u.Deleted}, Username: userUsername(u), Metadata: peerMetadata{Known: true, Badges: userBadges(u, time.Now())}}
 			} else {
 				old.Name = userName(u)
 				if name := userUsername(u); name != "" {
@@ -265,22 +271,35 @@ func (s *Store) rememberPeers(users []tg.UserClass, chats []tg.ChatClass) {
 	for _, ch := range chats {
 		switch ch := ch.(type) {
 		case *tg.Chat:
-			admin := ch.Creator
-			if r, ok := ch.GetAdminRights(); ok {
-				admin = admin || r.DeleteMessages
-			}
-			muted := ch.Left || ch.Deactivated
-			if r, ok := ch.GetDefaultBannedRights(); ok && !ch.Creator {
-				muted = muted || r.SendMessages
-			}
-			c.peers[peerID(&tg.PeerChat{ChatID: ch.ID})] = peerRecord{ID: ch.ID, Kind: "chat", Name: ch.Title, Photo: chatAvatar(ch.Photo),
-				Rights: peerRights{NoForwards: ch.Noforwards, Delete: admin, Muted: muted}}
+			c.peers[peerID(&tg.PeerChat{ChatID: ch.ID})] = peerRecord{ID: ch.ID, Kind: "chat", Name: ch.Title, Photo: chatAvatar(ch.Photo), Rights: groupRights(ch), Metadata: peerMetadata{Known: true, MembersKnown: true, Members: ch.ParticipantsCount}}
+		case *tg.ChatForbidden:
+			key := peerID(&tg.PeerChat{ChatID: ch.ID})
+			c.peers[key] = peerRecord{ID: ch.ID, Kind: "chat", Name: ch.Title, Rights: peerRights{Muted: true}, Metadata: c.peers[key].Metadata}
+		case *tg.ChannelForbidden:
+			key := peerID(&tg.PeerChannel{ChannelID: ch.ID})
+			c.peers[key] = peerRecord{ID: ch.ID, Hash: ch.AccessHash, Kind: "channel", Name: ch.Title, Rights: peerRights{Muted: true, Broadcast: ch.Broadcast}, Metadata: c.peers[key].Metadata}
 		case *tg.Channel:
 			key := peerID(&tg.PeerChannel{ChannelID: ch.ID})
-			if _, ok := c.peers[key]; !ch.Min || !ok {
-				c.peers[key] = peerRecord{ID: ch.ID, Hash: ch.AccessHash, Kind: "channel", Name: ch.Title, Rights: channelRights(ch), Username: channelUsername(ch)}
+			if old, ok := c.peers[key]; !ch.Min || !ok {
+				c.peers[key] = peerRecord{ID: ch.ID, Hash: ch.AccessHash, Kind: "channel", Name: ch.Title, Rights: channelRights(ch), Username: channelUsername(ch), Metadata: old.Metadata}
+				p := c.peers[key]
+				p.Rights.Unrestricted = old.Rights.Unrestricted
+				if ch.HasLink {
+					p.Rights.DiscussionID = old.Rights.DiscussionID
+				}
+				c.peers[key] = p
 			}
 			p := c.peers[key]
+			p.rememberChannelMetadata(ch)
+			if ch.Min && p.Rights.Known {
+				p.Rights.Default = bannedKinds(ch.DefaultBannedRights)
+				p.Rights.JoinToSend = ch.JoinToSend
+				p.Rights.Gigagroup = ch.Gigagroup
+				p.Rights.HasDiscussion = ch.HasLink
+				if !ch.HasLink {
+					p.Rights.DiscussionID = 0
+				}
+			}
 			if !ch.Min || ch.Photo != nil {
 				p.Photo = chatAvatar(ch.Photo)
 			}
@@ -820,6 +839,20 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 		var ids []int
 		var chat int64
 		switch u := u.(type) {
+		case *tg.UpdateChannel:
+			id := peerID(&tg.PeerChannel{ChannelID: u.ChannelID})
+			go func() { _ = s.RefreshSendPermissions(s.history.ctx, id) }()
+		case *tg.UpdateChat:
+			id := peerID(&tg.PeerChat{ChatID: u.ChatID})
+			go func() { _ = s.RefreshSendPermissions(s.history.ctx, id) }()
+		case *tg.UpdateChatDefaultBannedRights:
+			c := s.history
+			c.mu.Lock()
+			id := peerID(u.Peer)
+			p := c.peers[id]
+			p.Rights.Default = bannedKinds(u.DefaultBannedRights)
+			c.peers[id] = p
+			c.mu.Unlock()
 		case *tg.UpdateReadHistoryInbox:
 			s.setUnread(peerID(u.Peer), u.StillUnreadCount)
 		case *tg.UpdateReadChannelInbox:
@@ -918,6 +951,7 @@ func (s *Store) mergeUpdate(m model.Message) {
 	found := false
 	for i := range chats {
 		if chats[i].ID == m.Key.ChatID {
+			chats[i] = p.withMetadata(chats[i])
 			if isNew && !m.Outgoing {
 				chats[i].Unread++
 			}
@@ -931,14 +965,7 @@ func (s *Store) mergeUpdate(m model.Message) {
 	// A channel the account is not in has no place among its chats; its
 	// messages come from polling it while it is open.
 	if !found && !p.Rights.Left {
-		kind := model.KindUser
-		if p.Kind == "channel" {
-			kind = model.KindChannel
-		}
-		if p.Kind == "chat" {
-			kind = model.KindGroup
-		}
-		chat := model.Chat{ID: m.Key.ChatID, Title: p.Name, Kind: kind}
+		chat := p.withMetadata(model.Chat{ID: m.Key.ChatID})
 		setPreview(&chat, m)
 		chats = append(chats, chat)
 	}

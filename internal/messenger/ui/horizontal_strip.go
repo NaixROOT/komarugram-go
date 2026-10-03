@@ -6,6 +6,8 @@ import (
 	"image"
 	"math"
 
+	"gio-mw/widget/scroll"
+
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -57,7 +59,8 @@ func dragHorizontalStrip(gtx layout.Context, width int, drag *stripDrag, list *l
 		case pointer.Release, pointer.Cancel:
 			d.pressed, d.dragging = false, false
 		case pointer.Scroll:
-			scrollHorizontalStrip(drag, list, invalidate, e.Scroll.Y)
+			// As far as a list would scroll, the same on every platform.
+			scrollHorizontalStrip(drag, list, invalidate, scroll.Pixels(e).Y)
 		}
 	}
 }
