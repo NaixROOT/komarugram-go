@@ -15,6 +15,7 @@ import (
 	"gio-mw/token"
 	"gio-mw/wdk"
 
+	"gioui.org/f32"
 	"gioui.org/gesture"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
@@ -83,6 +84,32 @@ func unixDesktop() bool {
 // wheelKnown tells whether Gio tells a wheel's notches from a touchpad on
 // this platform (pointer.Event.Wheel): it does on X11, Wayland and Windows.
 var wheelKnown = unixDesktop() || runtime.GOOS == "windows"
+
+// NotchPixels is how far a wheel's notch scrolls a list, and what Pixels
+// gives for one on X11 and on Windows; on Wayland the compositor chooses
+// (150 on KDE Plasma).
+const NotchPixels = wheelStep
+
+// IsWheel tells whether scroll event e is of a wheel's notches, which glide,
+// rather than of a touchpad or of kinetic scrolling, which follow the
+// fingers at once.
+func IsWheel(e pointer.Event) bool {
+	if wheelKnown {
+		return e.Wheel
+	}
+	return math.Abs(float64(e.Scroll.X*WheelScale)) >= preciseBelow || math.Abs(float64(e.Scroll.Y*WheelScale)) >= preciseBelow
+}
+
+// Pixels is how far scroll event e scrolls a list, in pixels, the same on
+// every platform: about NotchPixels a wheel's notch, which X11 sends as two
+// events, and as far as the fingers went on a touchpad.
+func Pixels(e pointer.Event) f32.Point {
+	d := e.Scroll.Mul(WheelScale)
+	if !IsWheel(e) {
+		d = d.Mul(TouchpadScale)
+	}
+	return d
+}
 
 // Trace, when set, is told of every scroll event a List receives: the event
 // as the platform sent it, the distance in pixels it scrolls the list by,
@@ -288,20 +315,14 @@ func (l *List) update(gtx layout.Context) {
 			l.hovered = false
 		case pointer.Scroll:
 			l.stopPageGlide()
-			distance := e.Scroll.Y
-			if l.Axis == layout.Horizontal && e.Scroll.X != 0 {
-				distance = e.Scroll.X
+			d := Pixels(e)
+			distance := d.Y
+			if l.Axis == layout.Horizontal && d.X != 0 {
+				distance = d.X
 			}
-			distance *= WheelScale
 			// A touchpad scrolls along with the fingers, at once; a wheel's
 			// notch glides.
-			precise := !e.Wheel
-			if !wheelKnown {
-				precise = math.Abs(float64(distance)) < preciseBelow
-			}
-			if precise {
-				distance *= TouchpadScale
-			}
+			precise := !IsWheel(e)
 			if Trace != nil {
 				Trace(e, distance, precise)
 			}
