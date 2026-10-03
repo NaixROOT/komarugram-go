@@ -29,8 +29,9 @@ const (
 	// A wheel notch scrolls by wheelStep pixels over wheelDuration.
 	wheelStep     = 100
 	wheelDuration = 200 * time.Millisecond
-	// Scroll events smaller than this are precise (touchpads) and are
-	// applied at once, as Chromium does.
+	// Where the platform does not tell a wheel from a touchpad
+	// (pointer.Event.Wheel), scroll events smaller than this are taken
+	// for a touchpad's.
 	preciseBelow = 40
 
 	// pageFraction of the viewport is scrolled by a click on the track. The
@@ -55,12 +56,40 @@ const (
 var WheelScale = defaultWheelScale()
 
 func defaultWheelScale() float32 {
-	if runtime.GOOS != "android" && (runtime.GOOS == "linux" || runtime.GOOS == "freebsd" || runtime.GOOS == "openbsd") &&
-		os.Getenv("WAYLAND_DISPLAY") == "" {
+	if unixDesktop() && os.Getenv("WAYLAND_DISPLAY") == "" {
 		return 5
 	}
 	return 1
 }
+
+// TouchpadScale converts the distances of a touchpad, and of the kinetic
+// scrolling after it, to pixels. Gio passes on the axis values of Wayland
+// as they are, which scroll several times slower than other programs:
+// Chromium multiplies them by 10, or by 2.5 with its
+// WaylandUnscaledTouchpadScrolling. Other platforms send pixels.
+var TouchpadScale = defaultTouchpadScale()
+
+func defaultTouchpadScale() float32 {
+	if unixDesktop() && os.Getenv("WAYLAND_DISPLAY") != "" {
+		return 2.5
+	}
+	return 1
+}
+
+func unixDesktop() bool {
+	return runtime.GOOS == "linux" || runtime.GOOS == "freebsd" || runtime.GOOS == "openbsd"
+}
+
+// wheelKnown tells whether Gio tells a wheel's notches from a touchpad on
+// this platform (pointer.Event.Wheel): it does on X11, Wayland and Windows.
+var wheelKnown = unixDesktop() || runtime.GOOS == "windows"
+
+// Trace, when set, is told of every scroll event a List receives: the event
+// as the platform sent it, the distance in pixels it scrolls the list by,
+// and whether that distance is applied at once, as a touchpad's, or
+// animated, as a wheel notch's. It is for measuring what each platform sends, and is called
+// on the goroutine of the window the list is in.
+var Trace func(e pointer.Event, distance float32, precise bool)
 
 // List is a layout.List with smooth wheel scrolling and an overlay
 // scrollbar: at the right edge of vertical lists, at the bottom of
@@ -264,7 +293,19 @@ func (l *List) update(gtx layout.Context) {
 				distance = e.Scroll.X
 			}
 			distance *= WheelScale
-			if math.Abs(float64(distance)) < preciseBelow {
+			// A touchpad scrolls along with the fingers, at once; a wheel's
+			// notch glides.
+			precise := !e.Wheel
+			if !wheelKnown {
+				precise = math.Abs(float64(distance)) < preciseBelow
+			}
+			if precise {
+				distance *= TouchpadScale
+			}
+			if Trace != nil {
+				Trace(e, distance, precise)
+			}
+			if precise {
 				l.stopWheel()
 				l.addOffset(distance)
 				l.lastActive = gtx.Now

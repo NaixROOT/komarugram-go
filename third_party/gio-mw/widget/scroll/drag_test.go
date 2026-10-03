@@ -188,10 +188,66 @@ func TestHugeListThumb(t *testing.T) {
 	}
 }
 
+// scroll sends a touchpad's scroll and lets it settle.
 func (h *harness) scroll(x, y float32) {
-	h.r.Queue(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(300, 30), Scroll: f32.Pt(x, y)})
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(300, 30), Scroll: f32.Pt(x, y)})
 	for range 20 {
 		h.frame()
+	}
+}
+
+// wheel sends a wheel's notches and lets them settle.
+func (h *harness) wheel(x, y float32) {
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(300, 30), Scroll: f32.Pt(x, y), Wheel: true})
+	for range 20 {
+		h.frame()
+	}
+}
+
+func (h *harness) send(e pointer.Event) {
+	h.r.Queue(e)
+}
+
+// fixedScales sets both scales to 1 for the test, whatever the platform.
+func fixedScales(t *testing.T) {
+	wheel, touchpad := WheelScale, TouchpadScale
+	WheelScale, TouchpadScale = 1, 1
+	t.Cleanup(func() { WheelScale, TouchpadScale = wheel, touchpad })
+}
+
+// A wheel's notch glides; a touchpad's scroll, however large, moves the
+// list at once, scaled by TouchpadScale, as a fast swipe or the kinetic
+// scrolling after it sends large distances too.
+func TestWheelGlidesTouchpadFollows(t *testing.T) {
+	fixedScales(t)
+	h := newHarness(100, 64)
+	h.event(pointer.Move, 150, 300)
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(150, 300), Scroll: f32.Pt(0, 100), Wheel: true})
+	for range 4 {
+		h.frame()
+	}
+	if got := h.scrolled(); got <= 0 || got >= 100 {
+		t.Fatalf("a notch scrolled %d px in 50 ms, want part of the way", got)
+	}
+	for range 20 {
+		h.frame()
+	}
+	if got := h.scrolled(); got != 100 {
+		t.Fatalf("a notch scrolled %d px, want 100", got)
+	}
+	TouchpadScale = 2.5
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(150, 300), Scroll: f32.Pt(0, 80)})
+	h.frame()
+	if got := h.scrolled(); got != 300 {
+		t.Fatalf("a touchpad's 80 px scrolled to %d at once, want 300", got)
+	}
+	// The wheel is not scaled as the touchpad is.
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(150, 300), Scroll: f32.Pt(0, 100), Wheel: true})
+	for range 20 {
+		h.frame()
+	}
+	if got := h.scrolled(); got != 400 {
+		t.Fatalf("a notch after the touchpad scrolled to %d, want 400", got)
 	}
 }
 
@@ -199,13 +255,11 @@ func (h *harness) scroll(x, y float32) {
 // wheel and horizontal touchpad scrolling, and that its thumb, along the
 // bottom edge, follows the pointer.
 func TestHorizontal(t *testing.T) {
-	saved := WheelScale
-	WheelScale = 1
-	defer func() { WheelScale = saved }()
+	fixedScales(t)
 
 	h := newHorizontalHarness(100, 64)
 	h.event(pointer.Move, 300, 30)
-	h.scroll(0, 100) // A wheel notch.
+	h.wheel(0, 100) // A wheel notch.
 	if got := h.scrolled(); got != 100 {
 		t.Fatalf("vertical wheel: scrolled %d, want 100", got)
 	}
