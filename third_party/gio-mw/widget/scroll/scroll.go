@@ -84,6 +84,14 @@ func defaultTouchpadScale() float32 {
 	return 1
 }
 
+// ContinuousScale is TouchpadScale for continuous scrolling
+// (pointer.Event.Continuous), which Wayland tells apart: a trackpoint's, in
+// the same units as a touchpad's. A trackpoint's scrolling stops when the
+// stick is let go, with nothing like the kinetic scrolling that carries a
+// touchpad's swipe on, and with a touchpad's scale it took too long to go
+// far; it is twice as fast. The factor was chosen, not measured.
+var ContinuousScale = 2 * TouchpadScale
+
 func unixDesktop() bool {
 	return runtime.GOOS == "linux" || runtime.GOOS == "freebsd" || runtime.GOOS == "openbsd"
 }
@@ -112,7 +120,11 @@ func IsWheel(e pointer.Event) bool {
 // events, and as far as the fingers went on a touchpad.
 func Pixels(e pointer.Event) f32.Point {
 	d := e.Scroll.Mul(WheelScale)
-	if !IsWheel(e) {
+	switch {
+	case IsWheel(e):
+	case e.Continuous:
+		d = d.Mul(ContinuousScale)
+	default:
 		d = d.Mul(TouchpadScale)
 	}
 	return d

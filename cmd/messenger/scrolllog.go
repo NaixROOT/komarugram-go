@@ -29,8 +29,8 @@ func logScroll(path string) error {
 	if os.Getenv("DISPLAY") != "" {
 		session += " DISPLAY"
 	}
-	fmt.Fprintf(f, "# %s/%s session=%q wheel scale %g touchpad scale %g\n", runtime.GOOS, runtime.GOARCH, session, scroll.WheelScale, scroll.TouchpadScale)
-	fmt.Fprintln(f, "# since start (ms), since previous (ms), event time (ms), scroll x, scroll y, modifiers, wheel, distance (px), applied")
+	fmt.Fprintf(f, "# %s/%s session=%q wheel scale %g touchpad scale %g continuous scale %g\n", runtime.GOOS, runtime.GOARCH, session, scroll.WheelScale, scroll.TouchpadScale, scroll.ContinuousScale)
+	fmt.Fprintln(f, "# since start (ms), since previous (ms), event time (ms), scroll x, scroll y, modifiers, wheel, continuous, distance (px), applied")
 	var mu sync.Mutex
 	start := time.Now()
 	var last time.Time
@@ -49,7 +49,7 @@ func logScroll(path string) error {
 		}
 		// Each line is written at once, so that nothing is lost when the
 		// client is killed.
-		fmt.Fprintf(f, "%.3f\t%.3f\t%d\t%g\t%g\t%v\t%v\t%g\t%s\n", float64(now.Sub(start).Microseconds())/1000, gap, e.Time.Milliseconds(), e.Scroll.X, e.Scroll.Y, e.Modifiers, e.Wheel, distance, applied)
+		fmt.Fprintf(f, "%.3f\t%.3f\t%d\t%g\t%g\t%v\t%v\t%v\t%g\t%s\n", float64(now.Sub(start).Microseconds())/1000, gap, e.Time.Milliseconds(), e.Scroll.X, e.Scroll.Y, e.Modifiers, e.Wheel, e.Continuous, distance, applied)
 	}
 	return nil
 }

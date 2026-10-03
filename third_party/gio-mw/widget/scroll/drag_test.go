@@ -208,11 +208,30 @@ func (h *harness) send(e pointer.Event) {
 	h.r.Queue(e)
 }
 
-// fixedScales sets both scales to 1 for the test, whatever the platform.
+// fixedScales sets the scales to 1 for the test, whatever the platform.
 func fixedScales(t *testing.T) {
-	wheel, touchpad := WheelScale, TouchpadScale
-	WheelScale, TouchpadScale = 1, 1
-	t.Cleanup(func() { WheelScale, TouchpadScale = wheel, touchpad })
+	wheel, touchpad, continuous := WheelScale, TouchpadScale, ContinuousScale
+	WheelScale, TouchpadScale, ContinuousScale = 1, 1, 1
+	t.Cleanup(func() { WheelScale, TouchpadScale, ContinuousScale = wheel, touchpad, continuous })
+}
+
+// A trackpoint's scrolling, which Wayland tells as continuous, moves the
+// list at once by ContinuousScale, not by a touchpad's scale.
+func TestContinuousScrollingScale(t *testing.T) {
+	fixedScales(t)
+	TouchpadScale, ContinuousScale = 2.5, 5
+	h := newHarness(100, 64)
+	h.event(pointer.Move, 150, 300)
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(150, 300), Scroll: f32.Pt(0, 20), Continuous: true})
+	h.frame()
+	if got := h.scrolled(); got != 100 {
+		t.Fatalf("a trackpoint's 20 px scrolled to %d at once, want 100", got)
+	}
+	h.send(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(150, 300), Scroll: f32.Pt(0, 20)})
+	h.frame()
+	if got := h.scrolled(); got != 150 {
+		t.Fatalf("a touchpad's 20 px after it scrolled to %d, want 150", got)
+	}
 }
 
 // A wheel's notch glides; a touchpad's scroll, however large, moves the
