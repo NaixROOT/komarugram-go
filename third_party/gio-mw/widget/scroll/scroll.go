@@ -64,15 +64,22 @@ func defaultWheelScale() float32 {
 }
 
 // TouchpadScale converts the distances of a touchpad, and of the kinetic
-// scrolling after it, to pixels. Gio passes on the axis values of Wayland
-// as they are, which scroll several times slower than other programs:
-// Chromium multiplies them by 10, or by 2.5 with its
-// WaylandUnscaledTouchpadScrolling. Other platforms send pixels.
+// scrolling after it, to pixels, after WheelScale. Gio passes on the axis
+// values of Wayland as they are, libinput's units, which scroll several
+// times slower than other programs: Chromium multiplies them by 10, or by
+// 2.5 with its WaylandUnscaledTouchpadScrolling; lists here by 2.5. On X11
+// Gio makes 20 of a unit of XInput 2's smooth scrolling, the scrolling of a
+// wheel's notch, and xf86-input-libinput makes such a unit of 15 of
+// libinput's units: 2.5 pixels each there too take 0.375 of the 100 pixels
+// of a notch. Other platforms send pixels.
 var TouchpadScale = defaultTouchpadScale()
 
 func defaultTouchpadScale() float32 {
-	if unixDesktop() && os.Getenv("WAYLAND_DISPLAY") != "" {
-		return 2.5
+	if unixDesktop() {
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			return 2.5
+		}
+		return 2.5 * 15 / wheelStep
 	}
 	return 1
 }
