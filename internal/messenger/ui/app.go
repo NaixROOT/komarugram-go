@@ -497,6 +497,11 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 		a.open(chatPick{ID: chat.ID, Chat: &chat, Message: post})
 		a.window.Invalidate()
 	}
+	p.openAudio = func(m model.Message) {
+		a.thread = nil
+		a.open(chatPick{ID: m.Key.ChatID, Message: m.Key.MessageID})
+		a.window.Invalidate()
+	}
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.openAlone = func(m model.Message) { a.viewer.OpenAlone(p.chat, m) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
@@ -792,6 +797,9 @@ func (a *App) selectedChat() (model.Chat, bool) {
 // open opens the chat picked in the chat list, at the message picked when a
 // search found one.
 func (a *App) open(pick chatPick) {
+	if !a.section.showsChats() {
+		a.section = section{kind: sectionAll}
+	}
 	a.selected = pick.ID
 	if pick.Chat != nil {
 		a.found = *pick.Chat
@@ -996,33 +1004,38 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	// is a chat that takes them.
 	a.drop.page, a.drop.area, a.drop.metric = nil, image.Rect(x, pageTop, size.X, size.Y), gtx.Metric
 	column(x, pageTop, size.X-x, size.Y-pageTop, func(gtx layout.Context) layout.Dimensions {
-		switch a.section.kind {
-		case sectionProfile:
-			return a.profile.Layout(gtx, a.store.Me(), a.catalog(), a.layoutAvatar, a.private(), a.window.Motion.AnimationsEnabled())
-		case sectionSettings:
-			return a.settings.Layout(gtx, a.themeMode(), a.window.Appearance.Scheme(), a.dark(), a.catalog())
-		}
-		if a.thread != nil {
+		l := a.catalog()
+		c, chat := a.selectedChat()
+		// A chat's page and its comments draw the bar of what plays
+		// themselves; the others get it here.
+		switch {
+		case a.section.showsChats() && a.thread != nil:
 			if a.comments.takesFiles() {
 				a.drop.page = a.comments
 			}
-			return a.layoutComments(gtx, a.catalog())
-		}
-		if c, ok := a.selectedChat(); ok && c.Forum && a.forum != nil {
-			return a.layoutForum(gtx, c, a.catalog())
-		}
-		if c, ok := a.selectedChat(); ok {
+			return a.layoutComments(gtx, l)
+		case a.section.showsChats() && chat && !(c.Forum && a.forum != nil):
 			if a.history.takesFiles() {
 				a.drop.page = a.history
 			}
-			return layoutChatPage(gtx, c, a.catalog(), a.layoutAvatar, a.badges, func(gtx layout.Context) layout.Dimensions {
+			return layoutChatPage(gtx, c, l, a.layoutAvatar, a.badges, func(gtx layout.Context) layout.Dimensions {
 				if a.history != nil {
-					return a.history.Layout(gtx, c, a.catalog(), a.window.Motion.AnimationsEnabled())
+					return a.history.Layout(gtx, c, l, a.window.Motion.AnimationsEnabled())
 				}
-				return layoutEmptyPage(gtx, a.catalog())
+				return layoutEmptyPage(gtx, l)
 			}, a.history)
 		}
-		return layoutEmptyPage(gtx, a.catalog())
+		return a.withAudioBar(gtx, l, func(gtx layout.Context) layout.Dimensions {
+			switch {
+			case a.section.kind == sectionProfile:
+				return a.profile.Layout(gtx, a.store.Me(), l, a.layoutAvatar, a.private(), a.window.Motion.AnimationsEnabled())
+			case a.section.kind == sectionSettings:
+				return a.settings.Layout(gtx, a.themeMode(), a.window.Appearance.Scheme(), a.dark(), l)
+			case chat:
+				return a.layoutForum(gtx, c, l)
+			}
+			return layoutEmptyPage(gtx, l)
+		})
 	})
 
 	// The splitter goes last so that it takes the pointer over the columns.
@@ -1045,6 +1058,24 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	a.frozen.Layout(overlayGtx, a.catalog())
 	a.sessionEnded.Layout(overlayGtx, a.catalog())
 	a.connectionFailed.Layout(overlayGtx, a.catalog())
+}
+
+// withAudioBar draws the bar of what plays over a page that is not a chat's,
+// which has its own, and the page under it.
+func (a *App) withAudioBar(gtx layout.Context, l localization.Catalog, page layout.Widget) layout.Dimensions {
+	h := 0
+	if a.history != nil {
+		h = a.history.audioBarSize(gtx)
+	}
+	if h == 0 {
+		return page(gtx)
+	}
+	size := gtx.Constraints.Max
+	body := gtx
+	body.Constraints = layout.Exact(image.Pt(size.X, max(0, size.Y-h)))
+	offset(body, image.Pt(0, h), page)
+	a.history.layoutAudioBar(gtx, l, true)
+	return layout.Dimensions{Size: size}
 }
 
 const compactBarHeight = unit.Dp(52)
