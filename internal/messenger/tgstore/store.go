@@ -120,6 +120,11 @@ func (s *Store) Load(ctx context.Context, api *tg.Client) error {
 	l := newList(self.ID)
 	offset := page{peer: &tg.InputPeerEmpty{}}
 	for {
+		// A gap in the updates while the page is asked for leaves its
+		// chats as they are.
+		s.history.mu.Lock()
+		liveEpoch := s.history.liveEpoch
+		s.history.mu.Unlock()
 		res, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
 			OffsetDate: offset.date,
 			OffsetID:   offset.id,
@@ -135,12 +140,17 @@ func (s *Store) Load(ctx context.Context, api *tg.Client) error {
 		}
 		s.rememberPeers(dialogs.GetUsers(), dialogs.GetChats())
 		s.history.mu.Lock()
+		tops := map[int64]int{}
 		for _, d := range dialogs.GetDialogs() {
 			if d, ok := d.(*tg.Dialog); ok {
 				s.history.top[peerID(d.Peer)] = max(s.history.top[peerID(d.Peer)], d.TopMessage)
+				tops[peerID(d.Peer)] = d.TopMessage
 			}
 		}
 		s.history.mu.Unlock()
+		if err := s.liveFromDialogs(ctx, tops, liveEpoch); err != nil {
+			return err
+		}
 		added := l.add(dialogs)
 		chats, folders := l.snapshot(filters.Filters)
 		s.publish(func() { s.chats, s.folders = chats, folders })
@@ -600,4 +610,29 @@ func (l *list) folder(f tg.DialogFilterClass, entries map[int64]entry) (model.Fo
 		}, true
 	}
 	return model.Folder{}, false // the "All chats" entry
+}
+
+// liveFromDialogs marks live the chats whose newest span reaches the newest
+// message the dialog list names (tops), read at liveEpoch: the messages
+// that come after it come as updates. See conversation.live.
+func (s *Store) liveFromDialogs(ctx context.Context, tops map[int64]int, liveEpoch uint64) error {
+	c := s.history
+	c.mu.Lock()
+	cache := c.cache
+	c.mu.Unlock()
+	if cache == nil {
+		return nil
+	}
+	for chat, top := range tops {
+		span, ok, _, err := cache.SpanOf(ctx, chat, 0)
+		if err != nil {
+			return err
+		}
+		if ok && span.High >= top {
+			c.mu.Lock()
+			c.startLive(chat, liveEpoch)
+			c.mu.Unlock()
+		}
+	}
+	return nil
 }

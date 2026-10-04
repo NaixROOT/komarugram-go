@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -123,6 +124,12 @@ type conversation struct {
 	pinned map[int64]*pinned
 	// forums are the topics of the forums opened.
 	forums map[int64]*forum
+	// live are the chats whose newest span (historycache.Span) reaches
+	// their newest message, so each new message that comes as an update
+	// extends it: the updates come in order and without gaps, or say they
+	// cannot (too long), and liveEpoch counts those times.
+	live      map[int64]bool
+	liveEpoch uint64
 }
 type viewSave struct {
 	view    model.Viewport
@@ -130,7 +137,7 @@ type viewSave struct {
 }
 
 func newConversation() *conversation {
-	return &conversation{top: map[int64]int{}, globalDeleted: map[int]bool{}, ctx: context.Background(), peers: map[int64]peerRecord{}, histories: map[int64]*model.History{}, epochs: map[int64]uint64{}, reveals: map[int64]model.MessageID{}, views: map[int64]model.Viewport{}, refs: map[string]fileLocation{}, touched: map[model.MessageKey]uint64{}, deleted: map[model.MessageKey]bool{}, packs: map[string]map[string]string{}, packLoading: map[string]bool{}, saves: make(chan viewSave, 64)}
+	return &conversation{top: map[int64]int{}, globalDeleted: map[int]bool{}, ctx: context.Background(), peers: map[int64]peerRecord{}, histories: map[int64]*model.History{}, epochs: map[int64]uint64{}, reveals: map[int64]model.MessageID{}, views: map[int64]model.Viewport{}, refs: map[string]fileLocation{}, touched: map[model.MessageKey]uint64{}, deleted: map[model.MessageKey]bool{}, packs: map[string]map[string]string{}, packLoading: map[string]bool{}, saves: make(chan viewSave, 64), live: map[int64]bool{}}
 }
 func (s *Store) Configure(ctx context.Context, account, path string, p *security.Manager) error {
 	c := s.history
@@ -232,7 +239,71 @@ func (s *Store) Attach(client *telegram.Client) {
 	c.mu.Unlock()
 }
 func (s *Store) Updates() *updates.Manager {
-	return updates.New(updates.Config{Handler: telegram.UpdateHandlerFunc(s.Handle), Storage: s.Cache(), AccessHasher: s.Cache(), MaxChannelDifferenceConcurrency: 2, OnTooLong: func() { s.refreshOpen() }, OnChannelTooLong: func(id int64) { s.refreshOpen() }})
+	return updates.New(updates.Config{Handler: telegram.UpdateHandlerFunc(s.Handle), Storage: s.Cache(), AccessHasher: s.Cache(), MaxChannelDifferenceConcurrency: 2,
+		OnTooLong: func() {
+			s.endLive(0)
+			s.refreshOpen()
+		},
+		OnChannelTooLong: func(id int64) {
+			s.endLive(peerID(&tg.PeerChannel{ChannelID: id}))
+			s.refreshOpen()
+		}})
+}
+
+// endLive ends the live span of chat, or of every chat for 0: updates were
+// missed, and the next message may not follow the newest one kept.
+func (s *Store) endLive(chat int64) {
+	c := s.history
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.liveEpoch++
+	if chat == 0 {
+		clear(c.live)
+	} else {
+		delete(c.live, chat)
+	}
+}
+
+// startLive marks chat live when the history read at liveEpoch epoch
+// reached its newest message: see conversation.live. A channel the account
+// is not in sends no updates, and is never live.
+func (c *conversation) startLive(chat int64, epoch uint64) {
+	if c.liveEpoch == epoch && !c.peers[chat].Rights.Left {
+		c.live[chat] = true
+	}
+}
+
+// extendLive adds new messages that came as updates to their chats' live
+// spans.
+func (s *Store) extendLive(ctx context.Context, msgs []model.Message) error {
+	for _, m := range msgs {
+		c := s.history
+		c.mu.Lock()
+		live, cache, epoch := c.live[m.Key.ChatID], c.cache, c.liveEpoch
+		c.mu.Unlock()
+		if !live || cache == nil {
+			continue
+		}
+		id := int(m.Key.MessageID)
+		top, ok, _, e := cache.SpanOf(ctx, m.Key.ChatID, 0)
+		if e != nil {
+			return e
+		}
+		low := id
+		if ok {
+			low = min(top.High, id)
+		}
+		c.mu.Lock()
+		still := c.live[m.Key.ChatID] && c.liveEpoch == epoch
+		c.mu.Unlock()
+		if !still {
+			continue
+		}
+		if _, e = cache.AddSpan(ctx, m.Key.ChatID, low, max(id, low)); e != nil {
+			return e
+		}
+	}
+	return nil
 }
 func (s *Store) historyError(chat int64, e error) {
 	c := s.history
@@ -584,7 +655,7 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 	}
 	c := s.history
 	c.mu.Lock()
-	api, peer, start := c.api, c.peers[chat], c.generation
+	api, peer, start, liveEpoch := c.api, c.peers[chat], c.generation, c.liveEpoch
 	if h := c.histories[chat]; h != nil {
 		h.Offline = api == nil
 	}
@@ -612,14 +683,7 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 		}
 		return
 	}
-	req := &tg.MessagesGetHistoryRequest{Peer: peer.input(), OffsetID: anchor, Limit: 80}
-	if dir == 0 && anchor != 0 {
-		req.AddOffset = -40
-	}
-	if dir > 0 {
-		req.AddOffset = -80
-		req.OffsetID = anchor + 1
-	}
+	req := historyRequest(peer.input(), dir, anchor, 80)
 	result, e := api.MessagesGetHistory(ctx, req)
 	if e != nil {
 		if len(cached) > 0 {
@@ -643,6 +707,9 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 	if e == nil {
 		e = s.persistDialogs(ctx)
 	}
+	if e == nil {
+		e = s.keepSpan(ctx, epoch, liveEpoch, chat, modified.GetMessages(), start, dir, anchor, req.Limit)
+	}
 	// Telegram's page lacks the messages kept deleted; the cache has them.
 	for _, m := range cached {
 		if m.Deleted {
@@ -650,6 +717,125 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 		}
 	}
 	s.finishPageAt(epoch, chat, dir, msgs, len(modified.GetMessages()) >= req.Limit, e, start)
+}
+
+// historyRequest asks for limit messages before anchor (dir < 0), after it
+// (dir > 0), around it (0), or the newest (anchor 0): see pageSpan.
+func historyRequest(peer tg.InputPeerClass, dir, anchor, limit int) *tg.MessagesGetHistoryRequest {
+	req := &tg.MessagesGetHistoryRequest{Peer: peer, OffsetID: anchor, Limit: limit}
+	if dir == 0 && anchor != 0 {
+		req.AddOffset = -limit / 2
+	}
+	if dir > 0 {
+		req.AddOffset = -limit
+		req.OffsetID = anchor + 1
+	}
+	return req
+}
+
+// pageSpan is the run of IDs a page of messages.getHistory covers whole
+// (see historycache.Span), as fetchAt asks for it: the limit messages
+// before anchor for dir < 0, after it for dir > 0, and around it, or the
+// newest, for 0. A page is one run of the chat's history, from its oldest
+// message to its newest; it runs on to the chat's start when it has fewer
+// messages before anchor than asked for, and reaches the end (end) when
+// it has fewer after it. ok is false for a page that covers nothing.
+func pageSpan(ids []int, dir, anchor, limit int) (low, high int, end, ok bool) {
+	low, high = math.MaxInt, 0
+	var before, at, after int // messages older than anchor, anchor, newer
+	for _, id := range ids {
+		low, high = min(low, id), max(high, id)
+		switch {
+		case anchor == 0 || id < anchor:
+			before++
+		case id == anchor:
+			at++
+		default:
+			after++
+		}
+	}
+	switch {
+	case dir < 0:
+		// The messages right before anchor, which touch it.
+		high = anchor - 1
+		if before < limit {
+			low = 1
+		}
+	case dir > 0:
+		// The messages right after anchor; with fewer than asked for,
+		// Telegram moves the window down, and sends the newest.
+		low = min(low, anchor+1)
+		high = max(high, anchor)
+		end = after < limit
+	case anchor == 0:
+		end = true
+		if before < limit {
+			low = 1
+		}
+	default:
+		// limit/2 messages before anchor and as many from it on.
+		end = at+after < limit/2
+		if before < limit/2 {
+			low = 1
+		}
+		high = max(high, anchor-1)
+	}
+	return low, high, end, low <= high
+}
+
+// keepSpan records the span a page read at epoch covers, and drops from a
+// history started again (dir 0) what lies outside it: messages from an
+// older part of the history, which the page does not reach.
+func (s *Store) keepSpan(ctx context.Context, epoch, liveEpoch uint64, chat int64, raw []tg.MessageClass, start uint64, dir, anchor, limit int) error {
+	ids := make([]int, 0, len(raw))
+	for _, m := range raw {
+		ids = append(ids, m.GetID())
+	}
+	low, high, end, ok := pageSpan(ids, dir, anchor, limit)
+	c := s.history
+	c.mu.Lock()
+	if end {
+		// Messages that came as updates while the page was asked for
+		// follow it.
+		for key, seq := range c.touched {
+			if key.ChatID == chat && seq > start {
+				high = max(high, int(key.MessageID))
+				ok = ok || low <= high
+			}
+		}
+	}
+	cache := c.cache
+	c.mu.Unlock()
+	if !ok {
+		if end {
+			c.mu.Lock()
+			c.startLive(chat, liveEpoch)
+			c.mu.Unlock()
+		}
+		return nil
+	}
+	span, e := cache.AddSpan(ctx, chat, low, high)
+	if e != nil {
+		return e
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if end {
+		c.startLive(chat, liveEpoch)
+	}
+	if h := c.histories[chat]; dir == 0 && h != nil && c.epochs[chat] == epoch {
+		out := h.Messages[:0]
+		for _, m := range h.Messages {
+			if id := int(m.Key.MessageID); id >= span.Low && id <= span.High {
+				out = append(out, m)
+			}
+		}
+		if len(out) != len(h.Messages) {
+			h.Messages = out
+			h.Revision++
+		}
+	}
+	return nil
 }
 func (s *Store) finishPage(chat int64, dir int, msgs []model.Message, more bool, err error, generation ...uint64) {
 	s.history.mu.Lock()
@@ -838,6 +1024,7 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 		var msg tg.MessageClass
 		var ids []int
 		var chat int64
+		fresh := false
 		switch u := u.(type) {
 		case *tg.UpdateChannel:
 			id := peerID(&tg.PeerChannel{ChannelID: u.ChannelID})
@@ -858,9 +1045,9 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 		case *tg.UpdateReadChannelInbox:
 			s.setUnread(peerID(&tg.PeerChannel{ChannelID: u.ChannelID}), u.StillUnreadCount)
 		case *tg.UpdateNewMessage:
-			msg = u.Message
+			msg, fresh = u.Message, true
 		case *tg.UpdateNewChannelMessage:
-			msg = u.Message
+			msg, fresh = u.Message, true
 		case *tg.UpdateEditMessage:
 			msg = u.Message
 		case *tg.UpdateEditChannelMessage:
@@ -900,6 +1087,11 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			if e != nil {
 				return e
 			}
+			if fresh {
+				if e = s.extendLive(ctx, ms); e != nil {
+					return e
+				}
+			}
 			for _, m := range ms {
 				s.mergeUpdate(m)
 			}
@@ -934,7 +1126,10 @@ func (s *Store) mergeUpdate(m model.Message) {
 				break
 			}
 		}
-		if !found && !h.HasNewer {
+		// An edit of a message the history has not loaded is not added:
+		// it is from another part of the history.
+		newest := len(h.Messages) == 0 || m.Key.MessageID > h.Messages[len(h.Messages)-1].Key.MessageID
+		if !found && !h.HasNewer && newest {
 			h.Messages = append(h.Messages, m)
 			sort.Slice(h.Messages, func(i, j int) bool { return h.Messages[i].Key.MessageID < h.Messages[j].Key.MessageID })
 		}
@@ -1270,6 +1465,8 @@ func (s *Store) Disconnect() {
 	pool := c.pool
 	c.pool = nil
 	c.api = nil
+	c.liveEpoch++
+	clear(c.live)
 	c.mu.Unlock()
 	if pool != nil {
 		pool.Close()
