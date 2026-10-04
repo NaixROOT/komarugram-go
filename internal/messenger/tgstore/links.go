@@ -32,15 +32,24 @@ func (s *Store) ResolveUsername(ctx context.Context, name string) (model.Chat, e
 	if api == nil {
 		return model.Chat{}, errors.New("offline")
 	}
-	res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: name})
-	if tgerr.Is(err, "USERNAME_NOT_OCCUPIED", "USERNAME_INVALID") {
-		return model.Chat{}, model.ErrLinkNotFound
-	}
+	id, err := s.resolveUsername(ctx, api, name)
 	if err != nil {
 		return model.Chat{}, err
 	}
+	return s.chatFor(id, nil), nil
+}
+
+// resolveUsername asks Telegram whose name it is, and remembers them.
+func (s *Store) resolveUsername(ctx context.Context, api *tg.Client, name string) (int64, error) {
+	res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: name})
+	if tgerr.Is(err, "USERNAME_NOT_OCCUPIED", "USERNAME_INVALID") {
+		return 0, model.ErrLinkNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
 	s.rememberPeers(res.Users, res.Chats)
-	return s.chatFor(peerID(res.Peer), nil), nil
+	return peerID(res.Peer), nil
 }
 
 // ChannelByID implements model.TelegramLinkSource for t.me/c links.
@@ -61,11 +70,7 @@ func (s *Store) ChannelByID(ctx context.Context, id int64) (model.Chat, error) {
 	if err != nil {
 		return model.Chat{}, model.ErrLinkNotFound
 	}
-	modified, ok := res.(interface{ GetChats() []tg.ChatClass })
-	if !ok {
-		return model.Chat{}, model.ErrLinkNotFound
-	}
-	for _, raw := range modified.GetChats() {
+	for _, raw := range res.GetChats() {
 		if ch, ok := raw.(*tg.Channel); ok && ch.ID == id && !ch.Min {
 			s.rememberPeers(nil, []tg.ChatClass{ch})
 			return s.chatFor(chat, nil), nil

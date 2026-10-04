@@ -36,6 +36,12 @@ type tgLinkResult struct {
 
 // openTelegramLink opens link in the client; false leaves it to the browser.
 func (p *chatPage) openTelegramLink(link model.TelegramLink) bool {
+	return p.resolveTelegramLink(link, false)
+}
+
+// resolveTelegramLink asks Telegram what link leads to, or with join joins
+// the invite it is.
+func (p *chatPage) resolveTelegramLink(link model.TelegramLink, join bool) bool {
 	switch link.Kind {
 	case model.LinkStickers, model.LinkEmoji:
 		p.stickers.open(p, model.StickerSetRef{Type: "short_name", ShortName: link.Name})
@@ -66,7 +72,7 @@ func (p *chatPage) openTelegramLink(link model.TelegramLink) bool {
 		case model.LinkUser:
 			r.chat, r.err = source.UserByID(ctx, link.User)
 		case model.LinkInvite:
-			if link.Name == "join" {
+			if join {
 				r.chat, r.err = source.JoinInvite(ctx, link.Hash)
 			} else {
 				var inv model.ChatInvite
@@ -93,7 +99,7 @@ func (p *chatPage) tgLinkDialog(gtx layout.Context, l localization.Catalog) {
 	}
 	if d.join.Clicked(gtx) && !d.busy {
 		d.modal.Close()
-		p.openTelegramLink(model.TelegramLink{Kind: model.LinkInvite, Hash: d.hash, Name: "join"})
+		p.resolveTelegramLink(model.TelegramLink{Kind: model.LinkInvite, Hash: d.hash}, true)
 	}
 	if !d.modal.Shown() {
 		return
@@ -101,11 +107,11 @@ func (p *chatPage) tgLinkDialog(gtx layout.Context, l localization.Catalog) {
 	d.modal.Layout(gtx, false, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(400))
 		sc := scheme(gtx)
-		action := l.T("links.join_group")
-		members := l.Count("status.members", d.invite.Members, nil)
+		action, kind := l.T("links.join_group"), model.KindGroup
 		if d.invite.Channel {
-			action, members = l.T("links.join_channel"), l.Count("status.subscribers", d.invite.Members, nil)
+			action, kind = l.T("links.join_channel"), model.KindChannel
 		}
+		members := chatStatus(model.Chat{Kind: kind, Members: d.invite.Members}, l)
 		if d.invite.Request {
 			action = l.T("links.request")
 		}
@@ -163,7 +169,5 @@ func (p *chatPage) takeTelegramLink(r tgLinkResult, l localization.Catalog) {
 func (p *chatPage) openChatAt(chat model.Chat, post model.MessageID) {
 	if p.openChat != nil {
 		p.openChat(chat, post)
-	} else if p.openAuthor != nil {
-		p.openAuthor(chat)
 	}
 }

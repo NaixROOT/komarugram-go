@@ -167,11 +167,11 @@ type chatPage struct {
 	audio    *audioPlayer
 	audioBar audioBar
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
-	openPhoto  func(model.Message)
-	openAlone  func(model.Message)
-	openAuthor func(model.Chat)
-	openChat   func(model.Chat, model.MessageID)
-	tgLinks    tgLinks
+	openPhoto func(model.Message)
+	openAlone func(model.Message)
+	// openChat opens a chat, at a message unless it is 0.
+	openChat func(model.Chat, model.MessageID)
+	tgLinks  tgLinks
 	// openComments shows the comments to a channel post; nil hides the
 	// comments bar. thread is set for the page that shows comments.
 	openComments func(model.Message)
