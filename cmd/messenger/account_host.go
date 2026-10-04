@@ -17,6 +17,7 @@ import (
 	"gioui.org/io/system"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/updates"
+	"github.com/gotd/td/telegram/updates/hook"
 	"golang.org/x/sync/errgroup"
 
 	"komarugram/internal/appwindow"
@@ -809,5 +810,10 @@ func (h *accountWindows) runClient(ctx context.Context, a *account.Account, stor
 			return nil
 		})
 		return group.Wait()
-	}, store.Middleware())
+	},
+		// Updates that come as replies to requests, and the pts of their
+		// messages.affected* replies, go to the manager too: without them
+		// its pts falls behind after each read, deletion or message sent,
+		// and the next update waits for a getDifference.
+		store.Middleware(), hook.UpdateHook(manager.Handle), hook.AffectedHook(manager))
 }
