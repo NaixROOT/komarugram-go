@@ -3,6 +3,7 @@
 package historycache
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -104,7 +105,7 @@ func (c *Cache) flushAccess(ctx context.Context) error {
 		}
 	}
 	for r := range c.accessRefs {
-		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO media_refs SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM media_objects WHERE key=?)`, r.key, r.chat, r.message, r.key); err != nil {
+		if _, err = tx.ExecContext(ctx, insertRef, r.key, r.chat, r.message, r.key); err != nil {
 			return err
 		}
 	}
@@ -120,7 +121,8 @@ func (c *Cache) flushAccess(ctx context.Context) error {
 func (c *Cache) saveObject(ctx context.Context, tx *sql.Tx, key string, size int, ref MediaRef) error {
 	now := c.clock().UnixNano()
 	category := ref.Category
-	if parent := parentKey(key); parent != "" {
+	// A part of an object whose caller cannot tell takes the object's.
+	if parent := parentKey(key); parent != "" && category == model.StorageOther {
 		var p model.StorageCategory
 		if err := tx.QueryRowContext(ctx, `SELECT category FROM media_objects WHERE key=?`, parent).Scan(&p); err == nil {
 			category = p
@@ -256,7 +258,7 @@ func (c *Cache) fileSize() int64 {
 		base = c.path + ".secure"
 	}
 	var n int64
-	for _, suffix := range []string{"", "-journal", "-wal"} {
+	for _, suffix := range dbSuffixes {
 		if st, err := os.Stat(base + suffix); err == nil {
 			n += st.Size()
 		}
@@ -267,13 +269,16 @@ func (c *Cache) fileSize() int64 {
 const (
 	backfillKey  = "storage/backfill"
 	backfillDone = "done"
+	// insertLegacy makes the object of row key, of a category, if it has
+	// none: one whose references may be incomplete.
+	insertLegacy = `INSERT OR IGNORE INTO media_objects(key,category,size,created,accessed,legacy) SELECT key,?,length(data),used,used,1 FROM media WHERE key=?`
+	// insertRef adds a reference of key, chat, message, if key has an
+	// object; key is given twice.
+	insertRef = `INSERT OR IGNORE INTO media_refs SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM media_objects WHERE key=?)`
 )
 
 // backfillBatch is how many messages one step reads.
 var backfillBatch = 500
-
-// backfillTables are scanned in this order; the state is "table:rowid".
-var backfillTables = []string{"messages", "edits"}
 
 // backfillMedia runs the backfill in batches, letting the history have the
 // cache between them, as indexExisting does.
@@ -291,112 +296,83 @@ func (c *Cache) backfillMedia() {
 	}
 }
 
+type backfillRow struct {
+	chat    int64
+	id      int
+	payload []byte
+}
+
 // backfillStep attributes media rows without a complete object from one
-// batch of messages. Every write is idempotent and the position is saved
-// with it, so that a backfill cut short goes on after a restart.
+// batch of messages, then of edits; the state is "table:rowid". Every write
+// is idempotent and the position is saved with it, so that a backfill cut
+// short goes on after a restart. The payloads are decoded without the
+// cache's lock.
 func (c *Cache) backfillStep() (done bool, err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return true, nil
+	state, table, rows, last, err := c.backfillRead()
+	if state == backfillDone || err != nil {
+		return state == backfillDone, err
 	}
-	b, err := c.getLocked(backfillKey)
-	if err != nil {
-		return false, err
+	type found struct {
+		msg  model.Message
+		keys []string
 	}
-	state := string(b)
-	if state == backfillDone {
-		return true, nil
-	}
-	if c.candidates == nil {
-		if err = c.loadCandidates(); err != nil {
-			return false, err
+	var named []found
+	for _, r := range rows {
+		// Only media have IDs that are strings.
+		if !bytes.Contains(r.payload, []byte(`"ID":"`)) {
+			continue
 		}
-	}
-	table, pos, _ := strings.Cut(state, ":")
-	if table == "" {
-		table = backfillTables[0]
-	}
-	after, _ := strconv.ParseInt(pos, 10, 64)
-	query := `SELECT rowid, chat, id, payload FROM messages WHERE rowid>? ORDER BY rowid LIMIT ?`
-	if table == "edits" {
-		query = `SELECT rowid, chat, id, payload FROM edits WHERE rowid>? ORDER BY rowid LIMIT ?`
-	}
-	rows, err := c.db.Query(query, after, backfillBatch)
-	if err != nil {
-		return false, err
-	}
-	type hit struct {
-		key  string
-		ref  MediaRef
-		size int
-	}
-	var hits []hit
-	last, n := after, 0
-	for rows.Next() {
-		var chat int64
-		var id int
-		var payload []byte
-		if err = rows.Scan(&last, &chat, &id, &payload); err != nil {
-			rows.Close()
-			return false, err
-		}
-		n++
-		kind, keys := mediaKeys(payload)
-		msg := model.Message{Key: model.MessageKey{ChatID: chat, MessageID: model.MessageID(id)}, Kind: kind}
-		for _, key := range keys {
-			for _, k := range append([]string{key}, c.children[key]...) {
-				if c.candidates[k] {
-					hits = append(hits, hit{key: k, ref: RefOf(msg, key)})
-				}
-			}
-		}
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return false, err
+		kind, keys := mediaKeys(r.payload)
+		named = append(named, found{model.Message{Key: model.MessageKey{ChatID: r.chat, MessageID: model.MessageID(r.id)}, Kind: kind}, keys})
 	}
 	next := table + ":" + strconv.FormatInt(last, 10)
-	if n < backfillBatch {
-		next = ""
-		for i, t := range backfillTables {
-			if t == table && i+1 < len(backfillTables) {
-				next = backfillTables[i+1] + ":0"
-			}
+	if len(rows) < backfillBatch {
+		next = backfillDone
+		if table == "messages" {
+			next = "edits:0"
 		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if b, err := c.getLocked(backfillKey); c.closed || err != nil || string(b) != state {
+		return c.closed, err
 	}
 	tx, err := c.db.Begin()
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
-	for _, h := range hits {
-		if _, err = tx.Exec(`INSERT OR IGNORE INTO media_objects(key,category,size,created,accessed,legacy) SELECT key,?,length(data),used,used,1 FROM media WHERE key=?`, h.ref.Category, h.key); err != nil {
-			return false, err
-		}
-		if h.ref.Chat != 0 {
-			if _, err = tx.Exec(`INSERT OR IGNORE INTO media_refs SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM media_objects WHERE key=?)`, h.key, h.ref.Chat, h.ref.Message, h.key); err != nil {
-				return false, err
+	for _, f := range named {
+		for _, key := range f.keys {
+			ref := RefOf(f.msg, key)
+			for _, k := range append([]string{key}, c.children[key]...) {
+				if !c.candidates[k] {
+					continue
+				}
+				if _, err = tx.Exec(insertLegacy, ref.Category, k); err == nil && ref.Chat != 0 {
+					_, err = tx.Exec(insertRef, k, ref.Chat, ref.Message, k)
+				}
+				if err != nil {
+					return false, err
+				}
 			}
 		}
 	}
-	if next == "" {
+	if next == backfillDone {
 		// What no message names is attributed by its key where it can be.
 		for k := range c.candidates {
 			if chat, ok := model.AvatarChat(k); ok {
-				if _, err = tx.Exec(`INSERT OR IGNORE INTO media_objects(key,category,size,created,accessed,legacy) SELECT key,?,length(data),used,used,1 FROM media WHERE key=?`, model.StorageProfilePhotos, k); err != nil {
-					return false, err
-				}
-				if _, err = tx.Exec(`INSERT OR IGNORE INTO media_refs SELECT ?,?,0 WHERE EXISTS(SELECT 1 FROM media_objects WHERE key=?)`, k, chat, k); err != nil {
-					return false, err
+				if _, err = tx.Exec(insertLegacy, model.StorageProfilePhotos, k); err == nil {
+					_, err = tx.Exec(insertRef, k, chat, 0, k)
 				}
 			} else if strings.HasPrefix(k, "emoji/") {
-				if _, err = tx.Exec(`INSERT OR IGNORE INTO media_objects(key,category,size,created,accessed,legacy) SELECT key,?,length(data),used,used,1 FROM media WHERE key=?`, model.StorageStickers, k); err != nil {
-					return false, err
-				}
+				_, err = tx.Exec(insertLegacy, model.StorageStickers, k)
+			}
+			if err != nil {
+				return false, err
 			}
 		}
-		next = backfillDone
 	}
 	if _, err = tx.Exec(`INSERT OR REPLACE INTO kv VALUES(?,?)`, backfillKey, []byte(next)); err != nil {
 		return false, err
@@ -408,6 +384,46 @@ func (c *Cache) backfillStep() (done bool, err error) {
 		c.candidates, c.children = nil, nil
 	}
 	return next == backfillDone, nil
+}
+
+// backfillRead reads the next batch of the backfill. With nothing to look
+// for, the backfill is done at once.
+func (c *Cache) backfillRead() (state, table string, rows []backfillRow, last int64, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return backfillDone, "", nil, 0, nil
+	}
+	b, err := c.getLocked(backfillKey)
+	if state = string(b); err != nil || state == backfillDone {
+		return state, "", nil, 0, err
+	}
+	if c.candidates == nil {
+		if err = c.loadCandidates(); err != nil {
+			return "", "", nil, 0, err
+		}
+	}
+	if len(c.candidates) == 0 {
+		return backfillDone, "", nil, 0, c.putLocked(backfillKey, []byte(backfillDone))
+	}
+	table, pos, _ := strings.Cut(state, ":")
+	if table != "edits" {
+		table = "messages"
+	}
+	last, _ = strconv.ParseInt(pos, 10, 64)
+	r, err := c.db.Query(`SELECT rowid, chat, id, payload FROM `+table+` WHERE rowid>? ORDER BY rowid LIMIT ?`, last, backfillBatch)
+	if err != nil {
+		return "", "", nil, 0, err
+	}
+	defer r.Close()
+	for r.Next() {
+		var row backfillRow
+		if err = r.Scan(&last, &row.chat, &row.id, &row.payload); err != nil {
+			return "", "", nil, 0, err
+		}
+		rows = append(rows, row)
+	}
+	return state, table, rows, last, r.Err()
 }
 
 // loadCandidates reads the keys the backfill looks for: rows without an

@@ -105,18 +105,17 @@ func (c *Cache) open() error {
 	}
 	return err
 }
-func removePlain(path string) error {
-	for _, suffix := range []string{".plain", ".plain-journal", ".plain-wal", ".plain-shm"} {
-		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
-}
 
-func removeSecure(path string) error {
-	for _, suffix := range []string{".secure", ".secure-journal", ".secure-wal", ".secure-shm"} {
-		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+// dbSuffixes end the names of a database's files.
+var dbSuffixes = []string{"", "-journal", "-wal", "-shm"}
+
+func removePlain(path string) error { return removeDB(path + ".plain") }
+
+func removeSecure(path string) error { return removeDB(path + ".secure") }
+
+func removeDB(base string) error {
+	for _, suffix := range dbSuffixes {
+		if err := os.Remove(base + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}

@@ -63,7 +63,7 @@ func TestStorageUsageReconciles(t *testing.T) {
 		save("avatar/5/9", 100, avatar)
 		save("emoji/77", 50, MediaRef{Category: model.StorageStickers})
 		save("document/6", 400, MediaRef{Chat: 3, Message: 1, Category: model.StorageMusic})
-		save("document/6/range/0", 40, MediaRef{Chat: 3, Message: 1, Category: model.StorageFiles})
+		save("document/6/range/0", 40, MediaRef{Chat: 3, Message: 1})
 		// The same GIF shown in a second chat, read from the cache there.
 		if b, e := c.Media(ctx, "document/4", MediaRef{Chat: 2, Message: 7, Category: model.StorageGIFs}); e != nil || len(b) != 2000 {
 			t.Fatal(len(b), e)
