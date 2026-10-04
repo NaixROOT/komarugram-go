@@ -53,6 +53,11 @@ type App struct {
 	ownUsers atomic.Pointer[map[int64]bool]
 	// focused is set while the window has the focus.
 	focused bool
+	// shownChat and shownFocus tell other goroutines the open chat and the
+	// focus (see Showing); openChat is a chat to open (see OpenChat).
+	shownChat  atomic.Int64
+	shownFocus atomic.Bool
+	openChat   atomic.Int64
 	// filter hides messages as the settings ask.
 	filter     *messageFilter
 	lightTheme *token.Theme
@@ -280,6 +285,12 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 	a.settings.keep = func() preferences.Keep { return a.preferences.Global().Keep }
 	a.settings.setKeep = func(k preferences.Keep) {
 		if err := services.Preferences.SetKeep(k); err != nil {
+			log.Printf("save settings: %v", err)
+		}
+	}
+	a.settings.notifyView.get = func() preferences.Notify { return a.preferences.Global().Notify }
+	a.settings.notifyView.set = func(n preferences.Notify) {
+		if err := services.Preferences.SetNotify(n); err != nil {
 			log.Printf("save settings: %v", err)
 		}
 	}
@@ -664,6 +675,13 @@ func (a *App) Update(gtx layout.Context) {
 	a.sessionEnded.Update(gtx, a.store)
 	a.connectionFailed.Update(gtx, a.store)
 	a.frozen.Update(gtx)
+	if id := a.openChat.Swap(0); id != 0 {
+		if !a.section.showsChats() {
+			a.section = section{kind: sectionAll}
+		}
+		a.open(chatPick{ID: id})
+	}
+	a.shownChat.Store(a.selected)
 	folders := a.store.Folders()
 	a.overlay.Update(gtx)
 	if a.compact {
@@ -1121,8 +1139,22 @@ func (a *App) SetSuspended(hidden bool) {
 
 // SetFocused is called on the UI goroutine when the window gains or loses
 // the focus: the account shows online while it has it, if Ghost allows.
+// OpenChat opens chat in the window, as a click in the chat list would; it
+// may be called from any goroutine.
+func (a *App) OpenChat(chat int64) {
+	a.openChat.Store(chat)
+	a.window.Invalidate()
+}
+
+// Showing is the chat open in the window and whether the window has the
+// focus; it may be called from any goroutine.
+func (a *App) Showing() (chat int64, focused bool) {
+	return a.shownChat.Load(), a.shownFocus.Load()
+}
+
 func (a *App) SetFocused(focused bool) {
 	a.focused = focused
+	a.shownFocus.Store(focused)
 	a.tellGhost()
 }
 

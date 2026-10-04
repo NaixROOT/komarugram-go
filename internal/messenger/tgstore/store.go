@@ -37,6 +37,7 @@ type Store struct {
 	picker  pickerCache
 	themes  themeCatalogue
 	changed func()
+	notices atomic.Pointer[func(model.MessageNotice)]
 	history *conversation
 
 	themeRevisions map[int64]uint64
