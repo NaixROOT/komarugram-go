@@ -22,12 +22,14 @@ const (
 // New returns the notifier of this system: the desktop's Notifications
 // service (https://specifications.freedesktop.org/notification-spec/).
 func New(app string, tray Balloon) Notifier {
-	return &dbusNotifier{app: app, queue: make(chan Notification, 64), byTag: map[string]uint32{}, shown: map[uint32]shown{}, tokens: map[uint32]string{}}
+	return &dbusNotifier{app: app, queue: make(chan Notification, 64), byTag: map[string]uint32{}, shown: map[uint32]shown{}}
 }
 
 type shown struct {
 	tag  string
 	open func(string)
+	// token is the activation token the click comes with.
+	token string
 }
 
 type dbusNotifier struct {
@@ -42,7 +44,6 @@ type dbusNotifier struct {
 	markup bool
 	byTag  map[string]uint32
 	shown  map[uint32]shown
-	tokens map[uint32]string
 }
 
 func (d *dbusNotifier) connect() *dbus.Conn {
@@ -131,7 +132,7 @@ func (d *dbusNotifier) show(n Notification) {
 	if n.Tag != "" {
 		d.byTag[n.Tag] = id
 	}
-	d.shown[id] = shown{n.Tag, n.Open}
+	d.shown[id] = shown{tag: n.Tag, open: n.Open}
 	d.mu.Unlock()
 }
 
@@ -149,16 +150,18 @@ func (d *dbusNotifier) watch(signals <-chan *dbus.Signal) {
 			// Comes before ActionInvoked, for raising the window on Wayland.
 			if token, ok := sig.Body[1].(string); ok {
 				d.mu.Lock()
-				d.tokens[id] = token
+				if s, ok := d.shown[id]; ok {
+					s.token = token
+					d.shown[id] = s
+				}
 				d.mu.Unlock()
 			}
 		case busIface + ".ActionInvoked":
 			d.mu.Lock()
 			s, ok := d.shown[id]
-			token := d.tokens[id]
 			d.mu.Unlock()
 			if ok && s.open != nil {
-				go s.open(token)
+				go s.open(s.token)
 			}
 		case busIface + ".NotificationClosed":
 			d.mu.Lock()
@@ -166,7 +169,6 @@ func (d *dbusNotifier) watch(signals <-chan *dbus.Signal) {
 				delete(d.byTag, s.tag)
 			}
 			delete(d.shown, id)
-			delete(d.tokens, id)
 			d.mu.Unlock()
 		}
 	}

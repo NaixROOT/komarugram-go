@@ -8,6 +8,7 @@ import (
 	"komarugram/internal/messenger/localization"
 	"komarugram/internal/messenger/model"
 	"komarugram/internal/messenger/preferences"
+	"komarugram/internal/messenger/ui"
 	"komarugram/internal/notify"
 )
 
@@ -17,16 +18,12 @@ func (h *accountWindows) notice(s *accountSession, n model.MessageNotice) {
 	if h.notifier == nil || id == "" {
 		return
 	}
-	var shown noticeView
-	if app := s.app.Load(); app != nil && s.window.Load() != nil {
-		shown.chat, shown.focused = app.Showing()
+	app := s.app.Load()
+	if s.window.Load() == nil {
+		app = nil
 	}
-	shown.locked = s.locked.Load()
 	chat := n.Chat.ID
-	if note, ok := noticeFor(h.preferences.Global(), id, shown, n, h.catalog()); ok {
-		note.Open = func(token string) { h.openChat(id, chat, token) }
-		h.notifier.Show(note)
-	}
+	showNotice(h.notifier, h.preferences.Global(), id, viewOf(app, s.locked.Load()), n, func(token string) { h.openChat(id, chat, token) })
 }
 
 // noticeView is what the account's window shows: the chat open while it
@@ -34,6 +31,24 @@ func (h *accountWindows) notice(s *accountSession, n model.MessageNotice) {
 type noticeView struct {
 	chat            int64
 	focused, locked bool
+}
+
+// viewOf is what app shows; nil for no window.
+func viewOf(app *ui.App, locked bool) noticeView {
+	v := noticeView{locked: locked}
+	if app != nil {
+		v.chat, v.focused = app.Showing()
+	}
+	return v
+}
+
+// showNotice shows the notification of n to account, if the settings ask
+// for one; a click opens it.
+func showNotice(notifier notify.Notifier, g preferences.Global, account string, view noticeView, n model.MessageNotice, open func(token string)) {
+	if note, ok := noticeFor(g, account, view, n, localization.For(g.Language)); ok {
+		note.Open = open
+		notifier.Show(note)
+	}
 }
 
 // noticeFor is the notification of n to account, as the settings ask: none

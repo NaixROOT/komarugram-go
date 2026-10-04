@@ -277,22 +277,13 @@ func runDemo(chats int, profile bool, profileDir string, panicDemo bool, receive
 	var app atomic.Pointer[ui.App]
 	notifier := notify.New(localization.For(prefs.Global().Language).T("app.title"), nil)
 	store.SetNotices(func(n model.MessageNotice) {
-		var view noticeView
-		if a := app.Load(); a != nil {
-			view.chat, view.focused = a.Showing()
-		}
-		note, ok := noticeFor(prefs.Global(), "demo", view, n, localization.For(prefs.Global().Language))
-		if !ok {
-			return
-		}
 		chat := n.Chat.ID
-		note.Open = func(token string) {
+		showNotice(notifier, prefs.Global(), "demo", viewOf(app.Load(), false), n, func(token string) {
 			if a, w := app.Load(), window.Load(); a != nil && w != nil {
 				a.OpenChat(chat)
 				w.Activate(token)
 			}
-		}
-		notifier.Show(note)
+		})
 	})
 	if receive > 0 {
 		go func() {

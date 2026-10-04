@@ -8,8 +8,6 @@ import (
 	"komarugram/internal/messenger/model"
 )
 
-var _ model.NoticeSource = (*Store)(nil)
-
 // demoIncoming are the messages Receive brings, in turn.
 var demoIncoming = []struct {
 	chat         int64
@@ -59,6 +57,6 @@ func (s *Store) Receive() {
 	notices := s.notices
 	s.mu.Unlock()
 	if notices != nil && chat.ID != 0 {
-		notices(model.MessageNotice{Chat: chat, Message: id, Sender: in.sender, Text: in.text})
+		notices(model.MessageNotice{Chat: chat, Sender: in.sender, Text: in.text})
 	}
 }

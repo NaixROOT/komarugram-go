@@ -152,6 +152,7 @@ func TestRenderSettingsAccounts(t *testing.T) {
 	p.notifyView.set = func(n preferences.Notify) { notifyPrefs = n }
 	if os.Getenv("SETTINGS_SECTION") == "notify" {
 		p.section = settingsNotify
+		p.shownAccounts = p.accounts.All()
 		size.Y = 1100
 	}
 	if os.Getenv("SETTINGS_SECTION") == "privacy" {

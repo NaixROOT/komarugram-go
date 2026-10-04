@@ -569,13 +569,8 @@ func (p *settingsPage) Layout(gtx layout.Context, mode themeMode, system appeara
 		case settingsChats:
 			content = func(gtx layout.Context) layout.Dimensions { return p.layoutChats(gtx, l) }
 		case settingsNotify:
-			content = func(gtx layout.Context) layout.Dimensions {
-				accounts := 0
-				if p.accounts != nil {
-					accounts = len(p.accounts.All())
-				}
-				return p.notifyView.Layout(gtx, l, accounts)
-			}
+			// The accounts are as the main page last listed them.
+			content = func(gtx layout.Context) layout.Dimensions { return p.notifyView.Layout(gtx, l, len(p.shownAccounts)) }
 		default:
 			content = func(gtx layout.Context) layout.Dimensions {
 				return p.layoutMain(gtx, mode, dark, l)

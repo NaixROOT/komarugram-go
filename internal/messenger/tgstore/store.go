@@ -362,9 +362,7 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 		Unread: d.UnreadCount,
 		Pinned: d.Pinned,
 	}
-	if until, ok := d.NotifySettings.GetMuteUntil(); ok && time.Unix(int64(until), 0).After(time.Now()) {
-		chat.Muted = true
-	}
+	chat.Muted = mutedNow(d.NotifySettings)
 	if d.Pinned {
 		l.pins++
 		chat.PinRank = l.pins

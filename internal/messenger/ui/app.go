@@ -676,9 +676,6 @@ func (a *App) Update(gtx layout.Context) {
 	a.connectionFailed.Update(gtx, a.store)
 	a.frozen.Update(gtx)
 	if id := a.openChat.Swap(0); id != 0 {
-		if !a.section.showsChats() {
-			a.section = section{kind: sectionAll}
-		}
 		a.open(chatPick{ID: id})
 	}
 	a.shownChat.Store(a.selected)
@@ -807,6 +804,9 @@ func (a *App) selectedChat() (model.Chat, bool) {
 // open opens the chat picked in the chat list, at the message picked when a
 // search found one.
 func (a *App) open(pick chatPick) {
+	if !a.section.showsChats() {
+		a.section = section{kind: sectionAll}
+	}
 	a.selected = pick.ID
 	if pick.Chat != nil {
 		a.found = *pick.Chat
