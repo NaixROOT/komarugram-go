@@ -119,7 +119,6 @@ type photoViewer struct {
 	drag          stripDrag
 	thumbState    map[model.MessageID]*viewerThumbState
 	targets       map[model.MessageID]model.Message
-	videos        map[model.MessageID]model.Message
 	caption       viewerCaption
 	// openLink asks to open a link of a caption, once the viewer closes.
 	openLink func(url string)
@@ -206,7 +205,6 @@ func (v *photoViewer) openList(chat int64, m model.Message, list photoList) {
 	v.strip.Position = layout.Position{}
 	clear(v.thumbState)
 	clear(v.targets)
-	clear(v.videos)
 	v.fetch(ctx, session, -1, first)
 	v.fetch(ctx, session, 1, last)
 }
@@ -350,15 +348,8 @@ func (v *photoViewer) profileVideo(m model.Message) (model.Message, bool) {
 	if m.Media == nil || m.Media.Video == nil {
 		return model.Message{}, false
 	}
-	if g, ok := v.videos[m.Key.MessageID]; ok {
-		return g, true
-	}
 	g := m.WithMedia(m.Media.Video)
 	g.Kind = model.MessageGIF
-	if v.videos == nil {
-		v.videos = map[model.MessageID]model.Message{}
-	}
-	v.videos[m.Key.MessageID] = g
 	return g, true
 }
 

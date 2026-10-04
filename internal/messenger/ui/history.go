@@ -5,6 +5,7 @@ package ui
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"net/url"
 	"strings"
 	"sync"
@@ -814,6 +815,41 @@ type textRunes struct {
 	n        int
 }
 
+// runSpan is the style of a run of formatted text in typestyle ty: base is
+// its color, link a link's and quote a quote's.
+func runSpan(theme *token.Theme, ty token.TypeInfo, run model.TextRun, base, link, quote color.NRGBA) styledtext.SpanStyle {
+	st := styledtext.SpanStyle{Font: font.Font{Typeface: ty.Font, Weight: font.Normal}, Size: ty.Size, Content: run.Text, Color: base}
+	if run.Bold {
+		st.Font.Weight = font.Bold
+	}
+	if run.Italic || run.Quote {
+		st.Font.Style = font.Italic
+	}
+	if run.Code {
+		st.Font.Typeface = theme.Typescale[token.TypestylePreformatted].Font
+	}
+	if run.URL != "" {
+		st.Color = link
+	}
+	if run.Quote {
+		st.Color = quote
+	}
+	return st
+}
+
+// paintRunLine draws a run's underline or strike-through; links are
+// underlined.
+func paintRunLine(gtx layout.Context, run model.TextRun, size image.Point, c color.NRGBA) {
+	if !run.Underline && !run.Strike && run.URL == "" {
+		return
+	}
+	y := size.Y - 1
+	if run.Strike {
+		y = size.Y / 2
+	}
+	paint.FillShape(gtx.Ops, c, clip.Rect(image.Rect(0, y, size.X, y+max(gtx.Dp(1), 1))).Op())
+}
+
 func (p *chatPage) richText(gtx layout.Context, r *messageRow, l localization.Catalog, animate bool) layout.Dimensions {
 	end := p.trace.Begin("history.rich-text")
 	defer end()
@@ -822,24 +858,9 @@ func (p *chatPage) richText(gtx layout.Context, r *messageRow, l localization.Ca
 	ty := theme.Typescale[token.TypestyleBodyLarge]
 	styles := make([]styledtext.SpanStyle, len(r.runs))
 	frames := make([]image.Image, len(r.runs))
+	sc := scheme(gtx)
 	for i, run := range r.runs {
-		st := styledtext.SpanStyle{Font: font.Font{Typeface: ty.Font, Weight: font.Normal}, Size: ty.Size, Content: run.Text, Color: scheme(gtx).Surface.OnColor.AsNRGBA()}
-		if run.Bold {
-			st.Font.Weight = font.Bold
-		}
-		if run.Italic {
-			st.Font.Style = font.Italic
-		}
-		if run.Code {
-			st.Font.Typeface = theme.Typescale[token.TypestylePreformatted].Font
-		}
-		if run.URL != "" {
-			st.Color = scheme(gtx).Primary.Color.AsNRGBA()
-		}
-		if run.Quote {
-			st.Font.Style = font.Italic
-			st.Color = scheme(gtx).SurfaceVariant.OnColor.AsNRGBA()
-		}
+		st := runSpan(theme, ty, run, sc.Surface.OnColor.AsNRGBA(), sc.Primary.Color.AsNRGBA(), sc.SurfaceVariant.OnColor.AsNRGBA())
 		if run.Emoji != 0 && (!run.Spoiler || r.revealed || !r.text.reveal.started.IsZero()) {
 			msg := model.Message{Kind: model.MessageSticker, Media: &model.MessageMedia{ID: fmt.Sprintf("emoji/%d", run.Emoji), MIMEType: "application/x-custom-emoji"}}
 			frames[i], _ = p.media.Frame(msg, animate)
@@ -862,13 +883,7 @@ func (p *chatPage) richText(gtx layout.Context, r *messageRow, l localization.Ca
 			if frames[i] != nil {
 				drawImage(gtx, p.images, frames[i], size)
 			}
-			if run.Underline || run.Strike || run.URL != "" {
-				y := size.Y - 1
-				if run.Strike {
-					y = size.Y / 2
-				}
-				paint.FillShape(gtx.Ops, styles[i].Color, clip.Rect(image.Rect(0, y, size.X, y+max(gtx.Dp(1), 1))).Op())
-			}
+			paintRunLine(gtx, run, size, styles[i].Color)
 		}
 		if run.Spoiler && !r.revealed {
 			radius := float32(0)

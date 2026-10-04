@@ -11,7 +11,6 @@ import (
 	"gio-mw/token"
 	"gio-mw/wdk"
 
-	"gioui.org/font"
 	"gioui.org/gesture"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -45,6 +44,7 @@ func (v *photoViewer) layoutCaption(gtx layout.Context, m model.Message, stage i
 	if len(c.runs) == 0 {
 		return math.MaxInt
 	}
+	pad, padY, margin := gtx.Dp(12), gtx.Dp(8), gtx.Dp(12)
 	for {
 		e, ok := c.click.Update(gtx.Source)
 		if !ok {
@@ -53,7 +53,7 @@ func (v *photoViewer) layoutCaption(gtx layout.Context, m model.Message, stage i
 		if e.Kind != gesture.KindClick {
 			continue
 		}
-		at := e.Position.Sub(image.Pt(gtx.Dp(12), gtx.Dp(8)))
+		at := e.Position.Sub(image.Pt(pad, padY))
 		for _, f := range c.fragments {
 			if run := c.runs[f.Index]; run.URL != "" && at.In(f.Bounds) && v.openLink != nil {
 				v.Close()
@@ -67,20 +67,7 @@ func (v *photoViewer) layoutCaption(gtx layout.Context, m model.Message, stage i
 	white := color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	styles := make([]styledtext.SpanStyle, len(c.runs))
 	for i, run := range c.runs {
-		st := styledtext.SpanStyle{Font: font.Font{Typeface: ty.Font}, Size: ty.Size, Content: run.Text, Color: white}
-		if run.Bold {
-			st.Font.Weight = font.Bold
-		}
-		if run.Italic || run.Quote {
-			st.Font.Style = font.Italic
-		}
-		if run.Code {
-			st.Font.Typeface = theme.Typescale[token.TypestylePreformatted].Font
-		}
-		if run.URL != "" {
-			st.Color = color.NRGBA{R: 0x8a, G: 0xc8, B: 0xff, A: 0xff}
-		}
-		styles[i] = st
+		styles[i] = runSpan(theme, ty, run, white, color.NRGBA{R: 0x8a, G: 0xc8, B: 0xff, A: 0xff}, white)
 	}
 	c.fragments = c.fragments[:0]
 	text := styledtext.Text(theme.TextShaper, styles...)
@@ -93,15 +80,8 @@ func (v *photoViewer) layoutCaption(gtx layout.Context, m model.Message, stage i
 			return
 		}
 		draw()
-		if run.Underline || run.Strike || run.URL != "" {
-			y := size.Y - 1
-			if run.Strike {
-				y = size.Y / 2
-			}
-			paint.FillShape(gtx.Ops, styles[f.Index].Color, clip.Rect(image.Rect(0, y, size.X, y+max(gtx.Dp(1), 1))).Op())
-		}
+		paintRunLine(gtx, run, size, styles[f.Index].Color)
 	}
-	pad, padY, margin := gtx.Dp(12), gtx.Dp(8), gtx.Dp(12)
 	limit := image.Pt(max(0, min(stage.Dx()-2*margin, gtx.Dp(640))-2*pad), stage.Dy()/3)
 	tgtx := gtx
 	tgtx.Constraints = layout.Constraints{Max: image.Pt(limit.X, math.MaxInt/2)}
