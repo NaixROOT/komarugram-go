@@ -84,7 +84,8 @@ func (c *Cache) open() error {
  CREATE TABLE IF NOT EXISTS layouts(chat INTEGER,id INTEGER,env TEXT,revision INTEGER,height INTEGER,PRIMARY KEY(chat,id,env));
  CREATE TABLE IF NOT EXISTS media(key TEXT PRIMARY KEY,data BLOB,used INTEGER);
  CREATE TABLE IF NOT EXISTS edits(chat INTEGER,id INTEGER,at INTEGER,payload BLOB,PRIMARY KEY(chat,id,at));
- CREATE INDEX IF NOT EXISTS photos ON messages(chat,id) WHERE ` + photoWhere + `;`)
+ DROP INDEX IF EXISTS photos;
+ CREATE INDEX IF NOT EXISTS photo_videos ON messages(chat,id) WHERE ` + photoWhere + `;`)
 	if err == nil {
 		err = c.initSearch()
 	}
@@ -419,11 +420,11 @@ func (c *Cache) Page(ctx context.Context, chat int64, anchor, dir, limit int) ([
 	return out, rows.Err()
 }
 
-// photoWhere selects photo messages. Payloads are JSON stored as BLOBs,
+// photoWhere selects photos and videos. Payloads are JSON stored as BLOBs,
 // which SQLite would read as JSONB without the cast. The partial index above
 // uses the same expression, is built over existing rows when created, and is
 // what makes a gallery query cheap in a large chat.
-const photoWhere = `json_extract(CAST(payload AS TEXT),'$.Kind')=1`
+const photoWhere = `json_extract(CAST(payload AS TEXT),'$.Kind') IN (1,2)`
 
 // Photos reads a page of cached photo messages next to anchor, oldest
 // first: before it when dir is negative, after it otherwise.

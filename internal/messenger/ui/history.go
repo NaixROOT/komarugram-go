@@ -168,6 +168,7 @@ type chatPage struct {
 	audioBar audioBar
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
 	openPhoto  func(model.Message)
+	openAlone  func(model.Message)
 	openAuthor func(model.Chat)
 	// openComments shows the comments to a channel post; nil hides the
 	// comments bar. thread is set for the page that shows comments.

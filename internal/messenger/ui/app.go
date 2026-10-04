@@ -432,6 +432,9 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		a.chats.avatar = a.layoutAvatar
 		a.viewer = newPhotoViewer(source, &a.images, w.Invalidate)
 		a.history = a.newChatPage(source, store, w)
+		a.viewer.play = func(gtx layout.Context, m model.Message, l localization.Catalog) {
+			a.history.play(gtx, m, a.viewer.reportPlay, l)
+		}
 		if _, ok := store.(model.CommentsStore); ok {
 			a.history.openComments = a.openComments
 			a.comments = a.newChatPage(source, store, w)
@@ -492,6 +495,7 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.avatar = a.layoutAvatar
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
+	p.openAlone = func(m model.Message) { a.viewer.OpenAlone(p.chat, m) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
 	p.openWebApp = a.launchWebApp
 	if p.composer != nil {
