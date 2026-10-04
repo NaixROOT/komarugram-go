@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"komarugram/internal/messenger/historycache"
 	"komarugram/internal/messenger/model"
 
 	"github.com/gotd/td/bin"
@@ -133,7 +134,7 @@ func TestCDNMediaAndStreamingVerifyBeforeCaching(t *testing.T) {
 					if err == nil {
 						t.Fatal("accepted corrupted CDN bytes")
 					}
-					if b, _ := s.Cache().Media(context.Background(), "cdn"); len(b) > 0 {
+					if b, _ := s.Cache().Media(context.Background(), "cdn", historycache.MediaRef{}); len(b) > 0 {
 						t.Fatal("cached unauthenticated file")
 					}
 					return

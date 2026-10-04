@@ -737,7 +737,7 @@ func (m *Manager) gifThumbnail(ctx context.Context, msg model.Message) image.Ima
 	if thumb == nil || thumb.Width <= 0 || thumb.Height <= 0 {
 		return nil
 	}
-	data, err := m.source.Media(ctx, model.Message{Kind: model.MessagePhoto, Media: thumb})
+	data, err := m.source.Media(ctx, model.Message{Key: msg.Key, Kind: msg.Kind, Media: thumb})
 	if err != nil {
 		return nil
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"komarugram/internal/messenger/historycache"
 	"komarugram/internal/messenger/model"
 
 	"github.com/gotd/td/tg"
@@ -49,7 +50,7 @@ func (s *Store) collectionMessage(ctx context.Context, peer peerRecord, raw *tg.
 		if r.Thumb != "inline" {
 			refs[thumb.ID] = r
 		} else if cache != nil {
-			if err := cache.SaveMedia(ctx, thumb.ID, thumb.Preview); err != nil {
+			if err := cache.SaveMedia(ctx, thumb.ID, thumb.Preview, historycache.RefOf(m, thumb.ID)); err != nil {
 				return m, err
 			}
 		}

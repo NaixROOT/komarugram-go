@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"komarugram/internal/messenger/historycache"
 	"komarugram/internal/messenger/model"
 	"komarugram/pkg/dcpool"
 
@@ -48,7 +49,7 @@ func (s *Store) MediaStream(ctx context.Context, m model.Message) (io.ReaderAt, 
 	if cache == nil {
 		return nil, 0, nil, errors.New("cache unavailable")
 	}
-	if b, e := cache.Media(ctx, m.Media.ID); e != nil {
+	if b, e := cache.Media(ctx, m.Media.ID, historycache.RefOf(m, m.Media.ID)); e != nil {
 		return nil, 0, nil, e
 	} else if len(b) > 0 {
 		return bytes.NewReader(b), int64(len(b)), func() {}, nil
@@ -121,7 +122,7 @@ func (r *rangeReader) chunk(offset int64) ([]byte, error) {
 	cache, pool := c.cache, c.pool
 	c.mu.Unlock()
 	key := fmt.Sprintf("%s/range/%d", r.message.Media.ID, offset)
-	b, e := cache.Media(r.ctx, key)
+	b, e := cache.Media(r.ctx, key, historycache.RefOf(r.message, key))
 	if e != nil {
 		return nil, e
 	}
@@ -183,7 +184,7 @@ func (r *rangeReader) chunk(offset int64) ([]byte, error) {
 		if len(b) == 0 {
 			return nil, io.ErrUnexpectedEOF
 		}
-		if e = cache.SaveMedia(ctx, key, b); e != nil {
+		if e = cache.SaveMedia(ctx, key, b, historycache.RefOf(r.message, key)); e != nil {
 			return nil, e
 		}
 	}
