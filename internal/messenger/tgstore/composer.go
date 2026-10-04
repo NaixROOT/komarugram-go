@@ -4,7 +4,6 @@ package tgstore
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"mime"
@@ -438,31 +437,8 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 }
 
 func (s *Store) pickerWebItem(ctx context.Context, r *tg.BotInlineResult, dc int) model.PickerItem {
-	doc := r.Content
-	id := fmt.Sprintf("inline/%x", sha256.Sum256([]byte(doc.GetURL())))
-	m := &model.MessageMedia{ID: id, MIMEType: doc.GetMimeType(), Size: int64(doc.GetSize())}
-	for _, attr := range doc.GetAttributes() {
-		switch a := attr.(type) {
-		case *tg.DocumentAttributeVideo:
-			m.Width, m.Height = a.W, a.H
-		case *tg.DocumentAttributeImageSize:
-			m.Width, m.Height = a.W, a.H
-		}
-	}
-	ref := fileLocation{WebURL: doc.GetURL(), DC: dc}
-	if d, ok := doc.(*tg.WebDocument); ok {
-		ref.WebHash = d.AccessHash
-	} else {
-		ref.WebNoProxy = true
-	}
-	s.history.mu.Lock()
-	s.history.refs[id] = ref
-	cache := s.history.cache
-	s.history.mu.Unlock()
-	if cache != nil {
-		_ = cache.Put(ctx, "ref/"+id, ref)
-	}
-	return model.PickerItem{ID: id, Media: model.Message{Kind: model.MessageGIF, Media: m}}
+	m := s.webMedia(ctx, r.Content, dc)
+	return model.PickerItem{ID: m.ID, Media: model.Message{Kind: model.MessageGIF, Media: m}}
 }
 
 func (s *Store) RememberPicker(ctx context.Context, tab model.PickerTab, item model.PickerItem) error {

@@ -81,6 +81,9 @@ func (s *Store) Send(ctx context.Context, chat int64, out model.OutgoingMessage)
 	if out.Item != nil {
 		m.Kind = out.Item.Media.Kind
 		m.Media = out.Item.Media.Media
+		if m.Media == nil {
+			m.Text = inlineText(out.Item.ResultID)
+		}
 	}
 	if out.Voice != nil {
 		// A voice message, as Telegram returns one: no name, its duration.

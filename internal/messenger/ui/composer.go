@@ -160,6 +160,7 @@ type messageComposer struct {
 	voicePicks            chan voicePick
 	recorded              map[string]bool
 	paste                 struct{}
+	inline                inlineQuery
 	pasted                map[string]bool
 	uploading             map[string]bool
 	micClick, voiceCancel surface
@@ -510,6 +511,7 @@ drained:
 				c.textChanged(d)
 			}
 		}
+		c.updateInline(gtx, c.chat, d.editor.Text())
 	}
 	for {
 		_, ok := c.search.Update(gtx)
@@ -730,8 +732,9 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 		return layout.Dimensions{Size: size}
 	}
-	if p.bot.empty {
-		// An empty chat with a bot starts it, as Telegram Desktop's does.
+	if p.bot.empty || p.bot.startTokens[chat] != "" {
+		// An empty chat with a bot starts it, as Telegram Desktop's does,
+		// and so does one opened by a link with a start parameter.
 		p.layoutStart(gtx, chat, rect, classic, backdrop, l)
 		return layout.Dimensions{Size: size}
 	}
@@ -926,6 +929,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 	}
 	p.layoutCommands(gtx, chat, size, pad, above, l)
+	p.layoutInline(gtx, chat, size, pad, above, l, animate)
 	bar := rect
 	bar.Min.Y = above
 	if classic {
