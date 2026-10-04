@@ -149,7 +149,7 @@ func TestProtectionTransitionKeepsSyncAndAnchor(t *testing.T) {
 	if e = c.SaveMessages(ctx, []model.Message{msg}); e != nil {
 		t.Fatal(e)
 	}
-	if e = c.SaveMedia(ctx, "picture", []byte("media bytes")); e != nil {
+	if e = c.SaveMedia(ctx, "picture", []byte("media bytes"), MediaRef{}); e != nil {
 		t.Fatal(e)
 	}
 	if e = p.Enable(ctx, "test"); e != nil {
@@ -174,7 +174,7 @@ func TestProtectionTransitionKeepsSyncAndAnchor(t *testing.T) {
 		if err != nil || len(messages) != 1 || messages[0].Text != msg.Text {
 			t.Fatalf("message lost: %+v, %v", messages, err)
 		}
-		media, err := c.Media(ctx, "picture")
+		media, err := c.Media(ctx, "picture", MediaRef{})
 		if err != nil || string(media) != "media bytes" {
 			t.Fatalf("media lost: %q, %v", media, err)
 		}

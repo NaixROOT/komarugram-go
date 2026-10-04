@@ -355,6 +355,33 @@ Compaction, the same in both modes (only times differ):
   at 256 MiB, so the row count depends on sizes), latency under concurrent
   writes, Windows, allocated size vs file length.
 
+## Phase 1: what exists
+
+- `historycache/storage.go`: `media_objects` (category, size, created,
+  accessed, legacy) and `media_refs` (object, chat, message), made with the
+  other tables; a trigger drops both with their media row. `SaveMedia` and
+  `Media` take a `MediaRef`, from `RefOf(message, key)` in `tgstore`'s four
+  writers and two readers. Reads keep access times and references in memory
+  and write them together (256 reads or 30 s, and on close); statistics do
+  not count as access. The 256 MiB budget is unchanged.
+- The backfill runs in the background in batches of 500 messages, then the
+  edits, and keeps its place in `kv` (`storage/backfill`); every write is
+  idempotent. Objects it makes, and those a read makes for a row without
+  one, are `legacy`: their references may be incomplete. Avatars and emoji
+  that no message names are attributed by their key; the rest stays
+  Unattributed.
+- `StorageUsage` is one pass over objects and references in key order:
+  0.3 s for 100,000 objects in 10,000 chats (0.85 s as a query per
+  figure), 3–5 ms for 400 objects. Measured with `STORAGE_PROBE_OBJECTS`.
+- `internal/messenger/storage`: owned roots, volumes (`statfs` on Linux,
+  macOS and FreeBSD, `GetDiskFreeSpaceEx` on Windows, unknown elsewhere),
+  file length and allocated size (Unix only), and `StorageSnapshot` over
+  accounts with or without an open store, with a generation.
+- Not yet: wiring the service into `account_host.go` (phase 2, with its
+  first reader), opening inactive accounts' caches, stories as an origin,
+  eviction by access time (phase 5), `auto_vacuum` (phase 3). Checked on
+  Linux only; the Windows volume code is built, not run.
+
 ## Delivery phases
 
 Each phase should be independently reviewable. Storage phases 0–5 are the main

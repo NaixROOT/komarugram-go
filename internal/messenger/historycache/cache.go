@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -31,10 +32,18 @@ type Cache struct {
 	closed                 bool
 	unregister             func()
 	unregisterPlain        func()
+	clock                  func() time.Time
+	// Reads of media not yet written (see noteAccess), and what the
+	// backfill looks for (see backfillStep).
+	accessed   map[string]mediaAccess
+	accessRefs map[mediaRefRow]struct{}
+	flushed    time.Time
+	candidates map[string]bool
+	children   map[string][]string
 }
 
 func Open(path, account string, protection *security.Manager) (*Cache, error) {
-	c := &Cache{path: path, account: account, protection: protection}
+	c := &Cache{path: path, account: account, protection: protection, clock: time.Now}
 	if err := c.open(); err != nil {
 		return nil, err
 	}
@@ -43,6 +52,7 @@ func Open(path, account string, protection *security.Manager) (*Cache, error) {
 		c.unregisterPlain = protection.AddUnmigration(c.Unprotect)
 	}
 	go c.indexExisting()
+	go c.backfillMedia()
 	return c, nil
 }
 func (c *Cache) open() error {
@@ -86,7 +96,7 @@ func (c *Cache) open() error {
  CREATE TABLE IF NOT EXISTS edits(chat INTEGER,id INTEGER,at INTEGER,payload BLOB,PRIMARY KEY(chat,id,at));
  CREATE TABLE IF NOT EXISTS spans(chat INTEGER,low INTEGER,high INTEGER,PRIMARY KEY(chat,low));
  DROP INDEX IF EXISTS photos;
- CREATE INDEX IF NOT EXISTS photo_videos ON messages(chat,id) WHERE ` + photoWhere + `;`)
+ CREATE INDEX IF NOT EXISTS photo_videos ON messages(chat,id) WHERE ` + photoWhere + `;` + storageSchema)
 	if err == nil {
 		err = c.initSearch()
 	}
@@ -95,18 +105,17 @@ func (c *Cache) open() error {
 	}
 	return err
 }
-func removePlain(path string) error {
-	for _, suffix := range []string{".plain", ".plain-journal", ".plain-wal", ".plain-shm"} {
-		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
-}
 
-func removeSecure(path string) error {
-	for _, suffix := range []string{".secure", ".secure-journal", ".secure-wal", ".secure-shm"} {
-		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+// dbSuffixes end the names of a database's files.
+var dbSuffixes = []string{"", "-journal", "-wal", "-shm"}
+
+func removePlain(path string) error { return removeDB(path + ".plain") }
+
+func removeSecure(path string) error { return removeDB(path + ".secure") }
+
+func removeDB(base string) error {
+	for _, suffix := range dbSuffixes {
+		if err := os.Remove(base + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
@@ -191,6 +200,11 @@ func (c *Cache) Close() error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.closed {
+		if err := c.flushAccess(context.Background()); err != nil {
+			log.Printf("historycache: media access: %v", err)
+		}
+	}
 	c.closed = true
 	return c.db.Close()
 }
@@ -381,7 +395,9 @@ func (c *Cache) Layouts(ctx context.Context, chat int64, env model.RenderEnviron
 	}
 	return out, rows.Err()
 }
-func (c *Cache) Media(ctx context.Context, key string) ([]byte, error) {
+
+// Media reads the cached object key, read for ref.
+func (c *Cache) Media(ctx context.Context, key string, ref MediaRef) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var b []byte
@@ -389,18 +405,32 @@ func (c *Cache) Media(ctx context.Context, key string) ([]byte, error) {
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if e == nil {
+		c.noteAccess(key, ref)
+	}
 	return b, e
 }
-func (c *Cache) SaveMedia(ctx context.Context, key string, b []byte) error {
+
+// SaveMedia caches b as the object key, written for ref.
+func (c *Cache) SaveMedia(ctx context.Context, key string, b []byte, ref MediaRef) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, e := c.db.ExecContext(ctx, `INSERT OR REPLACE INTO media VALUES(?,?,?)`, key, b, time.Now().UnixNano())
+	tx, e := c.db.BeginTx(ctx, nil)
 	if e != nil {
 		return e
 	}
+	defer tx.Rollback()
+	if _, e = tx.ExecContext(ctx, `INSERT OR REPLACE INTO media VALUES(?,?,?)`, key, b, c.clock().UnixNano()); e != nil {
+		return e
+	}
+	if e = c.saveObject(ctx, tx, key, len(b), ref); e != nil {
+		return e
+	}
 	// Account-scoped 256 MiB disk budget, including originals needed by the external player.
-	_, e = c.db.ExecContext(ctx, `DELETE FROM media WHERE key IN (SELECT key FROM (SELECT key,SUM(length(data)) OVER (ORDER BY used DESC) AS total FROM media) WHERE total>268435456)`)
-	return e
+	if _, e = tx.ExecContext(ctx, `DELETE FROM media WHERE key IN (SELECT key FROM (SELECT key,SUM(length(data)) OVER (ORDER BY used DESC) AS total FROM media) WHERE total>268435456)`); e != nil {
+		return e
+	}
+	return tx.Commit()
 }
 
 // Page reads adjacent cached messages without requiring a Telegram connection.

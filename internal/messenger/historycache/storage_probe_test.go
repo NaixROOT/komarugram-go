@@ -20,7 +20,8 @@ import (
 // TestStorageProbe measures a synthetic cache, plaintext and encrypted, and
 // what deleting media and compacting give back. Data and Storage, phase 0:
 // STORAGE_PROBE=1 runs it; STORAGE_PROBE_MEDIA and STORAGE_PROBE_MESSAGES
-// change its size, STORAGE_PROBE_TEMP=file VACUUM's temporary storage.
+// change its size, STORAGE_PROBE_OBJECTS adds that many small objects,
+// STORAGE_PROBE_TEMP=file sets VACUUM's temporary storage.
 func TestStorageProbe(t *testing.T) {
 	if os.Getenv("STORAGE_PROBE") == "" {
 		t.Skip("STORAGE_PROBE not set")
@@ -96,13 +97,50 @@ func probeStorage(t *testing.T, encrypted bool) {
 	for i := range media {
 		rnd.Read(blob)
 		s := time.Now()
-		if e = c.SaveMedia(ctx, fmt.Sprintf("media/%d", i), blob); e != nil {
+		if e = c.SaveMedia(ctx, fmt.Sprintf("media/%d", i), blob, MediaRef{Chat: int64(i%chats + 1), Category: model.StoragePhotos}); e != nil {
 			t.Fatal(e)
 		}
 		slowest = max(slowest, time.Since(s))
 	}
 	t.Logf("%d media of %d KiB: %v, slowest SaveMedia %v", media, mediaSize>>10, time.Since(start).Round(time.Millisecond), slowest.Round(time.Microsecond))
 	report("media saved")
+	s := time.Now()
+	u, e := c.StorageUsage(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Logf("StorageUsage: %v, %d chats, %s media", time.Since(s).Round(time.Microsecond), len(u.Chats), mib(u.Media))
+	if objects := envInt("STORAGE_PROBE_OBJECTS", 0); objects > 0 {
+		// Rows written directly: SaveMedia's budget query reads every row.
+		tx, e := c.db.Begin()
+		if e != nil {
+			t.Fatal(e)
+		}
+		small := make([]byte, 1024)
+		for i := range objects {
+			key := fmt.Sprintf("small/%d", i)
+			if _, e = tx.Exec(`INSERT INTO media VALUES(?,?,0)`, key, small); e == nil {
+				_, e = tx.Exec(`INSERT INTO media_objects(key,category,size,created,accessed) VALUES(?,?,1024,0,0)`, key, i%model.StorageCategories)
+			}
+			if e == nil {
+				_, e = tx.Exec(`INSERT INTO media_refs VALUES(?,?,?)`, key, i%10000+1, i)
+			}
+			if e == nil && i%10 == 0 {
+				_, e = tx.Exec(`INSERT INTO media_refs VALUES(?,?,?)`, key, (i+1)%10000+1, i)
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+		}
+		if e = tx.Commit(); e != nil {
+			t.Fatal(e)
+		}
+		s = time.Now()
+		if u, e = c.StorageUsage(ctx); e != nil {
+			t.Fatal(e)
+		}
+		t.Logf("StorageUsage with %d more objects: %v, %d chats, %s media, %s", objects, time.Since(s).Round(time.Microsecond), len(u.Chats), mib(u.Media), probeRSS())
+	}
 
 	for _, q := range []string{
 		`SELECT count(*), coalesce(sum(length(data)),0) FROM media`,
@@ -131,7 +169,7 @@ func probeStorage(t *testing.T, encrypted bool) {
 			t.Fatal(e)
 		}
 	}
-	s := time.Now()
+	s = time.Now()
 	if _, e = c.db.ExecContext(ctx, `PRAGMA auto_vacuum=INCREMENTAL; VACUUM`); e != nil {
 		t.Fatal(e)
 	}

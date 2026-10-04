@@ -1056,7 +1056,7 @@ func (s *Store) convert(ctx context.Context, raw []tg.MessageClass, live bool, s
 				}
 			}
 			if inline != nil {
-				if e := cache.SaveMedia(ctx, inline.ID, inline.Preview); e != nil {
+				if e := cache.SaveMedia(ctx, inline.ID, inline.Preview, historycache.RefOf(m, inline.ID)); e != nil {
 					return nil, e
 				}
 			}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"komarugram/internal/diagnostics"
+	"komarugram/internal/messenger/historycache"
 	"komarugram/internal/messenger/model"
 	"komarugram/pkg/dcpool"
 	"sort"
@@ -48,7 +49,7 @@ func (s *Store) MediaProgress(ctx context.Context, m model.Message, progress fun
 		return nil, errors.New("media: connection not ready")
 	}
 	start := diagnostics.Start()
-	b, e := cache.Media(ctx, m.Media.ID)
+	b, e := cache.Media(ctx, m.Media.ID, historycache.RefOf(m, m.Media.ID))
 	if !start.IsZero() {
 		name := "media.cache-miss"
 		if len(b) > 0 {
@@ -106,7 +107,7 @@ func (s *Store) MediaProgress(ctx context.Context, m model.Message, progress fun
 	if m.Media.Size > 0 && int64(len(b)) != m.Media.Size {
 		return nil, fmt.Errorf("media size mismatch: received %d, expected %d", len(b), m.Media.Size)
 	}
-	if e = cache.SaveMedia(ctx, m.Media.ID, b); e != nil {
+	if e = cache.SaveMedia(ctx, m.Media.ID, b, historycache.RefOf(m, m.Media.ID)); e != nil {
 		return nil, e
 	}
 	return b, nil

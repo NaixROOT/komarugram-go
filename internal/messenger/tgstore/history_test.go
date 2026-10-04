@@ -4,6 +4,7 @@ package tgstore
 
 import (
 	"context"
+	"komarugram/internal/messenger/historycache"
 	"komarugram/internal/messenger/model"
 	"path/filepath"
 	"testing"
@@ -75,7 +76,7 @@ func TestOfflineMediaAndCachedPages(t *testing.T) {
 	if e := s.Cache().SaveMessages(ctx, []model.Message{m}); e != nil {
 		t.Fatal(e)
 	}
-	if e := s.Cache().SaveMedia(ctx, "test", []byte("bytes")); e != nil {
+	if e := s.Cache().SaveMedia(ctx, "test", []byte("bytes"), historycache.MediaRef{}); e != nil {
 		t.Fatal(e)
 	}
 	b, e := s.Media(ctx, m)
