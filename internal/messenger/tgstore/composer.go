@@ -30,44 +30,58 @@ type pickerCache struct {
 
 func (s *Store) pickerItems(ctx context.Context, docs []tg.DocumentClass) []model.PickerItem {
 	var out []model.PickerItem
+	refs := map[string]fileLocation{}
 	for _, raw := range docs {
-		d, ok := raw.(*tg.Document)
-		if !ok {
-			continue
+		if d, ok := raw.(*tg.Document); ok {
+			out = append(out, documentItem(d, refs))
 		}
-		kind, meta, ref := documentMedia(d)
-		item := model.PickerItem{ID: meta.ID, DocumentID: d.ID, Media: model.Message{Kind: kind, Media: meta}}
-		for _, a := range d.Attributes {
-			switch a := a.(type) {
-			case *tg.DocumentAttributeSticker:
-				item.Emoji = a.Alt
-			case *tg.DocumentAttributeCustomEmoji:
-				item.Emoji = a.Alt
-				item.Custom = true
-			}
-		}
-		// The thumbnail is located too: a GIF shows it until played.
-		refs := map[string]fileLocation{meta.ID: *ref}
-		if thumb := meta.Thumbnail; thumb != nil {
-			if r := *ref; thumb.Width > 0 {
-				r.Thumb = thumb.ID[strings.LastIndexByte(thumb.ID, '/')+1:]
-				refs[thumb.ID] = r
-			}
-		}
-		s.history.mu.Lock()
-		for id, r := range refs {
-			s.history.refs[id] = r
-		}
-		cache := s.history.cache
-		s.history.mu.Unlock()
-		if cache != nil {
-			for id, r := range refs {
-				_ = cache.Put(ctx, "ref/"+id, r)
-			}
-		}
-		out = append(out, item)
 	}
+	s.keepRefs(ctx, refs)
 	return out
+}
+
+// documentItem is document d to pick, with its location and its
+// thumbnail's added to refs: a GIF shows the thumbnail until played.
+func documentItem(d *tg.Document, refs map[string]fileLocation) model.PickerItem {
+	kind, meta, ref := documentMedia(d)
+	item := model.PickerItem{ID: meta.ID, DocumentID: d.ID, Media: model.Message{Kind: kind, Media: meta}}
+	for _, a := range d.Attributes {
+		switch a := a.(type) {
+		case *tg.DocumentAttributeSticker:
+			item.Emoji = a.Alt
+		case *tg.DocumentAttributeCustomEmoji:
+			item.Emoji = a.Alt
+			item.Custom = true
+		}
+	}
+	refs[meta.ID] = *ref
+	if thumb := meta.Thumbnail; thumb != nil {
+		if r := *ref; thumb.Width > 0 {
+			r.Thumb = thumb.ID[strings.LastIndexByte(thumb.ID, '/')+1:]
+			refs[thumb.ID] = r
+		}
+	}
+	return item
+}
+
+// keepRefs remembers where files are, in memory and in the cache, at once.
+func (s *Store) keepRefs(ctx context.Context, refs map[string]fileLocation) {
+	if len(refs) == 0 {
+		return
+	}
+	s.history.mu.Lock()
+	for id, r := range refs {
+		s.history.refs[id] = r
+	}
+	cache := s.history.cache
+	s.history.mu.Unlock()
+	if cache != nil {
+		values := make(map[string]any, len(refs))
+		for id, r := range refs {
+			values["ref/"+id] = r
+		}
+		_ = cache.PutAll(ctx, values)
+	}
 }
 func (s *Store) Picker(ctx context.Context, req model.PickerRequest) (model.PickerPage, error) {
 	s.history.mu.Lock()
@@ -116,22 +130,29 @@ func (s *Store) Picker(ctx context.Context, req model.PickerRequest) (model.Pick
 			return model.PickerPage{}, err
 		}
 		page := model.PickerPage{Next: res.NextOffset}
+		refs := map[string]fileLocation{}
 		for _, raw := range res.Results {
-			if r, ok := raw.(*tg.BotInlineResult); ok && r.Content != nil {
-				item := s.pickerWebItem(ctx, r, cfg.WebfileDCID)
-				item.QueryID = res.QueryID
-				item.ResultID = r.ID
-				page.Items = append(page.Items, item)
-			}
-			if r, ok := raw.(*tg.BotInlineMediaResult); ok {
-				items := s.pickerItems(ctx, []tg.DocumentClass{r.Document})
-				for _, item := range items {
-					item.QueryID = res.QueryID
-					item.ResultID = r.ID
-					page.Items = append(page.Items, item)
+			var item model.PickerItem
+			switch r := raw.(type) {
+			case *tg.BotInlineResult:
+				if r.Content == nil {
+					continue
 				}
+				m := webMedia(r.Content, cfg.WebfileDCID, refs)
+				item = model.PickerItem{ID: m.ID, Media: model.Message{Kind: model.MessageGIF, Media: m}}
+			case *tg.BotInlineMediaResult:
+				d, ok := r.Document.(*tg.Document)
+				if !ok {
+					continue
+				}
+				item = documentItem(d, refs)
+			default:
+				continue
 			}
+			item.QueryID, item.ResultID = res.QueryID, raw.GetID()
+			page.Items = append(page.Items, item)
 		}
+		s.keepRefs(ctx, refs)
 		return page, nil
 	}
 	base, err := s.pickerCatalogue(ctx, api, req.Tab)
@@ -434,11 +455,6 @@ func (s *Store) Send(ctx context.Context, chat int64, msg model.OutgoingMessage)
 
 	_ = s.Handle(ctx, res)
 	return nil
-}
-
-func (s *Store) pickerWebItem(ctx context.Context, r *tg.BotInlineResult, dc int) model.PickerItem {
-	m := s.webMedia(ctx, r.Content, dc)
-	return model.PickerItem{ID: m.ID, Media: model.Message{Kind: model.MessageGIF, Media: m}}
 }
 
 func (s *Store) RememberPicker(ctx context.Context, tab model.PickerTab, item model.PickerItem) error {

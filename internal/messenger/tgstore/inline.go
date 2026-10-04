@@ -4,9 +4,7 @@ package tgstore
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,14 +37,13 @@ func (s *Store) InlineBot(ctx context.Context, username string) (model.InlineBot
 	if api == nil {
 		return model.InlineBot{}, errors.New("offline")
 	}
-	res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
-	if tgerr.Is(err, "USERNAME_NOT_OCCUPIED", "USERNAME_INVALID") {
+	res, err := s.resolveUsername(ctx, api, username)
+	if errors.Is(err, model.ErrLinkNotFound) {
 		return model.InlineBot{}, model.ErrNotInlineBot
 	}
 	if err != nil {
 		return model.InlineBot{}, err
 	}
-	s.rememberPeers(res.Users, res.Chats)
 	for _, raw := range res.Users {
 		u, ok := raw.(*tg.User)
 		if !ok || !u.Bot {
@@ -77,7 +74,7 @@ func (s *Store) InlineResults(ctx context.Context, chat, bot int64, query, offse
 	if api == nil {
 		return model.InlineResults{}, errors.New("offline")
 	}
-	res, err := api.MessagesGetInlineBotResults(ctx, &tg.MessagesGetInlineBotResultsRequest{Bot: &tg.InputUser{UserID: botPeer.ID, AccessHash: botPeer.Hash}, Peer: peer.input(), Query: query, Offset: offset})
+	res, err := api.MessagesGetInlineBotResults(ctx, &tg.MessagesGetInlineBotResultsRequest{Bot: botPeer.inputUser(), Peer: peer.input(), Query: query, Offset: offset})
 	if tgerr.Is(err, "BOT_RESPONSE_TIMEOUT") {
 		return model.InlineResults{}, nil
 	}
@@ -87,51 +84,45 @@ func (s *Store) InlineResults(ctx context.Context, chat, bot int64, query, offse
 	s.rememberPeers(res.Users, nil)
 	dc := s.webDC(ctx, api)
 	out := model.InlineResults{Gallery: res.Gallery, Next: res.NextOffset}
+	refs := map[string]fileLocation{}
 	for _, raw := range res.Results {
 		var r model.InlineResult
 		switch v := raw.(type) {
 		case *tg.BotInlineResult:
 			r = model.InlineResult{Kind: v.Type, Title: v.Title, Description: v.Description}
 			if v.Thumb != nil {
-				r.Thumb = s.webMedia(ctx, v.Thumb, dc)
+				r.Thumb = webMedia(v.Thumb, dc, refs)
 			}
-			r.Item.ID = v.ID
 			if v.Content != nil {
-				r.Item.Media = model.Message{Kind: model.MessagePhoto, Media: s.webMedia(ctx, v.Content, dc)}
+				r.Item.Media = model.Message{Kind: model.MessagePhoto, Media: webMedia(v.Content, dc, refs)}
 				if v.Type == "gif" || strings.HasPrefix(v.Content.GetMimeType(), "video/") {
 					r.Item.Media.Kind = model.MessageGIF
 				}
 			} else if r.Thumb != nil {
 				r.Item.Media = model.Message{Kind: model.MessagePhoto, Media: r.Thumb}
 			}
-			r.Item.ResultID = v.ID
 		case *tg.BotInlineMediaResult:
 			r = model.InlineResult{Kind: v.Type, Title: v.Title, Description: v.Description}
 			if d, ok := v.Document.(*tg.Document); ok {
-				if items := s.pickerItems(ctx, []tg.DocumentClass{d}); len(items) > 0 {
-					r.Item = items[0]
-				}
+				r.Item = documentItem(d, refs)
 				r.Thumb = r.Item.Media.Media
 			}
 			if p, ok := v.Photo.(*tg.Photo); ok {
-				meta, largest := photoMedia(p)
-				if largest != "" {
-					meta.ID = fmt.Sprintf("photo/%d", p.ID)
-					c.mu.Lock()
-					c.refs[meta.ID] = fileLocation{ID: p.ID, Hash: p.AccessHash, Reference: p.FileReference, DC: p.DCID, Photo: true, Thumb: largest}
-					c.mu.Unlock()
+				c.mu.Lock()
+				meta := c.rememberProfilePhoto(p, 0)
+				c.mu.Unlock()
+				if meta != nil {
 					r.Item.Media = model.Message{Kind: model.MessagePhoto, Media: meta}
 					r.Thumb = meta
 				}
 			}
-			r.Item.ID = v.ID
-			r.Item.ResultID = v.ID
 		default:
 			continue
 		}
-		r.Item.QueryID = res.QueryID
+		r.Item.ID, r.Item.ResultID, r.Item.QueryID = raw.GetID(), raw.GetID(), res.QueryID
 		out.Results = append(out.Results, r)
 	}
+	s.keepRefs(ctx, refs)
 	return out, nil
 }
 
@@ -152,8 +143,9 @@ func (s *Store) webDC(ctx context.Context, api *tg.Client) int {
 	return dc
 }
 
-// webMedia is a web document of a bot, downloaded through dc.
-func (s *Store) webMedia(ctx context.Context, doc tg.WebDocumentClass, dc int) *model.MessageMedia {
+// webMedia is a web document of a bot, downloaded through dc; its location
+// is added to refs.
+func webMedia(doc tg.WebDocumentClass, dc int, refs map[string]fileLocation) *model.MessageMedia {
 	id := fmt.Sprintf("inline/%x", sha256.Sum256([]byte(doc.GetURL())))
 	m := &model.MessageMedia{ID: id, MIMEType: doc.GetMimeType(), Size: int64(doc.GetSize())}
 	for _, attr := range doc.GetAttributes() {
@@ -170,13 +162,7 @@ func (s *Store) webMedia(ctx context.Context, doc tg.WebDocumentClass, dc int) *
 	} else {
 		ref.WebNoProxy = true
 	}
-	s.history.mu.Lock()
-	s.history.refs[id] = ref
-	cache := s.history.cache
-	s.history.mu.Unlock()
-	if cache != nil {
-		_ = cache.Put(ctx, "ref/"+id, ref)
-	}
+	refs[id] = ref
 	return m
 }
 
@@ -192,15 +178,9 @@ func (s *Store) StartBot(ctx context.Context, chat int64, param string) error {
 	if peer.Kind != "user" || !peer.Rights.Bot {
 		return errors.New("not a bot")
 	}
-	res, err := api.MessagesStartBot(ctx, &tg.MessagesStartBotRequest{Bot: &tg.InputUser{UserID: peer.ID, AccessHash: peer.Hash}, Peer: peer.input(), RandomID: randomID(), StartParam: param})
+	res, err := api.MessagesStartBot(ctx, &tg.MessagesStartBotRequest{Bot: peer.inputUser(), Peer: peer.input(), RandomID: newRandomID(), StartParam: param})
 	if err != nil {
 		return err
 	}
 	return s.Handle(ctx, res)
-}
-
-func randomID() int64 {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return int64(binary.LittleEndian.Uint64(b[:]))
 }
