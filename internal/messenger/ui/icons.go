@@ -60,6 +60,7 @@ var (
 	iconDevices       = wdk.RequireIconWidget(icons.DeviceDevices)
 	iconChevronLeft   = wdk.RequireIconWidget(icons.NavigationChevronLeft)
 	iconOpenInNew     = wdk.RequireIconWidget(icons.ActionOpenInNew)
+	iconOpenInBrowser = wdk.RequireIconWidget(icons.ActionOpenInBrowser)
 	iconPalette       = wdk.RequireIconWidget(icons.ImagePalette)
 	iconPrivacy       = wdk.RequireIconWidget(icons.ActionLock)
 	iconPower         = wdk.RequireIconWidget(icons.DeviceBatteryStd)
