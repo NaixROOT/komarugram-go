@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gotd/td/bin"
@@ -366,4 +367,59 @@ func TestEditOfAnUnloadedMessageStaysOut(t *testing.T) {
 		t.Fatal(e)
 	}
 	checkRun(t, "after the edit", historyIDs(s.History(chat)), idsFrom(1, 500, 1))
+}
+
+// countHistory serves ids, and counts the requests for history.
+func countHistory(ids []int, n *atomic.Int32) func(context.Context, bin.Encoder, bin.Decoder) error {
+	serve := serveIDs(ids)
+	return func(ctx context.Context, in bin.Encoder, out bin.Decoder) error {
+		if _, ok := in.(*tg.MessagesGetHistoryRequest); ok {
+			n.Add(1)
+		}
+		return serve(ctx, in, out)
+	}
+}
+
+// A chat the cache has whole, from its first message, opens with nothing
+// older to load, online and offline: the first page from Telegram holds 80
+// of its 150 messages, but the cache gave the rest, down to the first.
+func TestWholeCachedChatHasNothingOlder(t *testing.T) {
+	s := testStore(t)
+	chat := int64(5)
+	all := idsFrom(1, 150, 1)
+	cacheMessages(t, s, chat, all)
+	if _, e := s.history.cache.AddSpan(context.Background(), chat, 1, 150); e != nil {
+		t.Fatal(e)
+	}
+	var requests atomic.Int32
+	s.history.peers[chat] = peerRecord{ID: 5, Hash: 1, Kind: "user"}
+	s.history.top[chat] = 150
+	s.history.api = tg.NewClient(telegram.InvokeFunc(countHistory(all, &requests)))
+	s.OpenChat(chat)
+	h := waitHistory(t, s, chat)
+	checkRun(t, "opened", historyIDs(h), all)
+	if ids := historyIDs(h); ids[0] != 1 || h.HasOlder {
+		t.Fatalf("opened from %d, HasOlder %v", ids[0], h.HasOlder)
+	}
+	if n := requests.Load(); n != 1 {
+		t.Fatalf("%d requests", n)
+	}
+
+	s.Disconnect()
+	s.reveal(chat, 0, true)
+	s.OpenChat(chat)
+	if h = waitHistory(t, s, chat); h.HasOlder {
+		t.Fatal("offline, the whole chat has older messages")
+	}
+
+	// A chat whose span does not reach its start still has older ones.
+	s2 := testStore(t)
+	cacheMessages(t, s2, chat, all[100:])
+	if _, e := s2.history.cache.AddSpan(context.Background(), chat, 101, 150); e != nil {
+		t.Fatal(e)
+	}
+	s2.OpenChat(chat)
+	if h = waitHistory(t, s2, chat); !h.HasOlder {
+		t.Fatal("offline, a chat cached from its 101st message has nothing older")
+	}
 }

@@ -130,6 +130,8 @@ type conversation struct {
 	// cannot (too long), and liveEpoch counts those times.
 	live      map[int64]bool
 	liveEpoch uint64
+	// firsts are the chats' first messages, when known: see noteFirst.
+	firsts map[int64]int
 }
 type viewSave struct {
 	view    model.Viewport
@@ -137,7 +139,7 @@ type viewSave struct {
 }
 
 func newConversation() *conversation {
-	return &conversation{top: map[int64]int{}, globalDeleted: map[int]bool{}, ctx: context.Background(), peers: map[int64]peerRecord{}, histories: map[int64]*model.History{}, epochs: map[int64]uint64{}, reveals: map[int64]model.MessageID{}, views: map[int64]model.Viewport{}, refs: map[string]fileLocation{}, touched: map[model.MessageKey]uint64{}, deleted: map[model.MessageKey]bool{}, packs: map[string]map[string]string{}, packLoading: map[string]bool{}, saves: make(chan viewSave, 64), live: map[int64]bool{}}
+	return &conversation{top: map[int64]int{}, globalDeleted: map[int]bool{}, ctx: context.Background(), peers: map[int64]peerRecord{}, histories: map[int64]*model.History{}, epochs: map[int64]uint64{}, reveals: map[int64]model.MessageID{}, views: map[int64]model.Viewport{}, refs: map[string]fileLocation{}, touched: map[model.MessageKey]uint64{}, deleted: map[model.MessageKey]bool{}, packs: map[string]map[string]string{}, packLoading: map[string]bool{}, saves: make(chan viewSave, 64), live: map[int64]bool{}, firsts: map[int64]int{}}
 }
 func (s *Store) Configure(ctx context.Context, account, path string, p *security.Manager) error {
 	c := s.history
@@ -676,6 +678,9 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 	}
 	if api == nil || peer.Kind == "" {
 		s.profileHistory("history.cache-only", chat, dir, anchor, len(cached), time.Time{}, nil)
+		if dir <= 0 {
+			s.noteFirst(ctx, chat, cached)
+		}
 		if dir != 0 {
 			s.finishPageAt(epoch, chat, dir, cached, len(cached) >= 80, nil, start)
 		} else {
@@ -710,6 +715,9 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 	if e == nil {
 		e = s.keepSpan(ctx, epoch, liveEpoch, chat, modified.GetMessages(), start, dir, anchor, req.Limit)
 	}
+	if e == nil && dir <= 0 {
+		s.noteFirst(ctx, chat, msgs)
+	}
 	// Telegram's page lacks the messages kept deleted; the cache has them.
 	for _, m := range cached {
 		if m.Deleted {
@@ -717,6 +725,39 @@ func (s *Store) fetchAt(epoch uint64, chat int64, dir, anchor int) {
 		}
 	}
 	s.finishPageAt(epoch, chat, dir, msgs, len(modified.GetMessages()) >= req.Limit, e, start)
+}
+
+// noteFirst keeps the chat's first message as firsts says, when the
+// oldest of the history and of msgs is it: its span runs from the chat's
+// start (see pageSpan), and the cache has nothing before it there. A page
+// says only whether there is more before itself, and the cache may have
+// given the rest, as for a chat cached whole.
+func (s *Store) noteFirst(ctx context.Context, chat int64, msgs []model.Message) {
+	c := s.history
+	c.mu.Lock()
+	oldest, cache := 0, c.cache
+	if h := c.histories[chat]; h != nil && len(h.Messages) > 0 {
+		oldest = int(h.Messages[0].Key.MessageID)
+	}
+	c.mu.Unlock()
+	for _, m := range msgs {
+		if id := int(m.Key.MessageID); oldest == 0 || id < oldest {
+			oldest = id
+		}
+	}
+	if oldest == 0 || cache == nil {
+		return
+	}
+	span, ok, _, e := cache.SpanOf(ctx, chat, oldest)
+	if e != nil || !ok || span.Low > 1 {
+		return
+	}
+	if older, e := cache.Page(ctx, chat, oldest, -1, 1); e != nil || len(older) > 0 {
+		return
+	}
+	c.mu.Lock()
+	c.firsts[chat] = oldest
+	c.mu.Unlock()
 }
 
 // historyRequest asks for limit messages before anchor (dir < 0), after it
@@ -879,7 +920,10 @@ func (s *Store) finishPageAt(epoch uint64, chat int64, dir int, msgs []model.Mes
 			}
 			sort.Slice(h.Messages, func(i, j int) bool { return h.Messages[i].Key.MessageID < h.Messages[j].Key.MessageID })
 			if dir <= 0 {
-				h.HasOlder = more
+				// Nothing is older than the chat's first message,
+				// whatever the page says.
+				first := c.firsts[chat]
+				h.HasOlder = more && (first == 0 || len(h.Messages) == 0 || first != int(h.Messages[0].Key.MessageID))
 			}
 			if dir >= 0 && len(h.Messages) > 0 {
 				last := int(h.Messages[len(h.Messages)-1].Key.MessageID)
