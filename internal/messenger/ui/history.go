@@ -310,6 +310,7 @@ func (p *chatPage) Close() {
 	p.closeMenu()
 	if p.composer != nil {
 		p.composer.cancel()
+		p.composer.forgetPasted(nil)
 	}
 	p.save(true)
 	p.audio.stop()
