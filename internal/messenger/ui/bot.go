@@ -46,6 +46,8 @@ type botPage struct {
 	keyboardKey model.MessageKey
 	// keyboardBot is the bot that set it, whose Mini Apps its buttons open.
 	keyboardBot int64
+	// startTokens are the start parameters of links that opened bots.
+	startTokens map[int64]string
 	hidden      map[int64]model.MessageKey
 	keys        [][]surface
 	hide        surface
@@ -225,7 +227,22 @@ func (p *chatPage) layoutKey(gtx layout.Context, chat int64, s *surface, btn mod
 func (p *chatPage) layoutStart(gtx layout.Context, chat int64, rect image.Rectangle, classic bool, backdrop *blurBackdrop, l localization.Catalog) {
 	b := &p.bot
 	if b.start.Clicked(gtx) && p.composer != nil {
-		p.composer.submit(chat, model.OutgoingMessage{Text: "/start"})
+		token := b.startTokens[chat]
+		delete(b.startTokens, chat)
+		if starter, ok := p.source.(model.BotStarter); ok && token != "" {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				if err := starter.StartBot(ctx, chat, token); err != nil {
+					p.bot.mu.Lock()
+					p.bot.outcome = &botOutcome{err: err}
+					p.bot.mu.Unlock()
+				}
+				p.invalidate()
+			}()
+		} else {
+			p.composer.submit(chat, model.OutgoingMessage{Text: "/start"})
+		}
 	}
 	inRect(gtx, rect, func(gtx layout.Context) layout.Dimensions {
 		sc := scheme(gtx)

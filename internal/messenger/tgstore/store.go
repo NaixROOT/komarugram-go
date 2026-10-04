@@ -35,6 +35,7 @@ const pagePause = 300 * time.Millisecond
 // Store holds what Load last read. It is safe to use from any goroutine.
 type Store struct {
 	picker  pickerCache
+	inline  inlineState
 	themes  themeCatalogue
 	changed func()
 	history *conversation

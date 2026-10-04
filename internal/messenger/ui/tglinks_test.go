@@ -13,12 +13,21 @@ import (
 
 type linkStore struct {
 	*mockstore.Store
-	joined bool
+	joined  bool
+	started string
+}
+
+func (s *linkStore) StartBot(_ context.Context, chat int64, param string) error {
+	s.started = param
+	return nil
 }
 
 func (s *linkStore) ResolveUsername(_ context.Context, name string) (model.Chat, error) {
 	if name == "durov" {
 		return model.Chat{ID: 77, Title: "Durov"}, nil
+	}
+	if name == "gobot" {
+		return model.Chat{ID: 1, Title: "Go bot", Kind: model.KindBot}, nil
 	}
 	return model.Chat{}, model.ErrLinkNotFound
 }
@@ -88,5 +97,32 @@ func TestTelegramLinksOpenInTheClient(t *testing.T) {
 	h.p.askLink("https://telegram.org")
 	if h.p.link != "https://telegram.org" {
 		t.Fatalf("a site did not ask for the browser: %q", h.p.link)
+	}
+}
+
+// A link with a start parameter shows the bot's Start button, which sends it.
+func TestBotLinkStartsWithParameter(t *testing.T) {
+	h := newComposerHarness(t)
+	store := &linkStore{Store: h.p.source.(*mockstore.Store)}
+	h.p.source = store
+	h.kind = model.KindBot
+	h.p.openChat = func(model.Chat, model.MessageID) {}
+	h.p.askLink("https://t.me/gobot?start=ref42")
+	deadline := time.Now().Add(2 * time.Second)
+	for h.frame(); h.p.bot.startTokens[1] == ""; h.frame() {
+		if time.Now().After(deadline) {
+			t.Fatal("no start parameter kept")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	h.p.bot.start.click.Click()
+	for h.frame(); store.started == ""; h.frame() {
+		if time.Now().After(deadline) {
+			t.Fatal("the bot was not started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if store.started != "ref42" || h.p.bot.startTokens[1] != "" {
+		t.Fatalf("started with %q, token left %q", store.started, h.p.bot.startTokens[1])
 	}
 }

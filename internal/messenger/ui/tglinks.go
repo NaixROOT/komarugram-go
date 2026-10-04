@@ -162,6 +162,12 @@ func (p *chatPage) takeTelegramLink(r tgLinkResult, l localization.Catalog) {
 		p.tgLinks.invite, p.tgLinks.hash = *r.invite, r.link.Hash
 		p.tgLinks.modal.Open()
 	default:
+		if r.link.Start != "" && r.chat.Kind == model.KindBot {
+			if p.bot.startTokens == nil {
+				p.bot.startTokens = map[int64]string{}
+			}
+			p.bot.startTokens[r.chat.ID] = r.link.Start
+		}
 		p.openChatAt(r.chat, r.link.Post)
 	}
 }

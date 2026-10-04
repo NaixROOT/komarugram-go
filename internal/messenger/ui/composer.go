@@ -160,6 +160,7 @@ type messageComposer struct {
 	voicePicks            chan voicePick
 	recorded              map[string]bool
 	paste                 struct{}
+	inline                inlineQuery
 	pasted                map[string]bool
 	uploading             map[string]bool
 	micClick, voiceCancel surface
@@ -510,6 +511,7 @@ drained:
 				c.textChanged(d)
 			}
 		}
+		c.updateInline(gtx, c.chat, d.editor.Text(), permissions)
 	}
 	for {
 		_, ok := c.search.Update(gtx)
@@ -730,8 +732,9 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 		return layout.Dimensions{Size: size}
 	}
-	if p.bot.empty {
-		// An empty chat with a bot starts it, as Telegram Desktop's does.
+	if p.bot.empty || p.bot.startTokens[chat] != "" {
+		// An empty chat with a bot starts it, as Telegram Desktop's does,
+		// and so does one opened by a link with a start parameter.
 		p.layoutStart(gtx, chat, rect, classic, backdrop, l)
 		return layout.Dimensions{Size: size}
 	}
@@ -847,6 +850,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			inner.Constraints.Min.Y = 0
 			inner.Constraints.Max.Y = max(0, size.Y-gtx.Dp(12))
 			record := op.Record(gtx.Ops)
+			c.inline.layoutPlaceholder(inner, d.editor.Len())
 			dims := flatEditor(inner, &d.editor, l.T("composer.message"))
 			call := record.Stop()
 			transform := op.Offset(image.Pt(0, max(0, (size.Y-dims.Size.Y)/2))).Push(gtx.Ops)
@@ -926,6 +930,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 		})
 	}
 	p.layoutCommands(gtx, chat, size, pad, above, l)
+	p.layoutInline(gtx, chat, size, pad, above, l, animate)
 	bar := rect
 	bar.Min.Y = above
 	if classic {

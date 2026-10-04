@@ -99,8 +99,12 @@ func PickerSendKind(tab PickerTab) SendKind {
 	}
 }
 func ItemSendKind(item PickerItem) SendKind {
-	if item.Media.Kind == MessageGIF || item.ResultID != "" {
+	switch {
+	case item.Media.Kind == MessageGIF:
 		return SendGIF
+	case item.ResultID != "":
+		// A result of an inline bot, which send_inline allows.
+		return SendInline
 	}
 	return SendSticker
 }
