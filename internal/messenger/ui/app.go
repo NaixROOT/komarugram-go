@@ -494,6 +494,10 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.appearance = a.themes
 	p.avatar = a.layoutAvatar
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
+	p.openChat = func(chat model.Chat, post model.MessageID) {
+		a.open(chatPick{ID: chat.ID, Chat: &chat, Message: post})
+		a.window.Invalidate()
+	}
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.openAlone = func(m model.Message) { a.viewer.OpenAlone(p.chat, m) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory

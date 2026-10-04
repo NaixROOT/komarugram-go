@@ -170,6 +170,8 @@ type chatPage struct {
 	openPhoto  func(model.Message)
 	openAlone  func(model.Message)
 	openAuthor func(model.Chat)
+	openChat   func(model.Chat, model.MessageID)
+	tgLinks    tgLinks
 	// openComments shows the comments to a channel post; nil hides the
 	// comments bar. thread is set for the page that shows comments.
 	openComments func(model.Message)
@@ -673,6 +675,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	if p.link != "" {
 		p.linkDialog(gtx, l)
 	}
+	p.tgLinkDialog(gtx, l)
 	p.deleteDialog(gtx, l)
 	p.membershipDialog(gtx, l)
 	p.playerDialog(gtx, l)
@@ -915,6 +918,9 @@ func safeURL(raw string) (string, bool) {
 	return u.String(), true
 }
 func (p *chatPage) askLink(raw string) {
+	if link, ok := model.ParseTelegramLink(raw); ok && p.openTelegramLink(link) {
+		return
+	}
 	if target, ok := safeURL(raw); ok {
 		p.link = target
 		p.linkModal.Open()
