@@ -46,7 +46,7 @@ func TestAudioBarOverOtherPages(t *testing.T) {
 
 	var page image.Point
 	frame := func(gtx layout.Context) {
-		a.withAudioBar(gtx, func(gtx layout.Context) layout.Dimensions {
+		a.withAudioBar(gtx, a.catalog(), func(gtx layout.Context) layout.Dimensions {
 			page = gtx.Constraints.Max
 			return a.settings.Layout(gtx, a.themeMode(), a.window.Appearance.Scheme(), a.dark(), a.catalog())
 		})
@@ -56,7 +56,7 @@ func TestAudioBarOverOtherPages(t *testing.T) {
 	}
 	gtx := layout.Context{Ops: new(op.Ops), Constraints: layout.Exact(image.Pt(700, 500)), Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Values: map[string]any{}}
 	wdk.InitMaterialThemeInContext(gtx, defaults.NewTheme(gtx, schemes.SchemeBaselineLight()))
-	a.withAudioBar(gtx, func(gtx layout.Context) layout.Dimensions {
+	a.withAudioBar(gtx, a.catalog(), func(gtx layout.Context) layout.Dimensions {
 		page = gtx.Constraints.Max
 		return layout.Dimensions{Size: page}
 	})
