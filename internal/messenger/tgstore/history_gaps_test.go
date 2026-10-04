@@ -423,3 +423,51 @@ func TestWholeCachedChatHasNothingOlder(t *testing.T) {
 		t.Fatal("offline, a chat cached from its 101st message has nothing older")
 	}
 }
+
+// After missed updates, only the chats on screen are read again; the
+// others opened in the session are dropped, to be read when opened.
+func TestResyncReadsOnlyChatsOnScreen(t *testing.T) {
+	s := testStore(t)
+	var requests atomic.Int32
+	s.history.api = tg.NewClient(telegram.InvokeFunc(countHistory(idsFrom(1, 10, 1), &requests)))
+	chats := []int64{5, 6, 7}
+	for _, chat := range chats {
+		s.history.peers[chat] = peerRecord{ID: chat, Hash: 1, Kind: "user"}
+		s.OpenChat(chat)
+		waitHistory(t, s, chat)
+	}
+	viewer := new(int)
+	s.WatchChat(viewer, 6)
+	requests.Store(0)
+
+	s.resync(0)
+	h := waitHistory(t, s, 6)
+	if n := requests.Load(); n != 1 {
+		t.Fatalf("%d chats read again; want the one on screen", n)
+	}
+	if len(h.Messages) == 0 {
+		t.Fatal("the chat on screen lost its history")
+	}
+	s.history.mu.Lock()
+	kept := len(s.history.histories)
+	s.history.mu.Unlock()
+	if kept != 1 {
+		t.Fatalf("%d histories kept; want the one on screen", kept)
+	}
+
+	// A hidden chat opened again is read again.
+	s.OpenChat(5)
+	waitHistory(t, s, 5)
+	if n := requests.Load(); n != 2 {
+		t.Fatalf("%d requests after opening a dropped chat", n)
+	}
+
+	// One channel's gap reads only it.
+	requests.Store(0)
+	s.WatchChat(new(int), 5)
+	s.resync(5)
+	waitHistory(t, s, 5)
+	if n := requests.Load(); n != 1 {
+		t.Fatalf("%d chats read again for one", n)
+	}
+}

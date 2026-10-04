@@ -244,11 +244,12 @@ func (s *Store) Updates() *updates.Manager {
 	return updates.New(updates.Config{Handler: telegram.UpdateHandlerFunc(s.Handle), Storage: s.Cache(), AccessHasher: s.Cache(), MaxChannelDifferenceConcurrency: 2,
 		OnTooLong: func() {
 			s.endLive(0)
-			s.refreshOpen()
+			s.reloadDialogs()
 		},
 		OnChannelTooLong: func(id int64) {
-			s.endLive(peerID(&tg.PeerChannel{ChannelID: id}))
-			s.refreshOpen()
+			chat := peerID(&tg.PeerChannel{ChannelID: id})
+			s.endLive(chat)
+			s.resync(chat)
 		}})
 }
 
@@ -602,18 +603,37 @@ func (s *Store) page(chat int64, dir int) {
 	c.mu.Unlock()
 	c.wg.Go(func() { ; s.guardedFetch(epoch, chat, dir, anchor) })
 }
-func (s *Store) refreshOpen() {
+
+// resync reads chat's history again from Telegram, or every chat's for 0:
+// updates were missed, or the dialogs were read again. A history on screen
+// is read again where it is; one opened before and hidden now is dropped,
+// to be read when it is opened again (UI asks for it on each frame), since
+// reading every chat opened in the session at once floods Telegram.
+func (s *Store) resync(chat int64) {
 	c := s.history
 	c.mu.Lock()
 	var ids []int64
+	dropped := false
 	for id, h := range c.histories {
-		if !h.LoadingOlder && !h.LoadingNewer {
-			ids = append(ids, id)
+		if isThread(id) || chat != 0 && id != chat {
+			continue
 		}
+		if c.watch.shown(id) {
+			if !h.LoadingOlder && !h.LoadingNewer {
+				ids = append(ids, id)
+			}
+			continue
+		}
+		c.epochs[id]++
+		delete(c.histories, id)
+		dropped = true
 	}
 	c.mu.Unlock()
 	for _, id := range ids {
 		s.Reload(id)
+	}
+	if dropped {
+		s.changed()
 	}
 }
 func (s *Store) Reload(chat int64) {

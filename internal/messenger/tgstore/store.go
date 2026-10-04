@@ -14,11 +14,13 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gotd/td/constant"
 	"github.com/gotd/td/tg"
 
+	"komarugram/internal/crash"
 	"komarugram/internal/messenger/model"
 )
 
@@ -61,6 +63,8 @@ type Store struct {
 	ghost         ghostState
 	blocked       blockedState
 	bots          botState
+	// dialogsLoading: loadDialogs runs.
+	dialogsLoading atomic.Bool
 }
 
 // New returns an empty store that calls changed whenever Load has read more.
@@ -111,13 +115,42 @@ func (s *Store) Load(ctx context.Context, api *tg.Client) error {
 		s.me.DC = s.dc
 	})
 	s.loadAppConfig(ctx, api, self.Premium)
+	return s.loadDialogs(ctx, api, self.ID)
+}
 
+// reloadDialogs reads the folders and dialogs again, after updates were
+// missed (too long): their unread counts and last messages are old. It
+// does nothing before Load, or while a load runs.
+func (s *Store) reloadDialogs() {
+	c := s.history
+	c.mu.Lock()
+	api, ctx := c.api, c.ctx
+	c.mu.Unlock()
+	s.mu.RLock()
+	self := s.me.ID
+	s.mu.RUnlock()
+	if api == nil || self == 0 {
+		return
+	}
+	go func() {
+		defer crash.Recover("dialogs reload", nil)
+		_ = s.loadDialogs(ctx, api, self)
+	}()
+}
+
+// loadDialogs reads the folders and every dialog of the main list, and
+// then the histories open: see resync. One runs at a time.
+func (s *Store) loadDialogs(ctx context.Context, api *tg.Client, self int64) error {
+	if !s.dialogsLoading.CompareAndSwap(false, true) {
+		return nil
+	}
+	defer s.dialogsLoading.Store(false)
 	filters, err := api.MessagesGetDialogFilters(ctx)
 	if err != nil {
 		return fmt.Errorf("tgstore: folders: %w", err)
 	}
 
-	l := newList(self.ID)
+	l := newList(self)
 	offset := page{peer: &tg.InputPeerEmpty{}}
 	for {
 		// A gap in the updates while the page is asked for leaves its
@@ -175,7 +208,7 @@ func (s *Store) Load(ctx context.Context, api *tg.Client) error {
 	if err := s.persistDialogs(ctx); err != nil {
 		return err
 	}
-	s.refreshOpen()
+	s.resync(0)
 	return nil
 }
 
