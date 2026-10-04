@@ -493,7 +493,10 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.audioExternal = func() bool { return a.preferences.Global().AudioPlayer == "external" }
 	p.appearance = a.themes
 	p.avatar = a.layoutAvatar
-	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
+	p.openChat = func(chat model.Chat, post model.MessageID) {
+		a.open(chatPick{ID: chat.ID, Chat: &chat, Message: post})
+		a.window.Invalidate()
+	}
 	p.openAudio = func(m model.Message) {
 		a.thread = nil
 		a.open(chatPick{ID: m.Key.ChatID, Message: m.Key.MessageID})

@@ -167,10 +167,12 @@ type chatPage struct {
 	audio    *audioPlayer
 	audioBar audioBar
 	// openPhoto shows a photo in the viewer; nil leaves photos inline.
-	openPhoto  func(model.Message)
-	openAlone  func(model.Message)
-	openAuthor func(model.Chat)
-	openAudio  func(model.Message)
+	openPhoto func(model.Message)
+	openAlone func(model.Message)
+	// openChat opens a chat, at a message unless it is 0.
+	openChat  func(model.Chat, model.MessageID)
+	openAudio func(model.Message)
+	tgLinks   tgLinks
 	// openComments shows the comments to a channel post; nil hides the
 	// comments bar. thread is set for the page that shows comments.
 	openComments func(model.Message)
@@ -674,6 +676,7 @@ func (p *chatPage) layoutDialogs(gtx layout.Context, l localization.Catalog) {
 	if p.link != "" {
 		p.linkDialog(gtx, l)
 	}
+	p.tgLinkDialog(gtx, l)
 	p.deleteDialog(gtx, l)
 	p.membershipDialog(gtx, l)
 	p.playerDialog(gtx, l)
@@ -916,6 +919,9 @@ func safeURL(raw string) (string, bool) {
 	return u.String(), true
 }
 func (p *chatPage) askLink(raw string) {
+	if link, ok := model.ParseTelegramLink(raw); ok && p.openTelegramLink(link) {
+		return
+	}
 	if target, ok := safeURL(raw); ok {
 		p.link = target
 		p.linkModal.Open()
