@@ -1104,6 +1104,10 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 			p.Rights.Default = bannedKinds(u.DefaultBannedRights)
 			c.peers[id] = p
 			c.mu.Unlock()
+		case *tg.UpdateNotifySettings:
+			if p, ok := u.Peer.(*tg.NotifyPeer); ok {
+				s.setMuted(peerID(p.Peer), u.NotifySettings)
+			}
 		case *tg.UpdateReadHistoryInbox:
 			s.setUnread(peerID(u.Peer), u.StillUnreadCount)
 		case *tg.UpdateReadChannelInbox:
@@ -1157,7 +1161,9 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 				}
 			}
 			for _, m := range ms {
-				s.mergeUpdate(m)
+				if chat, isNew := s.mergeUpdate(m); fresh && isNew {
+					s.notice(m, chat, msg)
+				}
 			}
 		}
 		if len(ids) > 0 {
@@ -1171,10 +1177,14 @@ func (s *Store) Handle(ctx context.Context, u tg.UpdatesClass) error {
 	s.changed()
 	return s.persistDialogs(ctx)
 }
-func (s *Store) mergeUpdate(m model.Message) {
+
+// mergeUpdate applies a new or edited message. It returns the chat it is
+// in, and whether it is newer than every message the chat had; chat is
+// zero for a channel the account is not in.
+func (s *Store) mergeUpdate(m model.Message) (chat model.Chat, isNew bool) {
 	c := s.history
 	c.mu.Lock()
-	isNew := int(m.Key.MessageID) > c.top[m.Key.ChatID]
+	isNew = int(m.Key.MessageID) > c.top[m.Key.ChatID]
 	c.top[m.Key.ChatID] = max(c.top[m.Key.ChatID], int(m.Key.MessageID))
 	if l := c.lookups[m.Key]; l != nil {
 		// An edit of a message looked up, as the one a reply quotes.
@@ -1217,6 +1227,7 @@ func (s *Store) mergeUpdate(m model.Message) {
 			if !m.Date.Before(chats[i].LastTime) {
 				setPreview(&chats[i], m)
 			}
+			chat = chats[i]
 			found = true
 			break
 		}
@@ -1224,13 +1235,14 @@ func (s *Store) mergeUpdate(m model.Message) {
 	// A channel the account is not in has no place among its chats; its
 	// messages come from polling it while it is open.
 	if !found && !p.Rights.Left {
-		chat := p.withMetadata(model.Chat{ID: m.Key.ChatID})
+		chat = p.withMetadata(model.Chat{ID: m.Key.ChatID})
 		setPreview(&chat, m)
 		chats = append(chats, chat)
 	}
 	model.SortChats(chats)
 	s.chats = chats
 	s.mu.Unlock()
+	return chat, isNew
 }
 
 // deleteMessages removes messages from histories and the cache. It returns

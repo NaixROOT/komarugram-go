@@ -37,6 +37,7 @@ type Store struct {
 	picker  pickerCache
 	themes  themeCatalogue
 	changed func()
+	notices atomic.Pointer[func(model.MessageNotice)]
 	history *conversation
 
 	themeRevisions map[int64]uint64
@@ -361,9 +362,7 @@ func (l *list) chat(d *tg.Dialog) (model.Chat, entry) {
 		Unread: d.UnreadCount,
 		Pinned: d.Pinned,
 	}
-	if until, ok := d.NotifySettings.GetMuteUntil(); ok && time.Unix(int64(until), 0).After(time.Now()) {
-		chat.Muted = true
-	}
+	chat.Muted = mutedNow(d.NotifySettings)
 	if d.Pinned {
 		l.pins++
 		chat.PinRank = l.pins
