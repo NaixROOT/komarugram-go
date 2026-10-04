@@ -28,11 +28,17 @@ func (s *Store) InlineBot(_ context.Context, username string) (model.InlineBot, 
 	return model.InlineBot{}, model.ErrNotInlineBot
 }
 
-func (s *Store) InlineResults(ctx context.Context, _, bot int64, query, _ string) (model.InlineResults, error) {
+func (s *Store) InlineResults(ctx context.Context, _, bot int64, query, offset string) (model.InlineResults, error) {
 	var out model.InlineResults
 	if bot == 9001 {
+		// Three pages of eight.
+		from := 0
+		fmt.Sscan(offset, &from)
 		out.Gallery = true
-		for i := range 8 {
+		if from+8 < 24 {
+			out.Next = fmt.Sprint(from + 8)
+		}
+		for i := from; i < from+8; i++ {
 			id := fmt.Sprintf("gif-%d", i)
 			out.Results = append(out.Results, model.InlineResult{Kind: "gif", Item: model.PickerItem{ID: id, ResultID: id, QueryID: 1, Media: model.Message{Kind: model.MessageGIF, Media: &model.MessageMedia{ID: "demo/gif", MIMEType: "image/gif", Width: 240, Height: 140}}}})
 		}

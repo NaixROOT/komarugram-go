@@ -23,6 +23,9 @@ import (
 // Desktop's kInlineBotRequestDelay.
 const inlineDelay = 400 * time.Millisecond
 
+// unasked is the query of answers not asked for yet.
+const unasked = "\x00"
+
 // inlineQuery is "@bot query" typed in the field and what the bot answered.
 type inlineQuery struct {
 	username, query string
@@ -33,14 +36,17 @@ type inlineQuery struct {
 	results         model.InlineResults
 	generation      int
 	answers         chan inlineAnswer
-	clicks          []surface
-	list            widget.List
+	// more is set while the next page of answers is asked for.
+	more   bool
+	clicks []surface
+	list   widget.List
 	// area is where the answers were drawn on the last frame.
 	area image.Rectangle
 }
 
 type inlineAnswer struct {
 	generation int
+	more       bool
 	username   string
 	bot        *model.InlineBot
 	query      string
@@ -61,10 +67,17 @@ func (c *messageComposer) updateInline(gtx layout.Context, chat int64, text stri
 			if a.generation != q.generation {
 				continue
 			}
-			if a.bot != nil {
+			switch {
+			case a.bot != nil:
 				q.bot, q.botOK = *a.bot, a.bot.ID != 0
 				q.due = gtx.Now
-			} else {
+			case a.more:
+				q.more = false
+				if a.query == q.asked {
+					q.results.Results = append(q.results.Results, a.results.Results...)
+					q.results.Next = a.results.Next
+				}
+			default:
 				q.results, q.asked = a.results, a.query
 				q.list.Position = layout.Position{}
 			}
@@ -84,7 +97,8 @@ func (c *messageComposer) updateInline(gtx layout.Context, chat int64, text stri
 	}
 	if !strings.EqualFold(username, q.username) {
 		q.generation++
-		q.username, q.query, q.botOK, q.results, q.asked = username, query, false, model.InlineResults{}, ""
+		// unasked: even an empty query goes, as bots answer it too.
+		q.username, q.query, q.botOK, q.results, q.asked = username, query, false, model.InlineResults{}, unasked
 		generation, answers, invalidate := q.generation, q.answers, c.invalidate
 		go func() {
 			ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
@@ -114,6 +128,41 @@ func (c *messageComposer) updateInline(gtx layout.Context, chat int64, text stri
 		answers <- inlineAnswer{generation: generation, query: query, results: results}
 		invalidate()
 	}()
+}
+
+// moreInline asks for the next page of answers.
+func (c *messageComposer) moreInline(chat int64) {
+	q := &c.inline
+	source, ok := c.source.(model.InlineBotSource)
+	if !ok || q.more || q.results.Next == "" || !q.botOK {
+		return
+	}
+	q.more = true
+	generation, answers, invalidate, bot, query, offset := q.generation, q.answers, c.invalidate, q.bot.ID, q.asked, q.results.Next
+	go func() {
+		ctx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
+		defer cancel()
+		results, _ := source.InlineResults(ctx, chat, bot, query, offset)
+		answers <- inlineAnswer{generation: generation, more: true, query: query, results: results}
+		invalidate()
+	}()
+}
+
+// layoutPlaceholder draws the bot's placeholder after "@bot " while the
+// query is empty, as Telegram Desktop does.
+func (q *inlineQuery) layoutPlaceholder(gtx layout.Context, text string) {
+	if !q.botOK || q.bot.Placeholder == "" || text != "@"+q.username+" " {
+		return
+	}
+	sc := scheme(gtx)
+	gtx.Constraints.Min = image.Point{}
+	macro := op.Record(gtx.Ops)
+	dims := label(gtx, text, token.TypestyleBodyLarge, sc.Surface.OnColor, 1)
+	macro.Stop()
+	offset(gtx, image.Pt(dims.Size.X, 0), func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Max.X = max(0, gtx.Constraints.Max.X-dims.Size.X)
+		return label(gtx, q.bot.Placeholder, token.TypestyleBodyLarge, sc.SurfaceVariant.OnColor, 1)
+	})
 }
 
 // layoutInline draws the answers of the inline bot over the composer, as a
@@ -163,6 +212,11 @@ func (p *chatPage) layoutInline(gtx layout.Context, chat int64, size image.Point
 		radius := gtx.Dp(12)
 		defer clip.UniformRRect(image.Rectangle{Max: menu}, radius).Push(gtx.Ops).Pop()
 		overlayFill(gtx, p.menuBackdrop(), menu, rect.Min, sc.SurfaceContainerHigh, radius)
+		defer func() {
+			if pos := q.list.Position; !pos.BeforeEnd {
+				c.moreInline(chat)
+			}
+		}()
 		if q.results.Gallery {
 			cell, gap := gtx.Dp(96), gtx.Dp(4)
 			columns := max(1, (menu.X-gap)/(cell+gap))

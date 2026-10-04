@@ -47,3 +47,24 @@ func TestComposerInlineBot(t *testing.T) {
 		t.Fatalf("the field kept %q", got)
 	}
 }
+
+// A gallery scrolled to its end asks for the bot's next page, until there
+// is none; "@gif " shows the bot's placeholder.
+func TestComposerInlinePagesAndPlaceholder(t *testing.T) {
+	h := newComposerHarness(t)
+	c := h.p.composer
+	h.click(150, 680)
+	h.router.Queue(key.EditEvent{Text: "@gif "}, key.SelectionEvent{Start: 5, End: 5})
+	deadline := time.Now().Add(3 * time.Second)
+	for h.frame(); len(c.inline.results.Results) < 24; h.frame() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d answers, next %q", len(c.inline.results.Results), c.inline.results.Next)
+		}
+		h.now = h.now.Add(50 * time.Millisecond)
+		c.inline.list.Position.First = 1000
+		time.Sleep(5 * time.Millisecond)
+	}
+	if c.inline.results.Next != "" || !c.inline.botOK || c.inline.bot.Placeholder == "" {
+		t.Fatalf("next %q, bot %+v", c.inline.results.Next, c.inline.bot)
+	}
+}

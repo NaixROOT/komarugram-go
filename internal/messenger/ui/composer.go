@@ -850,6 +850,7 @@ func (c *messageComposer) Layout(gtx layout.Context, chat int64, l localization.
 			inner.Constraints.Min.Y = 0
 			inner.Constraints.Max.Y = max(0, size.Y-gtx.Dp(12))
 			record := op.Record(gtx.Ops)
+			c.inline.layoutPlaceholder(inner, d.editor.Text())
 			dims := flatEditor(inner, &d.editor, l.T("composer.message"))
 			call := record.Stop()
 			transform := op.Offset(image.Pt(0, max(0, (size.Y-dims.Size.Y)/2))).Push(gtx.Ops)
