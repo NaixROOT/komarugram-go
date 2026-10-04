@@ -43,6 +43,8 @@ const (
 type MessageMedia struct {
 	Preview   []byte
 	Thumbnail *MessageMedia
+	// Video is a profile photo's video.
+	Video *MessageMedia `json:",omitempty"`
 	// StickerSet identifies the pack of a sticker or custom emoji. It is nil
 	// for documents without a usable pack reference.
 	StickerSet *StickerSetRef `json:",omitempty"`

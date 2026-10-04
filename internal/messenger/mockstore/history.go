@@ -87,7 +87,11 @@ func (s *Store) History(chat int64) model.History {
 	add("", model.MessagePoll, nil, nil, nil)
 	messages[len(messages)-1].Poll = &model.Poll{Question: "Какое оформление выберем?", Total: 10, Answers: []model.PollAnswer{{Text: "Светлое", Voters: 6}, {Text: "Тёмное", Voters: 4, Chosen: true}}}
 
-	add("Изображение из локального кеша", model.MessagePhoto, &model.MessageMedia{ID: "demo/photo", MIMEType: "image/png", Width: 640, Height: 360}, nil, nil)
+	caption := "Изображение из локального кеша, подробнее: telegram.org"
+	add(caption, model.MessagePhoto, &model.MessageMedia{ID: "demo/photo", MIMEType: "image/png", Width: 640, Height: 360}, []model.Entity{
+		{Kind: "bold", Offset: 15, Length: 15},
+		{Kind: "url", Offset: 43, Length: 12},
+	}, nil)
 	add("GIF воспроизводится прямо в чате", model.MessageGIF, &model.MessageMedia{ID: "demo/gif", MIMEType: "image/gif", Width: 240, Height: 140}, nil, nil)
 	add("", model.MessageSticker, &model.MessageMedia{ID: "demo/tgs", MIMEType: "application/x-tgsticker", Width: 512, Height: 512}, nil, nil)
 	add("", model.MessageSticker, &model.MessageMedia{ID: "demo/webm", MIMEType: "video/webm", Width: 512, Height: 512}, nil, nil)

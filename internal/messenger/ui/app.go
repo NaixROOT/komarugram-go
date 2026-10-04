@@ -432,6 +432,7 @@ func New(w *appwindow.Window, store model.Store, services Services) *App {
 		a.chats.avatar = a.layoutAvatar
 		a.viewer = newPhotoViewer(source, &a.images, w.Invalidate)
 		a.history = a.newChatPage(source, store, w)
+		a.viewer.openLink = a.history.askLink
 		a.viewer.play = func(gtx layout.Context, m model.Message, l localization.Catalog) {
 			a.history.play(gtx, m, a.viewer.reportPlay, l)
 		}

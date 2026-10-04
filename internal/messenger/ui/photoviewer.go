@@ -9,7 +9,6 @@ import (
 	"image/color"
 	"math"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -120,6 +119,10 @@ type photoViewer struct {
 	drag          stripDrag
 	thumbState    map[model.MessageID]*viewerThumbState
 	targets       map[model.MessageID]model.Message
+	videos        map[model.MessageID]model.Message
+	caption       viewerCaption
+	// openLink asks to open a link of a caption, once the viewer closes.
+	openLink func(url string)
 	// play opens a video in the external player; playErrs bring what it
 	// failed with.
 	play     func(gtx layout.Context, m model.Message, l localization.Catalog)
@@ -203,6 +206,7 @@ func (v *photoViewer) openList(chat int64, m model.Message, list photoList) {
 	v.strip.Position = layout.Position{}
 	clear(v.thumbState)
 	clear(v.targets)
+	clear(v.videos)
 	v.fetch(ctx, session, -1, first)
 	v.fetch(ctx, session, 1, last)
 }
@@ -339,6 +343,23 @@ func (v *photoViewer) viewerTarget(m model.Message) (model.Message, bool) {
 	}
 	v.targets[m.Key.MessageID] = t
 	return t, true
+}
+
+// profileVideo is the video of a profile photo, played as a GIF.
+func (v *photoViewer) profileVideo(m model.Message) (model.Message, bool) {
+	if m.Media == nil || m.Media.Video == nil {
+		return model.Message{}, false
+	}
+	if g, ok := v.videos[m.Key.MessageID]; ok {
+		return g, true
+	}
+	g := m.WithMedia(m.Media.Video)
+	g.Kind = model.MessageGIF
+	if v.videos == nil {
+		v.videos = map[model.MessageID]model.Message{}
+	}
+	v.videos[m.Key.MessageID] = g
+	return g, true
 }
 
 // mergePhotos adds photos and videos to a sorted list, once each.
@@ -491,6 +512,9 @@ func (v *photoViewer) Layout(gtx layout.Context, l localization.Catalog, animate
 				keep = append(keep, t.Media.ID)
 			}
 		}
+	}
+	if g, ok := v.profileVideo(items[i]); ok {
+		keep = append(keep, g.Media.ID)
 	}
 	v.full.Retain(keep...)
 	// Read further into the cache before the strip runs out.
@@ -654,6 +678,11 @@ func (v *photoViewer) layoutPhoto(gtx layout.Context, item model.Message, stage,
 	if im == nil {
 		im = status.Preview
 	}
+	if g, ok := v.profileVideo(item); ok && animate {
+		if f := v.full.StatusFit(g, true, box, false).Frame; f != nil {
+			im = f
+		}
+	}
 	showRing := status.Err != nil
 	if status.Loading {
 		if wait := v.since.Add(viewerRingDelay); gtx.Now.Before(wait) {
@@ -728,31 +757,6 @@ func (v *photoViewer) reportPlay(err error) {
 		v.invalidate()
 	default:
 	}
-}
-
-// layoutCaption draws m's caption over the bottom of the stage, and returns
-// where its top is.
-func (v *photoViewer) layoutCaption(gtx layout.Context, m model.Message, stage image.Rectangle) int {
-	text := strings.TrimSpace(m.Text)
-	if text == "" {
-		return math.MaxInt
-	}
-	pad, margin := gtx.Dp(12), gtx.Dp(12)
-	gtx.Constraints = layout.Constraints{Max: image.Pt(max(0, min(stage.Dx()-2*margin, gtx.Dp(640))-2*pad), stage.Dy()/3)}
-	macro := op.Record(gtx.Ops)
-	dims := label(gtx, text, token.TypestyleBodyLarge, token.NewMatColorFromHexRGB(0xffffff), 4)
-	call := macro.Stop()
-	size := dims.Size.Add(image.Pt(2*pad, 2*gtx.Dp(8)))
-	at := image.Pt(stage.Min.X+(stage.Dx()-size.X)/2, stage.Max.Y-margin-size.Y)
-	offset(gtx, at, func(gtx layout.Context) layout.Dimensions {
-		paint.FillShape(gtx.Ops, color.NRGBA{A: 150}, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(8)).Op(gtx.Ops))
-		offset(gtx, image.Pt(pad, gtx.Dp(8)), func(gtx layout.Context) layout.Dimensions {
-			call.Add(gtx.Ops)
-			return dims
-		})
-		return layout.Dimensions{Size: size}
-	})
-	return at.Y
 }
 
 // layoutSides lays out the zones beside the photo that switch to its
