@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"image"
 	"slices"
 	"testing"
 
@@ -56,4 +57,52 @@ func TestPhotoViewerOpensGIFAlone(t *testing.T) {
 	if len(items) != 1 || items[0].Key.MessageID != 25 || !h.viewer.open {
 		t.Fatalf("%d items, open %v", len(items), h.viewer.open)
 	}
+}
+
+// A link of a caption opens, through the chat's question, once the viewer
+// closes; the rest of the caption is plain text.
+func TestPhotoViewerCaptionLinks(t *testing.T) {
+	h := newViewerHarness(t)
+	photo := &h.store.photos[0]
+	photo.Text = "see telegram.org now"
+	photo.Entities = []model.Entity{{Kind: "url", Offset: 4, Length: 12}}
+	var opened []string
+	h.viewer.openLink = func(url string) { opened = append(opened, url) }
+	h.viewer.Open(1, *photo, nil)
+	h.frame()
+	c := &h.viewer.caption
+	var link image.Rectangle
+	for _, f := range c.fragments {
+		if c.runs[f.Index].URL != "" {
+			link = f.Bounds.Add(c.origin)
+		}
+	}
+	if link.Empty() {
+		t.Fatalf("no link drawn: %+v", c.runs)
+	}
+	plain := c.fragments[0].Bounds.Add(c.origin)
+	h.click(float32(plain.Min.X+2), float32(plain.Min.Y+plain.Dy()/2))
+	if len(opened) != 0 || !h.viewer.open {
+		t.Fatalf("plain text opened %v", opened)
+	}
+	h.click(float32(link.Min.X+link.Dx()/2), float32(link.Min.Y+link.Dy()/2))
+	if !slices.Equal(opened, []string{"telegram.org"}) || h.viewer.open {
+		t.Fatalf("opened %v, viewer open %v", opened, h.viewer.open)
+	}
+}
+
+// A profile photo's video plays over it while animations are on.
+func TestPhotoViewerPlaysProfileVideo(t *testing.T) {
+	h := newViewerHarness(t)
+	photo := h.store.photos[0]
+	photo.Media = &model.MessageMedia{ID: "p10/w", Width: 1600, Height: 1200, Video: &model.MessageMedia{ID: "p10/video", MIMEType: "video/mp4", Width: 800, Height: 800}}
+	h.viewer.Open(1, photo, nil)
+	for range 5 {
+		h.frame()
+	}
+	if slices.Contains(h.store.read(), "p10/video") {
+		t.Fatal("the video was read with animations off")
+	}
+	h.animate = true
+	h.until("the video", func() bool { return slices.Contains(h.store.read(), "p10/video") })
 }

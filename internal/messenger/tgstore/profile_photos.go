@@ -44,6 +44,9 @@ func (s *Store) ProfilePhoto(chat int64) (model.Message, bool) {
 	peer := c.peers[chat]
 	big := *small.Media
 	big.ID = small.Media.ID + "/big"
+	if t := small.Media.Thumbnail; t != nil && t.MIMEType == "application/x-avatar-video" {
+		big.Video = t
+	}
 	big.Thumbnail = nil
 	big.Width, big.Height = bigAvatarSide, bigAvatarSide
 	big.Variants = []model.MessageMedia{{ID: small.Media.ID, MIMEType: small.Media.MIMEType, Width: small.Media.Width, Height: small.Media.Height}}
@@ -210,6 +213,17 @@ func (c *conversation) rememberProfilePhoto(p *tg.Photo, message int) *model.Mes
 	for _, v := range meta.Variants {
 		ref.Thumb = v.ID[strings.LastIndexByte(v.ID, '/')+1:]
 		c.refs[v.ID] = ref
+	}
+	var video *tg.VideoSize
+	for _, v := range p.VideoSizes {
+		if v, ok := v.(*tg.VideoSize); ok && (video == nil || v.W > video.W) {
+			video = v
+		}
+	}
+	if video != nil {
+		meta.Video = &model.MessageMedia{ID: fmt.Sprintf("photo/%d/video/%s", p.ID, video.Type), MIMEType: "video/mp4", Size: int64(video.Size), Width: video.W, Height: video.H}
+		ref.Thumb = video.Type
+		c.refs[meta.Video.ID] = ref
 	}
 	return meta
 }
