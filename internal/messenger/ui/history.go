@@ -170,6 +170,7 @@ type chatPage struct {
 	openPhoto  func(model.Message)
 	openAlone  func(model.Message)
 	openAuthor func(model.Chat)
+	openAudio  func(model.Message)
 	// openComments shows the comments to a channel post; nil hides the
 	// comments bar. thread is set for the page that shows comments.
 	openComments func(model.Message)
@@ -384,7 +385,7 @@ func (p *chatPage) Layout(gtx layout.Context, c model.Chat, l localization.Catal
 		return layout.Dimensions{}
 	})
 	if playing > 0 {
-		p.layoutAudioBar(gtx, l)
+		p.layoutAudioBar(gtx, l, false)
 	}
 	return layout.Dimensions{Size: size}
 }

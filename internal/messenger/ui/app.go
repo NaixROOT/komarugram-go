@@ -494,6 +494,14 @@ func (a *App) newChatPage(source model.ConversationStore, store model.Store, w *
 	p.appearance = a.themes
 	p.avatar = a.layoutAvatar
 	p.openAuthor = func(chat model.Chat) { a.open(chatPick{ID: chat.ID, Chat: &chat}); a.window.Invalidate() }
+	p.openAudio = func(m model.Message) {
+		if a.section.kind == sectionProfile || a.section.kind == sectionSettings {
+			a.section = section{kind: sectionAll}
+		}
+		a.thread = nil
+		a.open(chatPick{ID: m.Key.ChatID, Message: m.Key.MessageID})
+		a.window.Invalidate()
+	}
 	p.openPhoto = func(m model.Message) { a.viewer.Open(p.chat, m, p.photos()) }
 	p.openAlone = func(m model.Message) { a.viewer.OpenAlone(p.chat, m) }
 	p.releaseMemory, p.keepMemory = w.ReleaseMemoryLater, w.KeepMemory
@@ -995,9 +1003,13 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	column(x, pageTop, size.X-x, size.Y-pageTop, func(gtx layout.Context) layout.Dimensions {
 		switch a.section.kind {
 		case sectionProfile:
-			return a.profile.Layout(gtx, a.store.Me(), a.catalog(), a.layoutAvatar, a.private(), a.window.Motion.AnimationsEnabled())
+			return a.withAudioBar(gtx, func(gtx layout.Context) layout.Dimensions {
+				return a.profile.Layout(gtx, a.store.Me(), a.catalog(), a.layoutAvatar, a.private(), a.window.Motion.AnimationsEnabled())
+			})
 		case sectionSettings:
-			return a.settings.Layout(gtx, a.themeMode(), a.window.Appearance.Scheme(), a.dark(), a.catalog())
+			return a.withAudioBar(gtx, func(gtx layout.Context) layout.Dimensions {
+				return a.settings.Layout(gtx, a.themeMode(), a.window.Appearance.Scheme(), a.dark(), a.catalog())
+			})
 		}
 		if a.thread != nil {
 			if a.comments.takesFiles() {
@@ -1006,7 +1018,7 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 			return a.layoutComments(gtx, a.catalog())
 		}
 		if c, ok := a.selectedChat(); ok && c.Forum && a.forum != nil {
-			return a.layoutForum(gtx, c, a.catalog())
+			return a.withAudioBar(gtx, func(gtx layout.Context) layout.Dimensions { return a.layoutForum(gtx, c, a.catalog()) })
 		}
 		if c, ok := a.selectedChat(); ok {
 			if a.history.takesFiles() {
@@ -1019,7 +1031,7 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 				return layoutEmptyPage(gtx, a.catalog())
 			}, a.history)
 		}
-		return layoutEmptyPage(gtx, a.catalog())
+		return a.withAudioBar(gtx, func(gtx layout.Context) layout.Dimensions { return layoutEmptyPage(gtx, a.catalog()) })
 	})
 
 	// The splitter goes last so that it takes the pointer over the columns.
@@ -1042,6 +1054,24 @@ func (a *App) layoutWindow(gtx layout.Context, transparent bool) {
 	a.frozen.Layout(overlayGtx, a.catalog())
 	a.sessionEnded.Layout(overlayGtx, a.catalog())
 	a.connectionFailed.Layout(overlayGtx, a.catalog())
+}
+
+// withAudioBar draws the bar of what plays over a page that is not a chat's,
+// which has its own, and the page under it.
+func (a *App) withAudioBar(gtx layout.Context, page layout.Widget) layout.Dimensions {
+	h := 0
+	if a.history != nil {
+		h = a.history.audioBarSize(gtx)
+	}
+	if h == 0 {
+		return page(gtx)
+	}
+	size := gtx.Constraints.Max
+	body := gtx
+	body.Constraints = layout.Exact(image.Pt(size.X, max(0, size.Y-h)))
+	offset(body, image.Pt(0, h), page)
+	a.history.layoutAudioBar(gtx, a.catalog(), true)
+	return layout.Dimensions{Size: size}
 }
 
 const compactBarHeight = unit.Dp(52)
