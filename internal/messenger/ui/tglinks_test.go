@@ -82,7 +82,7 @@ func TestTelegramLinksOpenInTheClient(t *testing.T) {
 
 	h.p.askLink("https://t.me/+AbCd")
 	wait(func() bool { return h.p.tgLinks.modal.Shown() })
-	h.p.openTelegramLink(model.TelegramLink{Kind: model.LinkInvite, Hash: h.p.tgLinks.hash, Name: "join"})
+	h.p.resolveTelegramLink(model.TelegramLink{Kind: model.LinkInvite, Hash: h.p.tgLinks.hash}, true)
 	wait(func() bool { return len(got) == 2 })
 	if !store.joined || got[1] != (opened{88, 0}) {
 		t.Fatalf("joined %v, opened %v", store.joined, got)
